@@ -106,6 +106,11 @@
   #rechazadas .ticket button { margin-left: 6px; }
   #rechazadas .ticket .nota { color: #5b6478; }
   .renglon.sin-existencia { outline: 2px solid var(--rojo); background: #fdecec; }
+  /* «La tengo en la mano» (#832): junto al aviso del escaneo; nunca toma el foco (el Enter del lector sigue en #codigo). */
+  #en-mano { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; font-size: 14px; }
+  #en-mano[hidden] { display: none; }
+  #en-mano button { padding: 10px 14px; font-size: 14px; border: 1px solid var(--azul); border-radius: 10px; background: #fff; color: var(--azul); cursor: pointer; }
+  .en-mano { color: var(--rojo); }
   #pie { padding: 8px 18px 14px; font-size: 13px; color: #5b6478; display: flex; gap: 18px; flex-wrap: wrap; }
   #tickets { margin-top: 14px; border-top: 1px solid var(--linea); padding-top: 10px; }
   #tickets summary { font-size: 13px; color: #5b6478; cursor: pointer; }
@@ -215,6 +220,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       <button id="abrir-camara" type="button">Cámara</button>
     </div>
     <div id="aviso" role="status"></div>
+    <div id="en-mano" hidden></div>
     <div id="sugerencias"></div>
     <div id="ticket"></div>
   </section>
@@ -512,7 +518,8 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
 import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, montoTransferidoRazonable, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
-  esBusquedaPorTexto, avisoExistencia, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo } from '/venta.js';
+  esBusquedaPorTexto, avisoExistencia, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo,
+  MOTIVOS_EN_MANO, SIN_RED_EN_MANO, puedeVenderEnMano } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -612,6 +619,13 @@ let folioIncierto = null;       // folio de un cobro con Dolarones, pedido o cla
 // Con el folio en duda, el reintento lleva EXACTAMENTE lo mismo (el servidor liga el folio a forma, efectivo y clave) y solo se deja tocar el mismo
 // botón: { id, boton, efectivo, transf } o null (#830). Se guarda con el ticket para que recargar la caja no lo pierda.
 let cobroIncierto = null;
+/** Con el folio en duda el ticket no se toca (#832): cambiarlo mintaría otro folio y el cobro dudoso podría quedar duplicado. Dice qué hacer y devuelve true. */
+function ticketEnDuda() {
+  if (!idVenta || cobroIncierto?.id !== idVenta) return false;
+  $('aviso').textContent = 'Primero termina el cobro pendiente: toca otra vez el mismo botón.';
+  $('aviso').style.color = '#D72B32';
+  return true;
+}
 // Pedido por WhatsApp cargado en el ticket (Issue #269): { id, folio, saldo } o null. Su saldo solo
 // existe en el servidor, así que con pedido el cobro espera al servidor y nunca se encola.
 let pedidoCargado = null;
@@ -902,6 +916,7 @@ function pintarPromoCupo() {
 function pintar() {
   pintarPromoCupo();
   revisarCancelarArmado();
+  if (cobrando) ocultarEnMano();   // #832: la oferta «en la mano» no sobrevive al cobro
   // Uno en % se aprueba para ese ticket exacto: si cambia, hay que pedir otro. Uno en
   // pesos se queda en el ticket hasta vaciarlo o quitarlo (Isaac, 17/10).
   const subtotal = totales(lineas).subtotal;
@@ -918,7 +933,7 @@ function pintar() {
   $('ticket').innerHTML = lineas.map((l, i) => `
     <div class="renglon${l.sin_existencia ? ' sin-existencia' : ''}">
       ${l.producto_id ? `<img class="foto" src="/api/foto/${encodeURIComponent(l.producto_id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div></div>'}
-      <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}${l.precio_lista > l.precio ? ` · Descuento, antes <s>${pesos(l.precio_lista)}</s>` : ''}</div></div>
+      <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}${l.precio_lista > l.precio ? ` · Descuento, antes <s>${pesos(l.precio_lista)}</s>` : ''}${l.en_mano ? ' · <b class="en-mano">Sin existencia en el sistema</b>' : ''}</div></div>
       <div>x${l.cantidad}</div>
       <div class="importe">${pesos(l.precio * l.cantidad)}</div>
       <button type="button" data-quitar="${i}" aria-label="Quitar ${escapar(l.nombre)}"${l.cantidad > 1 ? ' title="Quita una pieza; Mayús + clic quita el renglón entero"' : ''} ${cobrando ? 'disabled' : ''}>✕</button>
@@ -1018,6 +1033,8 @@ function buscarPieza(codigo) {
 
 function agregarCodigo(leido, reintento = false) {
   if (cobrando) return;
+  ocultarEnMano();
+  if (ticketEnDuda()) return false;
   const multiplicado = leerMultiplicador(leido);
   if (!multiplicado) {
     $('aviso').textContent = 'La cantidad antes del * va de 1 a 99.';
@@ -1071,6 +1088,7 @@ function agregarCodigo(leido, reintento = false) {
     if (sinExistencia) {
       $('aviso').textContent = sinExistencia;
       $('aviso').style.color = '#D72B32';
+      if (puedeVenderEnMano(pieza, enTicket)) ofrecerEnMano(pieza);
       // La existencia local puede estar vieja (otra caja, una devolución): se baja el catálogo una vez, como con «no encontrado», y si
       // ahora sí hay, entra. El aviso ya está en pantalla: no se retrasa.
       if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (catalogo.get(pieza.codigo)?.stock > pieza.stock) escanear(leido, true); });
@@ -1107,6 +1125,44 @@ function buscarPorTexto(texto) {
     .filter((p) => { const paja = sinAcentos(`${p.nombre} ${p.codigo}`); return palabras.every((w) => paja.includes(w)); })
     .sort((a, b) => enteras(b) - enteras(a))
     .slice(0, 10);
+}
+
+/* ---------- «La tengo en la mano» (#832) ---------- */
+// La oferta y sus tres motivos no toman el foco (ni con el ratón: mousedown no lo mueve) y el escaneo siguiente los quita: el Enter del lector
+// siempre cae en #codigo, nunca en uno de estos botones. Tras tocar uno, el foco vuelve a #codigo.
+function ocultarEnMano() { $('en-mano').hidden = true; $('en-mano').replaceChildren(); }
+$('en-mano').addEventListener('mousedown', (e) => e.preventDefault());
+function botonEnMano(texto, alClic) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = texto;
+  b.addEventListener('click', () => { alClic(); $('codigo').focus(); });
+  return b;
+}
+function ofrecerEnMano(pieza) {
+  const caja = $('en-mano');
+  caja.hidden = false;
+  // Sin red no se ofrece: el ajuste de existencia lo hace el servidor junto con la venta y esa venta no se encola.
+  if (!navigator.onLine) return caja.replaceChildren(SIN_RED_EN_MANO);
+  caja.replaceChildren(botonEnMano('La tengo en la mano: venderla', () => {
+    caja.replaceChildren('¿Por qué no estaba?', ...Object.entries(MOTIVOS_EN_MANO).map(([clave, texto]) => botonEnMano(texto, () => agregarEnMano(pieza.codigo, clave))));
+  }));
+}
+function agregarEnMano(codigo, motivo) {
+  ocultarEnMano();
+  if (cobrando || ticketEnDuda()) return;
+  const pieza = catalogo.get(codigo);   // el catálogo pudo refrescarse mientras tanto
+  const enTicket = lineas.filter((l) => l.codigo === codigo).reduce((suma, l) => suma + l.cantidad, 0);
+  const aviso = (texto, color) => { $('aviso').textContent = texto; $('aviso').style.color = color; };
+  if (!navigator.onLine) return aviso(SIN_RED_EN_MANO, '#D72B32');
+  if (!pieza || !puedeVenderEnMano(pieza, enTicket)) return aviso('La existencia cambió: escanea la pieza otra vez.', '#D72B32');
+  // `esperado` es la existencia que vio la caja: el servidor solo ajusta si sigue siendo esa.
+  lineas = agregar(lineas, { codigo: pieza.codigo, nombre: pieza.nombre, precio: precioHoy(pieza), precio_lista: pieza.precio, producto_id: pieza.id,
+    en_mano: { motivo, esperado: Math.max(0, pieza.stock) } }, 1);
+  idVenta = null;
+  aviso(`${pieza.nombre}: se vende sin existencia en el sistema; el dueño lo revisa después.`, '#5b6478');
+  sonar(TONO_PIEZA);
+  pintar();
 }
 
 /** Agrega con sonido: agudo si entró la pieza, grave y doble si se rechazó. 'pedido' y 'socio' abren su propio aviso. */
@@ -1240,7 +1296,7 @@ async function cargarDuenos() {
   } catch { $('descuento-pin').hidden = true; }   // sin red tampoco se piden descuentos
 }
 
-$('quitar-descuento').addEventListener('click', () => { descuento = null; idVenta = null; pintarDescuento(); pintar(); });
+$('quitar-descuento').addEventListener('click', () => { if (ticketEnDuda()) return; descuento = null; idVenta = null; pintarDescuento(); pintar(); });
 $('pedir-descuento').addEventListener('click', () => {
   $('descuento-form').hidden = false;
   cargarDuenos();
@@ -1398,7 +1454,7 @@ async function buscarSocio() {
 
 $('buscar-socio').addEventListener('click', buscarSocio);
 $('socio').addEventListener('keydown', (e) => { if (e.key === 'Enter') buscarSocio(); });
-$('quitar-socio').addEventListener('click', () => { quitarSocio(); idVenta = null; pintar(); });
+$('quitar-socio').addEventListener('click', () => { if (ticketEnDuda()) return; quitarSocio(); idVenta = null; pintar(); });
 
 // Alta de socio en una ventana (#820): la misma pantalla /socios, incrustada. Al terminar solo avisa su numero
 // (mismo origen y desde ese marco); el socio se liga al ticket al cerrar la ventana, con el mismo camino que «Buscar».
@@ -1595,6 +1651,7 @@ async function cargarPedido(folio) {
 
 /** Quita el pedido y, si era un apartado, también sus piezas del ticket. */
 function quitarPedido() {
+  if (ticketEnDuda()) return;
   lineas = lineas.filter((l) => !l.dePedido);
   pedidoCargado = null;
   idVenta = null;
@@ -1675,6 +1732,13 @@ async function cobrar(forma) {
   const previo = idVenta && cobroIncierto?.id === idVenta ? cobroIncierto : null;
   if (previo && boton !== previo.boton) return avisoRojo(`El cobro anterior quedó en duda. Toca otra vez ${nombres[previo.boton]}: con el mismo folio no se cobra dos veces.`);
   if (!exigirCaja()) return;
+  // #832: la pieza «en la mano» la ajusta el servidor junto con la venta; una venta con ella no se encola sin red.
+  if (lineas.some((l) => l.en_mano) && !navigator.onLine) {
+    $('aviso').textContent = SIN_RED_EN_MANO;
+    $('aviso').style.color = '#D72B32';
+    $('codigo').focus();
+    return;
+  }
   let efectivo = previo ? previo.efectivo : Math.round(Number($('efectivo').value || 0) * 100);
   if (previo) {
     if (efectivo) $('efectivo').value = String(efectivo / 100);
@@ -1770,8 +1834,8 @@ async function cobrar(forma) {
   try {
     const venta = {
       id: idVenta,
-      lineas: lineas.map(({ codigo, nombre, precio, precio_lista, cantidad, producto_id }) =>
-        ({ codigo, nombre, precio, ...(precio_lista > precio ? { precio_lista } : {}), cantidad, producto_id })),
+      lineas: lineas.map(({ codigo, nombre, precio, precio_lista, cantidad, producto_id, en_mano }) =>
+        ({ codigo, nombre, precio, ...(precio_lista > precio ? { precio_lista } : {}), cantidad, producto_id, ...(en_mano ? { en_mano } : {}) })),
       forma_pago: forma,
       efectivo: forma === 'efectivo' ? efectivo : 0,
       creado_en: creadoEnVenta,
@@ -1816,6 +1880,7 @@ async function cobrar(forma) {
         cuerpo = await r.json();
       } catch { /* respuesta desconocida: reintento idempotente al sincronizar */ }
       if (r && cuerpo && !r.ok && r.status < 500) {
+        folioIncierto = null;   // una respuesta que no es 5xx cierra la duda de un intento anterior (#830)
         if (cuerpo.promo_agotada) promoAgotada();
         // #819: el servidor dice qué pieza ya no está («Quita X: ya no está disponible.»): ese renglón se resalta y el resto del ticket sigue.
         const faltan = new Set((cuerpo.faltantes ?? []).map((f) => f.producto_id));
@@ -1833,6 +1898,13 @@ async function cobrar(forma) {
           socioTicket.bono_promo = cuerpo.bono_promo ?? 0;
           socioTicket.saldo = cuerpo.saldo?.disponible ?? socioTicket.saldo;
         }
+      } else if (lineas.some((l) => l.en_mano)) {
+        // #832: una venta con una pieza «en la mano» nunca se encola. Se deja el folio en duda como en las otras rutas (#830): el finally lo guarda
+        // en `cobroIncierto` y solo queda el mismo botón; el ticket no se puede tocar hasta que el servidor conteste.
+        folioIncierto = venta.id;
+        $('aviso').textContent = `No se supo si se cobró. Toca otra vez ${nombres[boton]}: con el mismo folio no se cobra dos veces. Si no avanza, abre Ventas de hoy antes de cobrar de nuevo.`;
+        $('aviso').style.color = '#D72B32';
+        return;
       } else {
         // Ya se cobro asi: el servidor respeta la promo que vio el cliente aunque el cupo se haya acabado.
         venta.sin_red = true;
@@ -2658,7 +2730,7 @@ $('dialogo-camara').addEventListener('cancel', (e) => { e.preventDefault(); cerr
 $('ticket').addEventListener('click', (e) => {
   if (e.target.dataset?.quitarDescuento !== undefined) return $('quitar-descuento').click();
   const i = e.target.dataset?.quitar;
-  if (i === undefined) return;
+  if (i === undefined || ticketEnDuda()) return;
   const linea = lineas[Number(i)];
   if (linea.cantidad > 1 && !e.shiftKey) linea.cantidad -= 1;   // Mayús + clic: el renglón entero (#817)
   else lineas.splice(Number(i), 1);

@@ -29,6 +29,7 @@ import {
 import { cajeroEnTurno, listarCajeros, listarVendedoras, esVendedora, entrar, salir, ponerPin } from './cajeros.ts';
 import { rutaPush } from './push.ts';
 import { reportarRechazo, listarRechazadas, resolverRechazada } from './ventas-rechazadas.ts';
+import { validarEnMano, sentenciasEnMano, avisarEnMano, listarEnMano, cubiertasPorAjuste, avisarReverso } from './venta-en-mano.ts';
 import { avisosDePedidos, marcarRenglon, type Accion } from './avisos-pedidos.ts';
 import { rutaCep, transferenciasPorValidar, validarTransferencia } from './cep.ts';
 import { subirComprobante, verComprobante } from './comprobante.ts';
@@ -1797,6 +1798,8 @@ interface LineaVenta {
   precio_lista?: unknown;
   cantidad?: unknown;
   producto_id?: unknown;
+  // «La tengo en la mano» (#832): { motivo, esperado }. Solo si la trae.
+  en_mano?: unknown;
 }
 
 interface ProductoVenta {
@@ -1925,7 +1928,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   // fija; reintentar desde otra estación no mueve ni duplica el ticket.
   const vendedora = typeof venta.vendedora === 'string' ? venta.vendedora : '';
   const pedido = JSON.stringify({
-    lineas:(venta.lineas as LineaVenta[]).map((l) => [String(l.producto_id ?? ''), l.cantidad]),
+    // La marca «en la mano» (#832) entra al hash solo si la trae: una venta sin ella conserva el suyo.
+    lineas:(venta.lineas as LineaVenta[]).map((l) => [String(l.producto_id ?? ''), l.cantidad, ...(l.en_mano === undefined ? [] : [l.en_mano])]),
     forma_pago:formaPago, efectivo:venta.efectivo ?? 0, creado_en:venta.creado_en ?? null,
     cliente_id:venta.cliente_id ?? null, dolarones:venta.dolarones ?? 0,
     codigo_socio:venta.codigo_socio ?? '', codigo_vale:venta.codigo_vale ?? '',
@@ -2000,6 +2004,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   if (!preparado.ok) {
     return json({ error: preparado.error }, 400);
   }
+  const enMano = await validarEnMano(env, tienda, venta.lineas as LineaVenta[], preparado.lineas);
+  if (!enMano.ok) return json({ error: enMano.error }, enMano.status);
 
   const subtotal = preparado.lineas.reduce((suma, l) => suma + l.precio * l.cantidad, 0);
   // Un descuento solo entra si el dueno lo aprobo (Issue #119); validarDescuento dice para que ticket.
@@ -2100,6 +2106,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     // con ella todo el batch, en vez de dejar que ambas "ganen".
     // #795: la existencia que baja es la de la tienda de la terminal (R3 de #793): Soledad = productos.stock, una sucursal = existencia_tienda.
     // Vender en sucursal una pieza que nunca llegó o ya se agotó ahí aborta el ticket completo (trigger existencia_tienda_no_negativa).
+    // #832: la pieza «en la mano» sube su faltante justo antes de esta baja, condicionada a la existencia que vio la caja (venta-en-mano.ts).
+    ...sentenciasEnMano(env, { tienda, ventaId: id, correo, caja, ahora, marcas: enMano.marcas }),
     ...preparado.lineas
       .filter((l) => !l.sinInventario)
       .flatMap((l) => sentenciasMover(env, tienda, l.producto_id, -l.cantidad, ahora)),
@@ -2128,7 +2136,9 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
         : 'No hay existencia suficiente en esta sucursal para completar la venta.';
       // #819: qué pieza ya no está (lectura aparte, después del aborto; no cambia si se acepta la venta). Con pedido las apartadas vuelven a la
       // existencia dentro del batch, así que una lectura posterior no distingue cuál faltó: se queda el mensaje general.
-      const faltantes = pedidoId ? [] : await piezasSinExistencia(env, tienda, preparado.lineas).catch(() => []);
+      // #832: la pieza «en la mano» con la existencia que vio la caja estaba cubierta por su ajuste: no es la que faltó.
+      const cubiertas = await cubiertasPorAjuste(env, tienda, id, enMano.marcas).catch(() => new Set<string>());
+      const faltantes = pedidoId ? [] : await piezasSinExistencia(env, tienda, preparado.lineas.filter((l) => !cubiertas.has(l.producto_id))).catch(() => []);
       const quita = faltantes.map((f) => f.nombre || f.codigo).join(', ');
       return json({ error: quita ? `${base} Quita ${quita}: ya no está disponible.` : base, ...faltantes[0], faltantes }, 409);
     }
@@ -2147,6 +2157,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   // Si una pieza publicada en Mercado Libre se agoto, se pausa alla (D1 manda). Despues de responder.
   // Solo Soledad publica en Mercado Libre: una venta de sucursal no toca su existencia.
   if (tienda === TIENDA_CENTRAL) ctx.waitUntil(conciliarSeguro(env, { productoIds: preparado.lineas.filter((l) => !l.sinInventario).map((l) => l.producto_id) }));
+  if (enMano.marcas.length) ctx.waitUntil(avisarEnMano(env, request, id));
   const respuesta = json({
     id, total, descuento, dolarones, imprimir_en:imprimirEn, cambio: Math.max(0, efectivo - aPagar), ganados: recompensa.ganados, referido_liberado: recompensa.referido ?? 0, bono_promo: recompensa.bono_promo ?? 0,
     anticipo, saldo_pedido: pedidoId ? await saldoDe(env, pedidoId) : null,
@@ -2739,7 +2750,12 @@ export default {
       if (solicitud && request.method === 'GET') return await estadoSolicitud(env, solicitud[1], correo);
       const resolver = pathname.match(/^\/api\/solicitudes\/([^/]+)\/resolver$/);
       if (resolver && request.method === 'POST') {
-        return await resolverSolicitud(resolver[1], request, env, correo);
+        const resuelta = await resolverSolicitud(resolver[1], request, env, correo);
+        // #832: la cancelación aprobada a distancia regresa sus piezas; la respuesta trae la venta (id) y `cancelada`.
+        const cuerpoResuelta = resuelta.ok ? await resuelta.clone().json().catch(() => null) as Record<string, unknown> | null : null;
+        if (cuerpoResuelta?.cancelada && !cuerpoResuelta.ya_estaba && typeof cuerpoResuelta.id === 'string')
+          ctx.waitUntil(avisarReverso(env, request, cuerpoResuelta.id, 'Cancelación aprobada de una venta'));
+        return resuelta;
       }
 
       // Botón «Ayuda» de la caja y notificaciones push al dueño (Issue #600, push.ts).
@@ -2943,24 +2959,33 @@ export default {
       const rechazo = pathname.match(/^\/api\/ventas\/([^/]+)\/rechazo$/);
       if (rechazo && request.method === 'POST') return await reportarRechazo(rechazo[1], request, env, ctx, correo, tienda);
       if (pathname === '/api/ventas-rechazadas' && request.method === 'GET') return await listarRechazadas(env);
+      // #832: lo vendido con la pieza «en la mano»; solo lectura y solo el dueño (permiso() por omisión).
+      if (pathname === '/api/ventas-sin-existencia' && request.method === 'GET') return await listarEnMano(env);
       const resolverRechazo = pathname.match(/^\/api\/ventas-rechazadas\/([^/]+)\/resolver$/);
       if (resolverRechazo && request.method === 'POST') return await resolverRechazada(resolverRechazo[1], request, env, correo);
 
+      // #832: si lo que regresa una cancelación o devolución se vendió después «en la mano», el dueño lo sabe (no cambia ninguna existencia).
+      const conAvisoReverso = async (r: Response, ventaId: string, que: string, lineaId?: number) => {
+        const c = r.ok ? await r.clone().json().catch(() => null) as Record<string, unknown> | null : null;
+        if (c && !c.ya_estaba && !c.duplicada && !c.pendiente) ctx.waitUntil(avisarReverso(env, request, ventaId, que, lineaId));
+        return r;
+      };
       const cancelacion = pathname.match(/^\/api\/ventas\/([^/]+)\/cancelar$/);
       if (cancelacion && request.method === 'POST') {
-        return await cancelarVenta(cancelacion[1], request, env, correo, tienda, ctx);
+        return await conAvisoReverso(await cancelarVenta(cancelacion[1], request, env, correo, tienda, ctx), cancelacion[1], 'Cancelación de una venta');
       }
       // #831: corregir efectivo/tarjeta/transferencia de un ticket que no ha entrado a un corte; la regla de rol es la de /api/ventas/... (permiso()).
       const correccionPago = pathname.match(/^\/api\/ventas\/([^/]+)\/corregir-pago$/);
       if (correccionPago && request.method === 'POST') return await corregirFormaPago(correccionPago[1], request, env, ctx, correo, tienda);
       const cancelacionPieza = pathname.match(/^\/api\/ventas\/([^/]+)\/lineas\/(\d+)\/cancelar$/);
       if (cancelacionPieza && request.method === 'POST') {
-        return await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo, tienda);
+        return await conAvisoReverso(await cancelarPieza(cancelacionPieza[1], Number(cancelacionPieza[2]), request, env, correo, tienda), cancelacionPieza[1],
+          'Devolución de una pieza', Number(cancelacionPieza[2]));
       }
       // Cupones en lugar de devolver dinero (Issue #330).
       const cupon = pathname.match(/^\/api\/ventas\/([^/]+)\/cupon(?:\/([^/]+))?$/);
       if (cupon && request.method === 'POST') {
-        return cupon[2] ? await reimprimirCupon(cupon[1], cupon[2], env) : await devolverEnCupon(cupon[1], request, env, correo, tienda);
+        return cupon[2] ? await reimprimirCupon(cupon[1], cupon[2], env) : await conAvisoReverso(await devolverEnCupon(cupon[1], request, env, correo, tienda), cupon[1], 'Devolución en cupón');
       }
       if (pathname === '/api/cupones' && request.method === 'POST') return await emitirCuponManual(request, env, correo);
       const ticket = pathname.match(/^\/api\/ventas\/([^/]+)$/);

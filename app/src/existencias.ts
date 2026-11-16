@@ -86,10 +86,15 @@ export const enSucursalesSql = (col: string) =>
 export const enTiendaSql = (col: string, tienda: Tienda) =>
   `coalesce((select e.unidades from existencia_tienda e where e.producto_id = ${col} and e.tienda = '${tienda}'), 0)`;
 
+/** Las líneas de bulto que cuentan como «en camino» (una sola definición para enCaminoSql y folioEnCaminoSql). */
+const lineasEnCamino = (col: string) => `from bulto_lineas bl join bultos bu on bu.id = bl.bulto_id
+    where bl.producto_id = ${col} and bl.quitada_en is null and bu.estado in ('abierto', 'cerrado')`;
+
 /** SQL: unidades de la pieza `col` en un bulto abierto o cerrado (en camino): no son de ninguna tienda hasta recibirse. */
-export const enCaminoSql = (col: string) =>
-  `coalesce((select sum(bl.cantidad) from bulto_lineas bl join bultos bu on bu.id = bl.bulto_id
-    where bl.producto_id = ${col} and bl.quitada_en is null and bu.estado in ('abierto', 'cerrado')), 0)`;
+export const enCaminoSql = (col: string) => `coalesce((select sum(bl.cantidad) ${lineasEnCamino(col)}), 0)`;
+
+/** SQL: el folio del bulto abierto o cerrado en que va la pieza `col` (null si no va en ninguno): para decirle a la caja cuál recibir (#832). */
+export const folioEnCaminoSql = (col: string) => `(select bu.folio ${lineasEnCamino(col)} order by bu.creado_en limit 1)`;
 
 /**
  * SQL: la existencia total de la pieza = Soledad + sucursales + en camino (#793). `stock` es la expresión de Soledad (`productos.stock`

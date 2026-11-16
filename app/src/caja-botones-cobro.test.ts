@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import {
   totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio,
-  descuentoDe, TOPE_DESCUENTO, maximoCanje, montosRapidos, montoTransferidoRazonable, MINIMO_REGALO,
+  descuentoDe, TOPE_DESCUENTO, maximoCanje, montosRapidos, montoTransferidoRazonable, MINIMO_REGALO, SIN_RED_EN_MANO,
 } from '../public/venta.js';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
@@ -75,6 +75,8 @@ interface Opciones {
   fetch?: (n: number) => Promise<unknown>;      // n = número de petición, desde 1
   almacen?: Record<string, string>;             // localStorage compartido entre «cargas» de la caja
   recargar?: boolean;                           // arranca como una caja recién abierta: el ticket sale del almacén
+  enMano?: boolean;                             // #832: el renglón lleva «La tengo en la mano»
+  enLinea?: boolean;                            // navigator.onLine (por omisión, sí)
 }
 
 const respuestaOk = async () => ({ ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null, saldo_pedido: 0 }) });
@@ -100,10 +102,10 @@ function armar(op: Opciones = {}) {
   const contexto: Record<string, any> = {
     crypto, Date, JSON, $, AbortSignal, Object, Math, Number, String, vistos: [] as unknown[], totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados,
     anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, descuentoDe, TOPE_DESCUENTO, maximoCanje, montosRapidos, montoTransferidoRazonable,
-    MINIMO_REGALO, navigator: { onLine: true }, window: { open() {} },
+    MINIMO_REGALO, navigator: { onLine: op.enLinea ?? true }, window: { open() {} }, ocultarEnMano() {}, SIN_RED_EN_MANO,
     localStorage: { getItem: (k: string) => almacen[k] ?? null, setItem: (k: string, v: string) => { almacen[k] = v; } },
     document: { querySelectorAll: (s: string) => (s === '#botones-cobro button' ? BOTONES.map($) : []), createElement: () => ({ style: {}, textContent: '' }) },
-    lineas: op.recargar ? [] : [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: op.precio ?? 30000, cantidad: 1 }],
+    lineas: op.recargar ? [] : [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: op.precio ?? 30000, cantidad: 1, ...(op.enMano ? { en_mano: { motivo: 'no_se', esperado: 0 } } : {}) }],
     errorImpresora: () => 'no conectada', socio, valesCargados: [], catalogo: new Map(), pedidoCargado: op.recargar ? null : op.pedido ?? null,
     descuento: op.descuento ?? null,
     preguntarSocio: async () => op.respuestaSocio ?? 'cobrar', abrirAlta() {},
@@ -548,4 +550,81 @@ test('#830 folio en duda con Dolarones: el aviso nombra el botón y solo ese que
   assert.equal(c.enviadas.length, 2);
   assert.deepEqual(c.enviadas[1], c.enviadas[0]);
   assert.equal(c.enviadas[1].codigo_socio, 'DC-x');
+});
+
+/* ---------- #832: una venta con una pieza «La tengo en la mano» no se encola; usa el folio en duda de #830 ---------- */
+
+const cincoXX = async () => ({ ok: false, status: 503, json: async () => ({}) });
+const timeout = async () => { throw new DOMException('timeout', 'TimeoutError'); };
+const RESPUESTAS_DESCONOCIDAS: [string, () => Promise<unknown>][] = [['sin red', sinRed], ['timeout', timeout], ['5xx', cincoXX]];
+
+test('#832 en la mano: con respuesta desconocida no se escribe nada en IndexedDB; queda el folio en duda de #830 (solo el mismo botón) y el reintento sale idéntico', async () => {
+  for (const [que, falla] of RESPUESTAS_DESCONOCIDAS) {
+    const c = armar({ enMano: true, fetch: (n) => (n === 1 ? falla() : respuestaOk()) });
+    await c.clic('cobrar-tarjeta');
+    assert.equal(c.enviadas.length, 1, que);
+    assert.equal(c.guardadas.length, 0, `${que}: nada en IndexedDB`);
+    assert.match(c.$('aviso').textContent, /^No se supo si se cobró\. Toca otra vez el botón «Tarjeta»: con el mismo folio no se cobra dos veces/, que);
+    assert.equal(c.estado().cobroIncierto.boton, 'tarjeta', que);
+    assert.deepEqual(c.habilitados(), ['cobrar-tarjeta'], `${que}: solo el mismo botón`);
+    assert.equal(c.p.activo, 'codigo', que);
+    await c.clic('cobrar-efectivo');
+    assert.equal(c.enviadas.length, 1, `${que}: otro botón no manda nada`);
+    await c.clic('cobrar-tarjeta');
+    assert.equal(c.enviadas.length, 2, que);
+    assert.deepEqual(c.enviadas[1], c.enviadas[0], `${que}: mismo folio y mismo cuerpo, con la marca`);
+    assert.deepEqual(c.enviadas[1].lineas[0].en_mano, { motivo: 'no_se', esperado: 0 });
+    assert.match(c.$('aviso').textContent, /^Cobrado/, que);
+    assert.equal(c.estado().cobroIncierto, null, que);
+    assert.equal(c.guardadas.length, 0, que);
+  }
+});
+
+test('#832 en la mano: recargar la caja con el cobro en duda conserva la marca, el folio y el botón', async () => {
+  const antes = armar({ enMano: true, fetch: sinRed });
+  await antes.clic('cobrar-tarjeta');
+  const folio = antes.estado().idVenta;
+  const despues = armar({ almacen: antes.almacen, recargar: true, fetch: respuestaOk });
+  assert.equal(despues.estado().idVenta, folio);
+  assert.deepEqual(despues.habilitados(), ['cobrar-tarjeta']);
+  await despues.clic('cobrar-tarjeta');
+  assert.deepEqual(despues.enviadas[0], antes.enviadas[0]);
+  assert.equal(despues.guardadas.length, 0);
+});
+
+test('#832 en la mano: una respuesta definitiva del servidor al reintento suelta la duda (no queda el ticket trabado)', async () => {
+  const c = armar({ enMano: true, fetch: (n) => (n === 1 ? sinRed() : rechazo('Va en el bulto BU-K7Q2M: recíbelo primero en «Bultos».')()) });
+  await c.clic('cobrar-tarjeta');
+  assert.deepEqual(c.habilitados(), ['cobrar-tarjeta']);
+  await c.clic('cobrar-tarjeta');
+  assert.match(c.$('aviso').textContent, /Va en el bulto/);
+  assert.equal(c.estado().cobroIncierto, null);
+  assert.equal(c.estado().folioIncierto, null);
+  assert.deepEqual(DE_DINERO.filter((id) => c.habilitados().includes(id)), DE_DINERO);
+  assert.equal(c.guardadas.length, 0);
+});
+
+test('#832 en la mano: sin red no se envía ni se encola, y sin la marca la venta sigue en cola como siempre', async () => {
+  const marcada = armar({ enMano: true, enLinea: false, fetch: sinRed });
+  await marcada.clic('cobrar-tarjeta');
+  assert.equal(marcada.enviadas.length, 0);
+  assert.equal(marcada.guardadas.length, 0);
+  assert.equal(marcada.$('aviso').textContent, SIN_RED_EN_MANO);
+  assert.equal(marcada.p.activo, 'codigo');
+  assert.equal(marcada.estado().cobroIncierto, null, 'no hubo cobro: no hay duda');
+  for (const [que, falla] of RESPUESTAS_DESCONOCIDAS) {
+    const normal = armar({ fetch: falla });
+    await normal.clic('cobrar-tarjeta');
+    assert.equal(normal.guardadas.length, 1, `${que}: una venta sin la marca se encola`);
+    assert.equal(normal.estado().cobroIncierto, null, que);
+  }
+});
+
+test('#832 en la mano: la marca viaja en su línea (motivo y existencia que vio la caja) y solo en ella; sin marca el cuerpo no cambia', async () => {
+  const c = armar({ enMano: true });
+  await c.clic('cobrar-tarjeta');
+  assert.deepEqual(c.enviadas[0].lineas, [{ codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1, producto_id: 'p1', en_mano: { motivo: 'no_se', esperado: 0 } }]);
+  const normal = armar();
+  await normal.clic('cobrar-tarjeta');
+  assert.deepEqual(Object.keys(normal.enviadas[0].lineas[0]), ['codigo', 'nombre', 'precio', 'cantidad', 'producto_id']);
 });

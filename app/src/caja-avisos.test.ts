@@ -13,6 +13,7 @@ import {
 import { LIMITE_GASTO_CAJERO } from './corte.ts';
 import { codigoDeDigitos, codigoEnDigitos } from '../public/code128.js';
 import { agregar, guiaVale, descuentoDe, TOPE_DESCUENTO } from '../public/venta.js';
+import { puedeVenderEnMano } from '../public/venta.js';
 import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
@@ -454,7 +455,7 @@ test('#817 renglón: Mayús + clic quita el renglón entero; el clic solo quita 
       $: () => ({ addEventListener: (_t: string, f: any) => { oyente = f; } }),
       get lineas() { return estado.lineas; }, set lineas(v) { estado.lineas = v; },
       get idVenta() { return estado.idVenta; }, set idVenta(v) { estado.idVenta = v; },
-      pintar() { estado.pintada++; },
+      pintar() { estado.pintada++; }, ticketEnDuda: () => false,
     });
     return { estado, clic: (shiftKey: boolean) => oyente({ shiftKey, target: { dataset: { quitar: '0' } } }) };
   };
@@ -791,7 +792,7 @@ function montarAgregar(piezas: any[], { enLinea = true, recarga = [] as any[] } 
   const recargas: number[] = [];
   const catalogo = new Map(piezas.map((p) => [p.codigo, p]));
   const contexto: Record<string, unknown> = {
-    $, catalogo, agregar, leerMultiplicador, codigoDeDigitos, avisoExistencia, precioHoy: (p: any) => p.precio, Map, Date,
+    $, catalogo, agregar, leerMultiplicador, codigoDeDigitos, avisoExistencia, precioHoy: (p: any) => p.precio, Map, Date, puedeVenderEnMano, ocultarEnMano() {}, ofrecerEnMano() {}, ticketEnDuda: () => false,
     navigator: { onLine: enLinea }, pintar() {}, cargarPedido() {}, buscarSocio() {},
     // El catálogo que baja la recarga: reemplaza lo que había (como cargarCatalogo).
     cargarCatalogo: async () => { recargas.push(1); for (const p of recarga) catalogo.set(p.codigo, p); },
