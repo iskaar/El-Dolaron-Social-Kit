@@ -677,6 +677,12 @@
           <span id="aviso-fondo"></span>
         </div>
         <div class="fondo-caja">
+          <label for="tope-retiro">Retiro del cajón sin aprobación: hasta cuánto puede sacar un cajero solo ($). Arriba de esto lo aprueba un supervisor o tú con su PIN en la caja. Vacío = todo retiro pide aprobación</label>
+          <input id="tope-retiro" type="number" min="0" step="1" inputmode="numeric">
+          <button id="guardar-tope" type="button">Guardar</button>
+          <span id="aviso-tope" role="status"></span>
+        </div>
+        <div class="fondo-caja">
           <label for="cupon-porcentaje">Devolución en cupón: % de lo pagado que se regresa en Dolarones (100 = lo mismo)</label>
           <input id="cupon-porcentaje" type="number" min="1" max="200" step="1" inputmode="numeric">
           <button id="guardar-cupon" type="button">Guardar</button>
@@ -1889,6 +1895,7 @@ async function cargarFondo() {
     const config = await (await fetch('/api/config')).json();
     $('fondo-caja').value = Math.round(Number(config.fondo_caja ?? 50000) / 100);
     $('cupon-porcentaje').value = config.cupon_porcentaje ?? 100;
+    $('tope-retiro').value = config.tope_retiro === undefined ? '' : Math.round(Number(config.tope_retiro) / 100);
     const bp = Finanzas.bpDeConfig(config[Finanzas.CLAVE_COMISION]);
     $('comision-terminal').value = bp ? (bp / 100).toFixed(2) : '';
   } catch { /* sin red: se ve al recargar */ }
@@ -1907,6 +1914,23 @@ $('guardar-fondo').addEventListener('click', async () => {
   });
   const cuerpo = await r.json().catch(() => ({}));
   aviso.textContent = r.ok ? 'Guardado. Aplica desde el siguiente corte de cada caja.' : (cuerpo.error ?? 'No se pudo guardar.');
+  aviso.style.color = r.ok ? 'var(--bien)' : 'var(--mal)';
+});
+
+// Tope de retiros sin aprobacion (#846): centavos enteros en `config` (clave tope_retiro). Solo el dueno lo ve y lo cambia; la caja nunca lo recibe.
+$('guardar-tope').addEventListener('click', async () => {
+  const aviso = $('aviso-tope');
+  const pesosTope = Number($('tope-retiro').value);
+  if ($('tope-retiro').value === '' || !Number.isFinite(pesosTope) || pesosTope < 0) {
+    aviso.textContent = 'Escribe una cantidad (0 si todo retiro debe pedir aprobación).';
+    aviso.style.color = 'var(--mal)';
+    return;
+  }
+  const r = await fetch('/api/config', {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tope_retiro: Math.round(pesosTope * 100) }),
+  });
+  const cuerpo = await r.json().catch(() => ({}));
+  aviso.textContent = r.ok ? 'Guardado. Aplica desde el siguiente retiro.' : (cuerpo.error ?? 'No se pudo guardar.');
   aviso.style.color = r.ok ? 'var(--bien)' : 'var(--mal)';
 });
 

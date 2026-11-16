@@ -35,7 +35,7 @@ import { rutaCep, transferenciasPorValidar, validarTransferencia } from './cep.t
 import { subirComprobante, verComprobante } from './comprobante.ts';
 import { verFotoReportada } from './pagos-reportados.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
-import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe, CajaAjena } from './corte.ts';
+import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe, CajaAjena, CLAVE_TOPE_RETIRO } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
 import { sentenciasMover, esExistenciaInsuficiente, piezasSinExistencia, fueraDeSoledad, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD, sucursales, enCaminoSql, enTiendaSql, existenciaTotalSql } from './existencias.ts';
 import { rutaBultos } from './bultos.ts';
@@ -1652,7 +1652,9 @@ async function guardarConfig(request: Request, env: Env): Promise<Response> {
   }
   for (const [clave, valor] of entradas) {
     const numero = Math.round(Number(valor));
-    if (!/^[a-z_0-9]{1,40}$/.test(clave) || !Number.isFinite(numero) || numero < 0 || configInvalida(clave, valor)) {
+    // El tope de retiros (#846) son centavos enteros; un monto con decimales o vacio no se redondea en silencio.
+    const topeMalo = clave === CLAVE_TOPE_RETIRO && (valor === '' || valor === null || typeof valor === 'boolean' || !Number.isInteger(Number(valor)) || numero > 100_000_000);
+    if (!/^[a-z_0-9]{1,40}$/.test(clave) || !Number.isFinite(numero) || numero < 0 || topeMalo || configInvalida(clave, valor)) {
       return json({ error: `Valor invalido para ${clave}.` }, 400);
     }
     await env.DB.prepare(
@@ -2813,7 +2815,10 @@ export default {
         if (request.method === 'PUT') {
           return await guardarConfig(request, env);
         }
-        return json(await leerConfig(env));
+        const config = await leerConfig(env);
+        // El tope de retiros sin aprobacion (#846) es politica de efectivo: lo ve el dueno, no quien captura ni FEP.
+        if (!usuario?.roles.includes('dueno')) delete config[CLAVE_TOPE_RETIRO];
+        return json(config);
       }
 
       if (pathname === '/api/borradores') {
