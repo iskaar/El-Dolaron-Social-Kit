@@ -172,8 +172,10 @@ export async function llegada(request: Request, env: Env, autor: string): Promis
   if (body.prueba !== undefined && body.prueba !== '') {
     const socio = await socioDePrueba(env, body.prueba, autor);
     if (socio === undefined) return json({ error: 'Prueba de alta inválida. Pide al cliente su código en su celular.' }, 400);
-    if (!socio) return json({ error: 'La prueba del alta venció, ya se usó o no es de esta sesión. Pide al cliente su código en su celular.' }, 403);
-    const respuesta = await acreditarLlegada(env, socio, autor);
+    if (!socio) return json({ error: 'La prueba del alta venció o no es de esta sesión. Pide al cliente su código en su celular.' }, 403);
+    // Ya usada por esta misma sesión (la respuesta se perdió): solo repite lo ya acreditado, sin acreditar nada.
+    if (socio.usada) return json({ premio: await premioActual(env, socio.id) ?? null });
+    const respuesta = await acreditarLlegada(env, socio.id, autor);
     if (respuesta.status === 200) await consumirPrueba(env, body.prueba, autor);
     return respuesta;
   }

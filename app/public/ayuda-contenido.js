@@ -475,11 +475,11 @@ export const ESCENARIOS = [
       'Lee el resultado: «Llegada acreditada». Para gastar los Dolarones nuevos, el cliente genera un código nuevo en su cuenta; el que acaba de mostrar sigue valiendo solo por lo que tenía cuando lo generó.',
     ],
     ojo: 'No se acredita la llegada de un cliente a un número que no es suyo. Acreditar no es gastar: para pagar con Dolarones siempre hace falta el código que el cliente genera en su celular.',
-    si_no: 'Si dice «La prueba del alta venció, ya se usó o no es de esta sesión», pide al cliente su código en su celular y acredítalo por «Acreditar llegada de un socio ya registrado en línea». Si el cliente ya no tiene la llegada por acreditar, dice «Este cliente no tiene una llegada por acreditar.»',
+    si_no: 'Si dice «La prueba del alta venció o no es de esta sesión», pide al cliente su código en su celular y acredítalo por «Acreditar llegada de un socio ya registrado en línea». Si el cliente ya no tiene la llegada por acreditar, dice «Este cliente no tiene una llegada por acreditar.»',
     ver: ['alta-de-socio'],
     pantalla: 'socios',
     textos: [['caja', 'Alta de socios'], ['caja', 'Buscar socio'], ['caja', 'Tiene su llegada pendiente: acreditarla'], 'Registrar socio', 'Acreditar llegada física', 'Acreditar llegada de un socio ya registrado en línea', 'Código del cliente (lo muestra en su celular)', 'Acreditar llegada', 'Escanear con la cámara', '¿Confirmas la llegada física de', 'Sí, acreditar la llegada', 'Llegada acreditada',
-      ['srv-portal', 'La prueba del alta venció, ya se usó o no es de esta sesión'], 'Este cliente no tiene una llegada por acreditar.'],
+      ['srv-portal', 'La prueba del alta venció o no es de esta sesión'], 'Este cliente no tiene una llegada por acreditar.'],
   },
   {
     id: 'pagar-con-dolarones', categoria: 'socios', titulo: 'El cliente quiere pagar con Dolarones',

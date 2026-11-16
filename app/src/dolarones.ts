@@ -214,13 +214,18 @@ const VIGENCIA_PRUEBA_ALTA = 30 * 60_000;
  */
 async function emitirPruebaAlta(env: Env, clienteId: string, autor: string, ahora: Date): Promise<string | null> {
   const prueba = codigoAleatorio('DA');
-  const { meta } = await env.DB.prepare(`insert into pruebas_alta (cliente_id, token_hash, autor, creado_en, expira_en)
-    select id, ?, ?, ?, ? from clientes where id = ? and registrado_por = ? and creado_en > ?
-    on conflict (cliente_id) do update set token_hash = excluded.token_hash, creado_en = excluded.creado_en,
-      expira_en = excluded.expira_en where pruebas_alta.usada_en = '' and pruebas_alta.autor = excluded.autor`)
-    .bind(await hashPrueba(prueba), autor, ahora.toISOString(), new Date(ahora.getTime() + VIGENCIA_PRUEBA_ALTA).toISOString(),
-      clienteId, autor, new Date(ahora.getTime() - VIGENCIA_PRUEBA_ALTA).toISOString()).run();
-  return meta.changes ? prueba : null;
+  // El vencimiento sale del alta (creado_en + 30 min), no de la emisión: reintentar el alta no alarga la vida de la prueba.
+  // Sin la migración 082 (tabla ausente) o ante cualquier fallo, el alta sigue y la llegada se acredita con el código del portal.
+  try {
+    const { meta } = await env.DB.prepare(`insert into pruebas_alta (cliente_id, token_hash, autor, creado_en, expira_en)
+      select id, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', creado_en, '+30 minutes') from clientes
+      where id = ? and registrado_por = ? and creado_en > ?
+      on conflict (cliente_id) do update set token_hash = excluded.token_hash, creado_en = excluded.creado_en,
+        expira_en = excluded.expira_en where pruebas_alta.usada_en = '' and pruebas_alta.autor = excluded.autor`)
+      .bind(await hashPrueba(prueba), autor, ahora.toISOString(), clienteId, autor,
+        new Date(ahora.getTime() - VIGENCIA_PRUEBA_ALTA).toISOString()).run();
+    return meta.changes ? prueba : null;
+  } catch { return null; }
 }
 
 export async function hashPrueba(prueba: unknown): Promise<string> {
@@ -229,14 +234,16 @@ export async function hashPrueba(prueba: unknown): Promise<string> {
     ? hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto))) : '';
 }
 
-/** Socio dueño de una prueba de alta vigente, sin usar y emitida a `autor`; undefined si no tiene la forma, null si no vale. No la consume. */
-export async function socioDePrueba(env: Env, prueba: unknown, autor: string): Promise<string | null | undefined> {
+/**
+ * Socio dueño de una prueba de alta vigente y emitida a `autor`; `usada` si esa misma sesión ya la gastó (reintento tras una respuesta perdida).
+ * undefined si no tiene la forma, null si no vale (vencida, de otra sesión o desconocida). No la consume.
+ */
+export async function socioDePrueba(env: Env, prueba: unknown, autor: string): Promise<{ id: string; usada: boolean } | null | undefined> {
   const hash = await hashPrueba(prueba);
   if (!hash) return undefined;
-  const fila = await env.DB.prepare(`select cliente_id from pruebas_alta
-    where token_hash = ? and usada_en = '' and expira_en > ? and autor = ?`)
-    .bind(hash, new Date().toISOString(), autor).first<{ cliente_id: string }>();
-  return fila?.cliente_id ?? null;
+  const fila = await env.DB.prepare(`select cliente_id, usada_en from pruebas_alta where token_hash = ? and expira_en > ? and autor = ?`)
+    .bind(hash, new Date().toISOString(), autor).first<{ cliente_id: string; usada_en: string }>();
+  return fila ? { id: fila.cliente_id, usada: fila.usada_en !== '' } : null;
 }
 
 /** Consume la prueba tras acreditar; la condición va en la sentencia: solo la primera la gasta. */

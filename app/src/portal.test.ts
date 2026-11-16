@@ -254,8 +254,13 @@ test('un alta en la caja acredita su llegada con la prueba de un solo uso, sin c
     assert.equal(tienda(a.cuerpo.id), 1);
     assert.equal(tienda(b.cuerpo.id), 0);
     assert.notEqual(p.db.prepare('select usada_en from pruebas_alta where cliente_id = ?').get(a.cuerpo.id)!.usada_en, '');
-    // Usada: se rechaza y no acredita otra vez.
+    // Usada: la misma sesión que reintenta tras una respuesta perdida recibe lo ya acreditado, sin acreditar otra vez; otra sesión, 403.
+    const repetida = await p.pedir('/api/portal/llegada', { prueba: a.cuerpo.prueba_llegada });
+    assert.equal(repetida.status, 200);
+    assert.equal(repetida.cuerpo.premio.lote_id, primera.cuerpo.premio.lote_id);
+    como(OTRA);
     assert.equal((await p.pedir('/api/portal/llegada', { prueba: a.cuerpo.prueba_llegada })).status, 403);
+    como(DUENO);
     assert.equal(p.db.prepare("select count(*) as n from dolarones_movimientos where cliente_id = ? and tipo = 'regalo'").get(a.cuerpo.id)!.n, 1);
     // Reintento antes de gastarla (se perdió la respuesta): mismo premio, un solo regalo.
     p.db.prepare("update pruebas_alta set usada_en = '' where cliente_id = ?").run(a.cuerpo.id);
@@ -287,10 +292,47 @@ test('reintentar el alta con el mismo id devuelve una prueba nueva solo a quien 
     p.env.DEV_USUARIO = OTRA;
     assert.equal((await p.pedir('/api/socios', cuerpo)).cuerpo.prueba_llegada, null);
     p.env.DEV_USUARIO = DUENO;
+    // Un reintento en el minuto 29 no alarga la prueba: vence 30 minutos después del alta, no de la reemisión.
+    const alta0 = new Date(Date.now() - 29 * 60_000).toISOString();
+    p.db.prepare('update clientes set creado_en = ? where id = ?').run(alta0, id);
+    const tercera = await p.pedir('/api/socios', cuerpo);
+    assert.match(tercera.cuerpo.prueba_llegada, /^DA-/);
+    assert.equal(p.db.prepare('select expira_en from pruebas_alta where cliente_id = ?').get(id)!.expira_en, new Date(Date.parse(alta0) + 30 * 60_000).toISOString());
     // Vencido el alta (30 min) tampoco se reemite.
     p.db.prepare("update clientes set creado_en = '2020-01-01T00:00:00.000Z' where id = ?").run(id);
     assert.equal((await p.pedir('/api/socios', cuerpo)).cuerpo.prueba_llegada, null);
-    assert.equal((await p.pedir('/api/portal/llegada', { prueba: segunda.cuerpo.prueba_llegada })).status, 200);
+    assert.equal((await p.pedir('/api/portal/llegada', { prueba: tercera.cuerpo.prueba_llegada })).status, 200);
+  } finally { p.cerrar(); }
+});
+
+test('un socio dado de alta por otra cuenta no recibe prueba de quien solo reintenta el id, aunque no haya fila previa (#844)', async () => {
+  const p = portalDePrueba();
+  try {
+    const OTRA = 'otra-caja@prueba.mx';
+    p.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, 'Otra', 'dueno', 1, '', '')`).run(OTRA);
+    const id = crypto.randomUUID();
+    const cuerpo = { id, nombre: 'Cliente', telefono: '5551110061', acepta_bases: true, declara_mayor_edad: true };
+    p.env.DEV_USUARIO = OTRA;
+    assert.equal((await p.pedir('/api/socios', cuerpo)).status, 201);
+    p.db.prepare('delete from pruebas_alta where cliente_id = ?').run(id);
+    p.env.DEV_USUARIO = DUENO;
+    assert.equal((await p.pedir('/api/socios', cuerpo)).cuerpo.prueba_llegada, null);
+    assert.equal(p.db.prepare('select count(*) as n from pruebas_alta').get()!.n, 0);
+  } finally { p.cerrar(); }
+});
+
+test('sin la migración 082 el alta sigue funcionando, sin prueba, y la llegada va por el código del portal (#844)', async () => {
+  const p = portalDePrueba();
+  try {
+    p.db.exec('drop table pruebas_alta');
+    const id = crypto.randomUUID();
+    const cuerpo = { id, nombre: 'Cliente', telefono: '5551110071', acepta_bases: true, declara_mayor_edad: true };
+    const alta = await p.pedir('/api/socios', cuerpo);
+    assert.equal(alta.status, 201);
+    assert.equal(alta.cuerpo.prueba_llegada, null);
+    assert.equal(alta.cuerpo.llegada_pendiente, true);
+    assert.equal((await p.pedir('/api/socios', cuerpo)).status, 200);
+    assert.equal((await p.pedir('/api/portal/llegada', { codigo: await codigoPrueba(p.db, id) })).status, 200);
   } finally { p.cerrar(); }
 });
 
