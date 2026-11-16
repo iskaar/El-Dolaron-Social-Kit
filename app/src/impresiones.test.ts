@@ -232,7 +232,7 @@ test('celular sin red guarda imprimir_en; no imprime localmente ni abre el cajó
       textContent:'', style:{}, focus() {} });
     return elementos.get(id);
   };
-  const cobrar = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false;
+  const cobrar = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, folioIncierto = null, cobroIncierto = null;
     ${cobro}; cobrar`, {
     crypto, Date, $, AbortSignal, Object, debePreguntarSocio, navigator:{ onLine:false },   // sin red no se pregunta por el socio (#730)
     lineas:[{ producto_id:PRODUCTO, codigo:'ED-000001', nombre:'Ventilador', precio:25000, cantidad:1 }],

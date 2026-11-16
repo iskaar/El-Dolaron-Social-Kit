@@ -152,7 +152,7 @@ function montarCobro(op: Opciones = {}) {
   const errorClave = entre('function errorClave(', "for (const id of ['clave-rastreo'");
   const cobro = entre('async function cobrar(', 'let sincronizando = false;');
   // pintar() es el de la pantalla en lo que importa aquí: deshabilita #codigo mientras se cobra y guarda el folio que ve.
-  const cobrarReal = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false;
+  const cobrarReal = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, folioIncierto = null, cobroIncierto = null;
     function pintar() { $('codigo').disabled = cobrando; vistos.push(idVenta); }
     ${avisoRojo}\n${falla}\n${conPedido}\n${errorClave}\n${cobro}; cobrar`, contexto);
   // Sin argumento se toca «Cobrar en efectivo»; las pruebas de otras formas lo dicen en `forma`.
@@ -481,7 +481,7 @@ function montarCancelar(lineas: any[], extra: Record<string, unknown> = {}) {
   };
   const rutinas = runInNewContext(`let cancelarArmado = null; ${entre('// Con descuento aprobado, pedido cargado', 'function pintarRed()')}
     ({ revisarCancelarArmado })`, {
-    $, totales, cancelarPideConfirmar, descuento: null, pedidoCargado: null, sinPromo: false, ...extra,
+    $, totales, cancelarPideConfirmar, descuento: null, pedidoCargado: null, sinPromo: false, limpiarDatosTransferencia() {}, ...extra,
     get lineas() { return estado.lineas; }, set lineas(v) { estado.lineas = v; },
     idVenta: 'x', pintarDescuento() {}, quitarSocio() { estado.limpiadas++; }, pintar() {}, clearTimeout() {},
     setTimeout: (f: () => void) => { temporizadores.push(f); return temporizadores.length; },

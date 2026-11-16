@@ -279,15 +279,20 @@ export function efectivoAlcanza({ formaPago, total, efectivo }) {
 export const BILLETES = [2000, 5000, 10000, 20000, 50000, 100000];
 
 /**
- * Botones rápidos del «Efectivo recibido» (#830): «Exacto» (lo que se debe) y hasta 4 billetes mayores, en centavos.
+ * Botones rápidos del «Efectivo recibido» (#830): «Exacto» (lo que se debe) y hasta 3 billetes mayores, en centavos.
+ * Caben en una sola fila del panel de la caja.
  * Solo llenan el campo; quien cobra es el botón de cobro. Sin nada que pagar no hay botones.
  * @returns {{ centavos: number, exacto: boolean }[]}
  */
 export function montosRapidos(aPagar) {
   if (!Number.isInteger(aPagar) || aPagar <= 0) return [];
   return [{ centavos: aPagar, exacto: true },
-    ...BILLETES.filter((b) => b > aPagar).slice(0, 4).map((centavos) => ({ centavos, exacto: false }))];
+    ...BILLETES.filter((b) => b > aPagar).slice(0, 3).map((centavos) => ({ centavos, exacto: false }))];
 }
+
+/** Lo que un comprobante puede pasar de lo que se debe antes de que la caja pida revisarlo (#830): $5,000. Solo la pantalla; el servidor acepta el excedente. */
+export const EXCEDENTE_MAXIMO = 5000_00;
+export const montoTransferidoRazonable = (transferido, debido) => transferido <= debido + EXCEDENTE_MAXIMO;
 
 /**
  * Billetes y monedas del corte (Issue #100), en centavos. El de $20 cuenta

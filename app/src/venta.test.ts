@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, BILLETES, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin } from '../public/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, BILLETES, montoTransferidoRazonable, EXCEDENTE_MAXIMO, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -63,16 +63,16 @@ test('efectivo exacto o de sobra si alcanza', () => {
   assert.equal(efectivoAlcanza({ formaPago: 'efectivo', total: 4000, efectivo: 5000 }), true);
 });
 
-test('#830 botones rápidos: «Exacto» y hasta 4 billetes mayores que lo que se debe, en centavos enteros', () => {
+test('#830 botones rápidos: «Exacto» y hasta 3 billetes mayores que lo que se debe, en centavos enteros', () => {
   assert.deepEqual(BILLETES, [2000, 5000, 10000, 20000, 50000, 100000]);
   const montos = (aPagar: number) => montosRapidos(aPagar).map((m) => (m.exacto ? 'exacto' : '') + m.centavos);
   assert.deepEqual(montos(13000), ['exacto13000', '20000', '50000', '100000']);                 // $130: $200, $500, $1,000
-  assert.deepEqual(montos(1500), ['exacto1500', '2000', '5000', '10000', '20000']);             // $15: tope de 4 billetes
-  assert.deepEqual(montos(1999), ['exacto1999', '2000', '5000', '10000', '20000']);
+  assert.deepEqual(montos(1500), ['exacto1500', '2000', '5000', '10000']);                      // $15: tope de 3 billetes (una sola fila en la pantalla)
+  assert.deepEqual(montos(1999), ['exacto1999', '2000', '5000', '10000']);
   assert.deepEqual(montos(10000), ['exacto10000', '20000', '50000', '100000']);                 // el billete igual a lo que se debe ya es «Exacto»
   assert.deepEqual(montos(100000), ['exacto100000']);                                           // $1,000: ningún billete cubre más
   assert.deepEqual(montos(125050), ['exacto125050']);                                           // más de $1,000: solo «Exacto»
-  assert.deepEqual(montos(1), ['exacto1', '2000', '5000', '10000', '20000']);                   // un centavo: Exacto es el importe, no un billete
+  assert.deepEqual(montos(1), ['exacto1', '2000', '5000', '10000']);                   // un centavo: Exacto es el importe, no un billete
   assert.deepEqual(montos(0), []);
   assert.deepEqual(montos(-500), []);                                                           // Dolarones o pedido de más: nada que cobrar
   for (const malo of [NaN, 12.5, '300' as unknown as number, null as unknown as number]) assert.deepEqual(montosRapidos(malo), []);
@@ -80,8 +80,17 @@ test('#830 botones rápidos: «Exacto» y hasta 4 billetes mayores que lo que se
   for (const a of [1, 99, 1999, 2000, 4999, 10001, 49999, 99999]) {
     for (const m of montosRapidos(a)) { assert.ok(Number.isInteger(m.centavos)); assert.ok(m.centavos >= a); }
     assert.equal(montosRapidos(a)[0].centavos, a);
-    assert.ok(montosRapidos(a).length <= 5);
+    assert.ok(montosRapidos(a).length <= 4);
   }
+});
+
+test('#830 un comprobante de más de $5,000 sobre lo que se debe se manda revisar; hasta ahí se acepta (el excedente se resuelve a mano)', () => {
+  assert.equal(EXCEDENTE_MAXIMO, 500000);
+  assert.equal(montoTransferidoRazonable(30000, 30000), true);
+  assert.equal(montoTransferidoRazonable(530000, 30000), true, 'justo $5,000 de más');
+  assert.equal(montoTransferidoRazonable(530001, 30000), false, 'un centavo más');
+  assert.equal(montoTransferidoRazonable(7501234567890, 30000), false, 'un código de barras escaneado en «Monto»');
+  assert.equal(montoTransferidoRazonable(100, 30000), true, 'lo que falta lo rechaza transferenciaDe, no esta función');
 });
 
 test('tarjeta no se valida contra el efectivo', () => {
@@ -205,7 +214,7 @@ const cobroPedido = (fetchSimulado: () => Promise<unknown>, forma = 'efectivo', 
     return elementos.get(id);
   };
   const contexto: Record<string, unknown> = {
-    crypto, Date, $, AbortSignal, Object, Math, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE,
+    crypto, Date, $, AbortSignal, Object, Math, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, montoTransferidoRazonable,
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
     socio: opciones.socio ?? null, valesCargados: [], catalogo: new Map(), debePreguntarSocio, navigator: { onLine: !opciones.sinRed },
     preguntarSocio: async () => { preguntasSocio.push(1); return opciones.respuestaSocio ?? 'cobrar'; }, abrirAlta: () => abiertas.push('/socios'), pedidoCargado: opciones.sinPedido ? null : { id: 'ped-1', folio: 17, saldo: 10000 },
@@ -220,7 +229,7 @@ const cobroPedido = (fetchSimulado: () => Promise<unknown>, forma = 'efectivo', 
   const conPedido = cajaFuente.slice(cajaFuente.indexOf('async function cobrarConPedido('), cajaFuente.indexOf('/* ---------- cobro: primero'));
   const cobro = cajaFuente.slice(cajaFuente.indexOf('async function cobrar('), cajaFuente.indexOf('let sincronizando = false;'));
   const errorClave = cajaFuente.slice(cajaFuente.indexOf('function errorClave('), cajaFuente.indexOf("for (const id of ['clave-rastreo'"));
-  const cobrarReal = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false;
+  const cobrarReal = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, folioIncierto = null, cobroIncierto = null;
     ${avisoRojo}\n${conPedido}\n${errorClave}\n${cobro}; cobrar`, contexto);
   // El argumento es el botón de cobro que se tocó (#830): por omisión, el que dice `forma`.
   return { cobrar: (f = forma) => cobrarReal(f), contexto, guardadas, enviadas, preguntasSocio, abiertas, $ };

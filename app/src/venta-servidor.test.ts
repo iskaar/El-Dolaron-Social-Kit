@@ -147,7 +147,7 @@ test('caja reintenta un canje tras perder la respuesta con el mismo folio, fecha
     const respuestas: number[] = [];
     let reloj = 0;
     // Ejecutar el cobro real con una primera respuesta perdida. Devolver false mantiene el ticket abierto.
-    const repetir = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false;
+    const repetir = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, folioIncierto = null, cobroIncierto = null;
       ${cobrar}; cobrar`, {
       crypto, debePreguntarSocio, navigator: { onLine: true }, preguntarSocio: async () => 'cobrar',   // #730: «cobrar así»
       Date: class extends Date { constructor() { super(1760000000000 + reloj++ * 1000); } },
