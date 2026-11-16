@@ -405,7 +405,7 @@ test('anticipo y Dolarones en un mismo ticket: la fila dolarones del reporte no 
   // Un socio con $20 de Dolarones: una compra de $250 en efectivo le da $20 (8%) al dia siguiente.
   const socio = (await pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Cliente', telefono: '4449990001',
     acepta_bases: true, declara_mayor_edad: true })).cuerpo;
-  await pedir('/api/portal/llegada', { cliente_id: socio.id });
+  await pedir('/api/portal/llegada', { codigo: await codigoPrueba(db, socio.id) });
   assert.equal((await pedir('/api/ventas', { id: crypto.randomUUID(), cliente_id: socio.id, lineas: [{ producto_id: PRODUCTO, cantidad: 1 }],
     forma_pago: 'efectivo', efectivo: 25000, caja: 'Caja 1' })).status, 201);
   db.prepare("update dolarones_lotes set disponible_desde = '2026-01-01' where origen = 'compra'").run();

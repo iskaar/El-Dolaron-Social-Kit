@@ -15,7 +15,7 @@ function abrir() {
   const alta = async (extra: Record<string, unknown> = {}) => {
     const r = await t.pedir('/api/socios', { id:crypto.randomUUID(), nombre:'Cliente',
       telefono:String(telefonos++), acepta_bases:true, declara_mayor_edad:true, ...extra });
-    if (r.status === 201) await t.pedir('/api/portal/llegada', { cliente_id:r.cuerpo.id });
+    if (r.status === 201) await t.pedir('/api/portal/llegada', { codigo: await codigoPrueba(t.db, r.cuerpo.id) });
     return r;
   };
   const pagar = async (socio: Record<string, any>, extra: Record<string, unknown> = {}) =>

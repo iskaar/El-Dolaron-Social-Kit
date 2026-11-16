@@ -41,7 +41,7 @@ async function armar() {
 
   // Socio 1: regalo de apertura, compra que gana, canje del regalo, devolucion parcial, ticket cancelado y bono de la promo.
   const s1 = await socio(t, '4440000001', 'Nombre Secreto Uno');
-  assert.equal((await t.pedir('/api/portal/llegada', { cliente_id: s1.id })).status, 200);
+  assert.equal((await t.pedir('/api/portal/llegada', { codigo: await codigoPrueba(t.db, s1.id) })).status, 200);
   const A = await vender(t, { cliente_id: s1.id, lineas: cuatro, efectivo: 100000 });                                    // gana 100 D
   const B = await vender(t, { cliente_id: s1.id, lineas: cuatro, dolarones: 5000, codigo_socio: await codigoPrueba(t.db, s1.id), efectivo: 95000 });   // 50 D de regalo; gana 90 D
   const linea = (await t.pedir(`/api/ventas/${B.id}`, undefined, 'GET')).cuerpo.lineas[0].id;

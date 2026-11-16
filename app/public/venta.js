@@ -221,6 +221,7 @@ export const debePreguntarSocio = (socio, enLinea) => !!enLinea && (!socio || !!
  */
 export function leerMensajeAlta(datos) {
   if (datos?.tipo === 'alta-socio' && Number.isSafeInteger(datos.numero) && datos.numero > 0) return { tipo: 'alta', numero: datos.numero };
+  if (datos?.tipo === 'alta-llegada') return { tipo: 'llegada' };
   if (datos?.tipo === 'alta-cerrar') return { tipo: 'cerrar' };
   return null;
 }

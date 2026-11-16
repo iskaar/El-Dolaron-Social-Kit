@@ -90,7 +90,7 @@ test('tarjeta o transferencia (menos de $300, sin clave) a efectivo: queda lo pa
 test('lo pagado con Dolarones y con el saldo de un pedido no cambia de forma: solo el dinero', async () => {
   const t = montar();
   const socio = (await t.pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Cliente', telefono: '4449990000', pin: '1234', acepta_bases: true, declara_mayor_edad: true })).cuerpo;
-  assert.equal((await t.pedir('/api/portal/llegada', { cliente_id: socio.id })).status, 200);
+  assert.equal((await t.pedir('/api/portal/llegada', { codigo: await codigoPrueba(t.db, socio.id) })).status, 200);
   // Ticket de $1,000 con 50 D: $950 en dinero.
   const conD = await t.vender({ cliente_id: socio.id, dolarones: 5000, codigo_socio: await codigoPrueba(t.db, socio.id), efectivo: 95000, lineas: [{ producto_id: PRODUCTO, cantidad: 4 }] });
   assert.equal((await t.corregir(conD, 'tarjeta')).cuerpo.importe, 95000);
