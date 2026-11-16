@@ -312,7 +312,10 @@ function anotarGuardada(guardada, grado, sinFoto = false) {
         const r = await fetch('/api/etiquetas', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ids:[guardada.id]}) });
         const datos = await r.json();
         if (!r.ok) throw new Error(datos.error || 'No se preparó la etiqueta.');
-        if (await e.imprimirEtiquetas(datos[0], guardada.sumadas)) avisarEtiqueta(guardada.codigo, guardada.sumadas);
+        // #825: nunca más etiquetas que piezas contadas ahora (una venta pudo bajar la existencia desde el +N).
+        const n = Math.min(guardada.sumadas, datos[0].stock);
+        if (n < 1) throw new Error(`No hay piezas contadas de ${guardada.codigo}: no se imprimió ninguna etiqueta.`);
+        if (await e.imprimirEtiquetas(datos[0], n)) avisarEtiqueta(guardada.codigo, n);
       } catch (error) { mensaje(error.message); }
       finally { imprimir.disabled = false; }
     });

@@ -37,6 +37,9 @@
   #capturistas { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
   #capturistas button:not([aria-pressed=true]) { background: #fff; color: #1a1f2b; border: 1px solid var(--linea); }
   .vacio { padding: 24px; text-align: center; color: #5b6478; }
+  .pregunta { background: #fff6d9; border: 1px solid #e0c24a; border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+  .pregunta p { margin: 0 0 10px; font-weight: 600; }
+  .pregunta .barra { margin-bottom: 0; }
   .ayuda { font-size: 13px; color: #5b6478; line-height: 1.45; margin: 0 0 16px; max-width: 70ch; }
 </style>
 </head>
@@ -66,6 +69,16 @@
     <span id="resumen" role="status" aria-live="polite"></span>
   </div>
 
+  <!-- #825: pedir más etiquetas que piezas contadas pregunta cuántas piezas hay (lo muestra imprimir-lote.js). -->
+  <div id="existencia-pregunta" class="pregunta" role="alertdialog" aria-labelledby="existencia-texto" hidden>
+    <p id="existencia-texto"></p>
+    <div class="barra">
+      <button id="existencia-imprimir" type="button"></button>
+      <button id="existencia-sumar" class="claro" type="button"></button>
+      <button id="existencia-cancelar" class="claro" type="button">Cancelar</button>
+    </div>
+  </div>
+
   <p id="ayuda-automatica" class="ayuda" hidden>
     Inicia aquí y toma las fotos en <a href="/captura" target="_blank" rel="noopener">la cámara</a> desde el teléfono en el mismo entorno.
     Se imprime ropa y lo capturado en <a href="/escanear" target="_blank" rel="noopener">Escanear</a>, una etiqueta por pieza en existencia, cuando su precio está listo;
@@ -92,8 +105,9 @@
     Si le cambias el precio, el nombre o la talla a una pieza ya etiquetada, regresa arriba en amarillo
     (↻) para reimprimir su etiqueta; el código de barras es el mismo, y la caja
     cobra el precio nuevo aunque la etiqueta vieja siga pegada.
-    La columna <b>Etiquetas</b> es cuántas imprimir; empieza en la existencia,
-    pero cambiarla no cambia la existencia (eso se hace en la cola de revisión).
+    La columna <b>Etiquetas</b> es cuántas imprimir; empieza en la existencia.
+    Si pides más etiquetas que piezas contadas, la página pregunta cuántas piezas hay: <b>«Hay N»</b> suma la diferencia a la
+    existencia (queda registrado quién y cuándo) y las imprime; <b>«Hay M»</b> imprime solo las contadas.
   </p>
 
   <details id="historial-envios">

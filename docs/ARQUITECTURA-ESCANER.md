@@ -306,6 +306,16 @@ la pestaña Imprimir y el chip de impresora funcionan igual, y la impresora se c
   adoptó de otro dispositivo (`propia: false`) se suelta desde el dispositivo que lo imprimió. Si la base no responde al
   liberar, el aviso lo dice. Si la página se cierra a medias, el reclamo queda y se recupera con «No salió desde aquí».
   Las piezas sin existencia (vendidas) no se listan y, si llegan a un lote, se saltan y se cuentan.
+- **Una etiqueta, una unidad contada (#825).** `imprimir()` (el punto por el que pasan Imprimir, Buscar → Reimprimir, la ficha,
+  Capturar y `/etiquetas`) compara, con la existencia fresca que devuelve la preparación, lo pedido más lo que ya salió en
+  envíos cortados contra `stock`. Si lo pedido cabe, sigue como siempre. Si no, antes de mandar nada pregunta «¿Cuántas piezas
+  hay?»: **«Hay N»** suma la diferencia con `POST /api/piezas/:id/existencia` (`fijar_a` + `esperado`, `motivo: 'entrada'`, folio
+  idempotente, rastro en `conteo_ajustes`, sin `etiquetas` para no dejar una deuda #783 que las repita) y entonces imprime;
+  **«Hay M»** imprime solo `M − ya salieron`; cerrar la hoja cancela sin imprimir ni sumar. Si la suma falla (existencia
+  cambiada, sin permiso, sin red) no sale ninguna etiqueta. La automática, las deudas (topadas a `stock`) y las bandas
+  (`sin_inventario`, sin existencia) quedan fuera; `imprimirEtiquetas` además nunca manda más copias que `pieza.stock`.
+  La pregunta es la hoja de `/inventario` (`vista.preguntarExistencia`) o, en `/etiquetas`, su recuadro `#existencia-pregunta`; no
+  usa `confirm()` nativo, que bloquea la sesión Bluetooth.
 - **Sin red.** `localStorage` es respaldo: si el navegador reporta que no hay red (o `fetch` falla con `TypeError`) al
   reclamar, se imprime con la marca local y la siguiente carga de la lista la sube (también se suben las marcas de antes
   del registro). Solo para una pieza suelta: en un lote de varias, sin reclamo se detiene en esa pieza (la red pudo caerse justo
