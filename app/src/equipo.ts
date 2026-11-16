@@ -5,8 +5,11 @@
  * Todo en centavos enteros; el bono se paga como `nomina_movimientos` tipo 'bono' (nomina.ts).
  */
 import { lineasNetas } from './netas.ts';
-import { vendedoras } from './cajeros.ts';
-import { delDia, hoyTienda, rangoDe } from './reportes.ts';
+import { atiende } from './cajeros.ts';
+import { leerRoles, esTienda, type Tienda } from './cuentas.ts';
+import { delDia, diaTienda, hoyTienda, rangoDe } from './reportes.ts';
+import { COMPARACIONES, GRANOS, granoEfectivo, ventanaComparacion } from '../public/reportes-resumen.js';
+import { armarEquipo } from '../public/reportes-equipo.js';
 
 const json = (cuerpo: unknown, status = 200) => new Response(JSON.stringify(cuerpo), {
   status, headers: { 'content-type': 'application/json; charset=utf-8' },
@@ -44,8 +47,8 @@ export async function configBono(env: Env): Promise<ConfigBono> {
 }
 
 /** Para cada lunes: ventas netas (mismo neto que el Resumen), meta, bolsa y la parte de cada empleada ligada. */
-export async function semanasBono(env: Env, lunes: string[]) {
-  const config = await configBono(env);
+export async function semanasBono(env: Env, lunes: string[], config?: ConfigBono) {
+  config ??= await configBono(env);
   const primero = [...lunes].sort()[0];
   const ultimo = sumarDias([...lunes].sort().at(-1)!, 7);   // el lunes siguiente: limite exclusivo
   const { results: ventas } = await env.DB.prepare(
@@ -81,60 +84,95 @@ export async function semanasBono(env: Env, lunes: string[]) {
   });
 }
 
-/** GET /api/reportes/equipo?dias=N: tabla por persona del rango y las ultimas 8 semanas cerradas. */
-export async function reporteEquipo(url: URL, env: Env): Promise<Response> {
-  const rango = rangoDe(url);
-  const { desde } = rango;
-  type Fila = { correo: string; [campo: string]: string | number };
-  const [ventas, socios, apartados, piezas, trabajados] = await Promise.all([
-    // Neto por ticket (igual que el Resumen), atribuido a quien atendio; '' = sin atribuir.
+/**
+ * GET /api/reportes/equipo?dias=N | desde=&hasta=[&comparar=&grano=]: tabla por persona del rango, la serie por cubeta (dia, semana o mes)
+ * contra la comparacion elegida y las ultimas 8 semanas cerradas del bono. Los campos de siempre (`personas`, `semanas`, `config`, `dias`,
+ * `dia_desde`, `dia_hasta`) no cambian; lo demas se agrega (#802). Sin subconsultas por pieza: «vendidas a 14 dias» sale de UNA pasada
+ * agrupada por producto, como Capturas. Todo por dia de la tienda; 10 consultas (en paralelo) mas las 3 del bono: 13.
+ * `tienda=` (#802, A1) acota lo que tiene tienda: ventas, tickets, cancelaciones, apartados y desde cuando hay ventas atribuidas (`ventas.tienda`).
+ * Socios, capturas y asistencias no se registran por tienda: no se filtran y la pantalla lo dice. El bono (`semanas`) es del negocio completo
+ * y no cambia con la tienda (lo leen tambien retos.ts y el pago de nomina).
+ */
+export async function reporteEquipo(url: URL, env: Env, ahora = Date.now()): Promise<Response> {
+  const rango = rangoDe(url, ahora);
+  const periodo = { desde: rango.dia_desde, hasta: rango.dia_hasta, dias: rango.dias };
+  const pedida = url.searchParams.get('tienda') ?? '';
+  if (pedida && !esTienda(pedida)) return json({ error: 'Tienda invalida.' }, 400);
+  const tienda: Tienda | null = esTienda(pedida) ? pedida : null;
+  const deTienda = tienda ? ` and v.tienda = '${tienda}'` : '';          // la clave sale de TIENDAS: segura en el SQL
+  const deTiendaSola = tienda ? ` and tienda = '${tienda}'` : '';
+  const comparar = url.searchParams.get('comparar') || 'anterior';
+  if (!COMPARACIONES.includes(comparar)) return json({ error: 'Comparacion invalida.' }, 400);
+  const granoPedido = url.searchParams.get('grano') ?? '';
+  if (granoPedido && !GRANOS.includes(granoPedido)) return json({ error: 'Grano invalido.' }, 400);
+  const grano: string = granoEfectivo(granoPedido, periodo.desde, periodo.hasta);
+  const ventana: { desde: string; hasta: string; dias: number } | null = ventanaComparacion(periodo.desde, periodo.hasta, comparar);
+
+  // Se lee desde el inicio de lo que se compara (si hay) hasta el final del periodo.
+  const lecturaDesde = ventana && ventana.desde < periodo.desde ? ventana.desde : periodo.desde;
+  const [desde, hasta] = [`${lecturaDesde}T06:00:00.000Z`, rango.hasta];
+  const [ventas, cancelaciones, socios, apartados, capturas, asistencias, primeraAsistencia, atribucion, usuarios, config] = await Promise.all([
+    // Neto por ticket (igual que el Resumen), por dia y atribuido a quien atendio; '' = sin atribuir.
     env.DB.prepare(
-      `${lineasNetas('v.creado_en >= ?')}
-       select v.vendedora as correo, count(distinct n.venta) as tickets, coalesce(sum(n.neta), 0) as ventas
-       from netas n join ventas v on v.id = n.venta where n.propietario = 'dolaron' group by v.vendedora`,
-    ).bind(desde).all<Fila>(),
+      `${lineasNetas(`v.creado_en >= ? and v.creado_en < ?${deTienda}`)}
+       select ${diaTienda('v.creado_en')} as dia, v.vendedora as correo, count(distinct n.venta) as tickets, coalesce(sum(n.neta), 0) as ventas, coalesce(sum(n.cant), 0) as piezas
+       from netas n join ventas v on v.id = n.venta where n.propietario = 'dolaron' group by 1, 2`,
+    ).bind(desde, hasta).all(),
+    // Tickets completos cancelados de cada vendedora, en el dia de la venta (el mismo periodo de Control).
     env.DB.prepare(
-      `select c.registrado_por as correo, count(*) as socios,
+      `select ${diaTienda('creado_en')} as dia, vendedora as correo, count(*) as n, coalesce(sum(total - devuelto - dolarones_devueltos), 0) as valor
+       from ventas where cancelada = 1 and creado_en >= ? and creado_en < ?${deTiendaSola} group by 1, 2`,
+    ).bind(desde, hasta).all(),
+    env.DB.prepare(
+      `select ${diaTienda('c.creado_en')} as dia, c.registrado_por as correo, count(*) as socios,
          coalesce(sum(exists(select 1 from ventas v where v.cliente_id = c.id and v.cancelada = 0
            and substr(datetime(v.creado_en, '-6 hours'), 1, 10) = substr(datetime(c.creado_en, '-6 hours'), 1, 10))), 0) as socios_compraron
-       from clientes c where c.creado_en >= ? group by c.registrado_por`,
-    ).bind(desde).all<Fila>(),
+       from clientes c where c.creado_en >= ? and c.creado_en < ? and c.registrado_por <> 'retos' group by 1, 2`,
+    ).bind(desde, hasta).all(),
     env.DB.prepare(
-      `select p.vendedora as correo, count(*) as apartados from pedidos p join ventas v on v.id = p.venta_id
-       where p.estado = 'vendido' and v.cancelada = 0 and v.creado_en >= ? group by p.vendedora`,
-    ).bind(desde).all<Fila>(),
+      `select ${diaTienda('v.creado_en')} as dia, p.vendedora as correo, count(*) as apartados from pedidos p join ventas v on v.id = p.venta_id
+       where p.estado = 'vendido' and v.cancelada = 0 and v.creado_en >= ? and v.creado_en < ?${deTienda} group by 1, 2`,
+    ).bind(desde, hasta).all(),
+    // Piezas capturadas por dia y persona (las de `capturado_por` vacio vienen aparte, como `capturas_sin_cuenta`) y cuantas se vendieron en sus primeros 14 dias. La primera venta de cada pieza sale de UNA pasada
+    // que arranca por las ventas del rango (indice ventas_creado, luego venta_lineas_venta y la llave de productos); `cross join` fija ese orden.
+    // Antes era un `exists` por pieza sobre venta_lineas, que no tiene indice por producto. Solo cuenta la caja, como antes (Mercado Libre no).
     env.DB.prepare(
-      `select p.capturado_por as correo, count(*) as capturadas,
-         coalesce(sum(exists(select 1 from venta_lineas l join ventas v on v.id = l.venta_id
-           where l.producto_id = p.id and v.cancelada = 0 and l.cantidad > l.cancelada_cantidad
-             and julianday(v.creado_en) - julianday(p.creado_en) <= 14)), 0) as vendidas_14
-       from productos p where p.capturado_por <> '' and p.creado_en >= ? and p.sin_inventario = 0
-         and p.propietario = 'dolaron' and p.estado_analisis <> 'descartado' group by p.capturado_por`,
-    ).bind(desde).all<Fila>(),
+      `select ${diaTienda('p.creado_en')} as dia, p.capturado_por as correo, count(*) as capturadas,
+         coalesce(sum(f.primera is not null and julianday(f.primera) - julianday(p.creado_en) <= 14), 0) as vendidas_14
+       from productos p left join (
+         select l.producto_id, min(v.creado_en) as primera
+         from ventas v cross join venta_lineas l on l.venta_id = v.id cross join productos q on q.id = l.producto_id
+         where v.creado_en >= ? and v.cancelada = 0 and l.cantidad > l.cancelada_cantidad
+           and q.creado_en >= ? and q.creado_en < ? and q.sin_inventario = 0 and q.propietario = 'dolaron'
+         group by l.producto_id) f on f.producto_id = p.id
+       where p.creado_en >= ? and p.creado_en < ? and p.sin_inventario = 0
+         and p.propietario = 'dolaron' and p.estado_analisis <> 'descartado' group by 1, 2`,
+    ).bind(desde, desde, hasta, desde, hasta).all(),
+    // Dias de asistencia por dia y cuenta ligada ('' = empleado sin cuenta: cuenta en el total, no en una persona).
     env.DB.prepare(
-      `select e.correo, count(*) as dias_trabajados from asistencias a join empleados e on e.id = a.empleado_id
-       where e.correo <> '' and a.fecha >= ? and a.fecha <= ? group by e.correo`,
-    ).bind(rango.dia_desde, rango.dia_hasta).all<Fila>(),
+      `select a.fecha as dia, e.correo, count(*) as n from asistencias a join empleados e on e.id = a.empleado_id
+       where a.fecha >= ? and a.fecha <= ? group by 1, 2`,
+    ).bind(lecturaDesde, rango.dia_hasta).all(),
+    env.DB.prepare('select min(fecha) as desde from asistencias').first<{ desde: string | null }>(),
+    // El primer dia con una venta atribuida: se recorre ventas_creado hasta la primera que trae vendedora (las de antes de que existiera la columna).
+    env.DB.prepare(`select creado_en from ventas where vendedora <> ''${deTiendaSola} order by creado_en limit 1`).first<{ creado_en: string }>(),
+    // Las cuentas: el nombre de cada correo y, de ellas, las que atienden en piso (salen en la tabla aunque no hayan hecho nada).
+    env.DB.prepare('select correo, nombre, roles, activo from usuarios order by nombre').all<{ correo: string; nombre: string; roles: string; activo: number }>(),
+    configBono(env),
   ]);
-  const { results: usuarios } = await env.DB.prepare('select correo, nombre from usuarios').all<{ correo: string; nombre: string }>();
-  const nombres = new Map(usuarios.map((u) => [u.correo, u.nombre]));
-  const personas = new Map<string, Record<string, unknown>>();
-  const fila = (correo: string) => {
-    if (!personas.has(correo)) {
-      personas.set(correo, { correo, nombre: correo ? nombres.get(correo) || correo : 'Sin atribuir', ventas: 0, tickets: 0,
-        socios: 0, socios_compraron: 0, apartados: 0, capturadas: 0, vendidas_14: 0, dias_trabajados: 0 });
-    }
-    return personas.get(correo)!;
-  };
-  for (const v of await vendedoras(env)) fila(v.correo);
-  for (const origen of [ventas, socios, apartados, piezas, trabajados]) {
-    for (const { correo, ...datos } of origen.results) Object.assign(fila(correo), datos);
-  }
+
+  const primera = atribucion?.creado_en ? new Date(Date.parse(atribucion.creado_en) - 6 * 3_600_000).toISOString().slice(0, 10) : null;
+  const equipo = armarEquipo({
+    desde: periodo.desde, hasta: periodo.hasta, grano, ventana,
+    ventas: ventas.results as never, cancelaciones: cancelaciones.results as never, socios: socios.results as never, apartados: apartados.results as never,
+    capturas: capturas.results as never, asistencias: asistencias.results as never, usuarios: usuarios.results, vendedoras: usuarios.results.filter((u) => u.activo && atiende(leerRoles(u.roles))), atribucionDesde: primera,
+  });
   return json({
-    dias: rango.dias, dia_desde: rango.dia_desde, dia_hasta: rango.dia_hasta,
-    personas: [...personas.values()].filter((p) => p.correo || p.tickets).sort((a, b) => String(a.nombre).localeCompare(String(b.nombre))),
-    semanas: await semanasBono(env, semanasCerradas(hoyTienda())),
-    config: await configBono(env),
+    dias: rango.dias, dia_desde: rango.dia_desde, dia_hasta: rango.dia_hasta, tienda: tienda ?? '',
+    periodo, comparar, comparacion: ventana, grano, asistencias: { desde: primeraAsistencia?.desde ?? null },
+    ...equipo,
+    semanas: await semanasBono(env, semanasCerradas(hoyTienda(ahora)), config),
+    config,
   });
 }
 

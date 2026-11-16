@@ -4,6 +4,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
 import { verificarCuadre, rellenarDias } from '../public/graficas.js';
+import { rangoDe, rangoDias, hoyTienda, RangoInvalido } from './reportes.ts';
+import { lineasNetas } from './netas.ts';
+import { CLAVES_DE_PARTE, PARTES_REPORTE } from '../public/reportes-partes.js';
 
 type Pedir = ReturnType<typeof tienda>['pedir'];
 
@@ -241,4 +244,205 @@ test('reportes con dias basura no se caen: dias invalidos usan el valor por omis
   const r = await pedir('/api/reportes?dias=abc', undefined, 'GET');
   assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
   assert.equal(r.cuerpo.dias, 30);
+});
+
+/* ---------- rango por fechas (#802) ---------- */
+
+const rango = (consulta: string, ahora = Date.parse('2026-11-15T20:00:00Z')) => rangoDe(new URL(`https://x/api/reportes?${consulta}`), ahora);
+const invalido = (consulta: string, ahora?: number) => assert.throws(() => rango(consulta, ahora), RangoInvalido, consulta);
+
+test('rangoDe: desde/hasta son dias de la tienda, ambos inclusive, con tope arriba y periodo anterior de igual largo', () => {
+  const r = rango('desde=2026-11-01&hasta=2026-11-10');
+  assert.equal(r.dias, 10);
+  assert.deepEqual([r.dia_desde, r.dia_hasta], ['2026-11-01', '2026-11-10']);
+  assert.equal(r.desde, '2026-11-01T06:00:00.000Z');             // 00:00 de la tienda
+  assert.equal(r.hasta, '2026-11-11T06:00:00.000Z');             // las 00:00 del dia siguiente: el 10 entra completo, el 11 no
+  assert.equal(r.anterior_desde, '2026-10-22T06:00:00.000Z');    // 10 dias justo antes: 22 oct - 31 oct
+  assert.equal(rango('desde=2026-11-15&hasta=2026-11-15').dias, 1);   // un solo dia, hoy
+  assert.equal(rango('desde=2026-02-28&hasta=2026-03-01').dias, 2);
+  assert.equal(rango('desde=2025-11-15&hasta=2026-11-15').dias, 366);   // el maximo
+});
+
+test('rangoDe: fechas mal formadas, a medias, al reves, futuras o de mas de 366 dias se rechazan', () => {
+  for (const mala of [
+    'desde=2026-11-01', 'hasta=2026-11-10', 'desde=&hasta=', 'desde=2026-11-01&hasta=ayer', 'desde=2026-13-01&hasta=2026-11-10',
+    'desde=2026-02-30&hasta=2026-11-10', 'desde=2026-1-1&hasta=2026-11-10',
+    'desde=2026-11-10&hasta=2026-11-01',                         // al reves
+    'desde=2026-11-10&hasta=2026-11-16',                         // mañana (hoy es 15)
+    'desde=2025-11-14&hasta=2026-11-15',                         // 367 dias
+  ]) invalido(mala);
+  // Hoy en la tienda va seis horas detras de UTC: 16 nov 03:00 UTC = 15 nov 21:00, asi que el 16 todavia es futuro.
+  assert.equal(rango('desde=2026-11-15&hasta=2026-11-15', Date.parse('2026-11-16T03:00:00Z')).dias, 1);
+  invalido('desde=2026-11-16&hasta=2026-11-16', Date.parse('2026-11-16T03:00:00Z'));
+});
+
+test('rangoDe: dias= sigue igual (omision 30, tope 365, basura = omision) y trae su cierre', () => {
+  const ahora = Date.parse('2026-11-15T20:00:00Z');
+  assert.deepEqual(rango('dias=7', ahora), rangoDias(7, ahora));
+  assert.equal(rango('', ahora).dias, 30);
+  assert.equal(rango('dias=abc', ahora).dias, 30);
+  assert.equal(rango('dias=9999', ahora).dias, 365);
+  assert.equal(rango('dias=0', ahora).dias, 1);
+  const siete = rango('dias=7', ahora);
+  assert.deepEqual([siete.dia_desde, siete.dia_hasta, siete.desde, siete.anterior_desde],
+    ['2026-11-09', '2026-11-15', '2026-11-09T06:00:00.000Z', '2026-11-02T06:00:00.000Z']);
+  assert.equal(siete.hasta, '2026-11-16T06:00:00.000Z');
+  assert.equal(rango('dias=7&desde=2026-11-01&hasta=2026-11-03', ahora).dias, 3);   // con fechas, mandan las fechas
+});
+
+/** Mueve una venta a `dia` (de la tienda) a mediodia. */
+const alDia = (db: ReturnType<typeof tienda>['db'], id: string, dia: string) => {
+  const cuando = `${dia}T18:00:00.000Z`;   // 12:00 en la tienda
+  db.prepare('update ventas set creado_en = ?, registrado_en = ? where id = ?').run(cuando, cuando, id);
+};
+const hoyMenos = (n: number) => hoyTienda(Date.now() - n * 86_400_000);
+
+test('un rango pasado cerrado deja fuera lo vendido despues: reporte, equipo, tickets y sus selectores', async () => {
+  const { db, pedir } = tienda();
+  db.prepare('update productos set stock = 100 where id = ?').run(PRODUCTO);
+  const vieja = await vender(pedir, 'Caja 1');       // hace 10 dias: dentro
+  const reciente = await vender(pedir, 'Caja 2');    // hace 2 dias: despues del cierre
+  const hoy = await vender(pedir, 'Caja 1');         // hoy: despues del cierre
+  assert.ok([vieja, reciente, hoy].every((v) => v.status === 201));
+  alDia(db, vieja.id, hoyMenos(10));
+  alDia(db, reciente.id, hoyMenos(2));
+  const rangoPasado = `desde=${hoyMenos(12)}&hasta=${hoyMenos(5)}`;
+
+  const r = (await pedir(`/api/reportes?${rangoPasado}`)).cuerpo;
+  assert.equal(r.resumen.total, 25000);              // solo la de hace 10 dias; sin tope arriba sumaria las tres
+  assert.equal(r.resumen.ventas, 1);
+  assert.equal(r.dias, 8);
+  assert.deepEqual([r.dia_desde, r.dia_hasta], [hoyMenos(12), hoyMenos(5)]);
+  assert.equal(r.cuadre.bruto, 25000);
+  assert.deepEqual(r.por_dia.map((d: { dia: string }) => d.dia), [hoyMenos(10)]);
+  assert.equal(r.por_forma_pago.reduce((s: number, f: { total: number }) => s + f.total, 0), 25000);
+  assert.equal(r.top_productos[0].cantidad, 1);
+  assert.deepEqual(verificarCuadre(r).filter((c: { ok: boolean }) => !c.ok), []);
+  assert.equal(r.anterior.total, 0);                 // los 8 dias antes del 12: nada vendido ahi
+
+  const dosDias = (await pedir(`/api/reportes?desde=${hoyMenos(3)}&hasta=${hoyMenos(1)}`)).cuerpo;
+  assert.equal(dosDias.resumen.total, 25000);        // solo la reciente: la de hoy sigue fuera
+  assert.equal(dosDias.resumen.ventas, 1);
+
+  const tk = (await pedir(`/api/reportes/tickets?${rangoPasado}`)).cuerpo;
+  assert.deepEqual(tk.tickets.map((t: { id: string }) => t.id), [vieja.id]);
+  assert.equal(tk.resumen.tickets, 1);
+  assert.deepEqual(tk.cajas, ['Caja 1']);            // los selectores tampoco ven lo posterior
+  const equipo = (await pedir(`/api/reportes/equipo?${rangoPasado}`)).cuerpo;
+  assert.equal(equipo.personas.reduce((s: number, p: { tickets: number }) => s + (p.tickets || 0), 0), 1);
+  // Con dias= todo lo reciente sigue entrando, como siempre.
+  assert.equal((await pedir('/api/reportes?dias=30')).cuerpo.resumen.ventas, 3);
+  assert.equal((await pedir('/api/reportes/tickets?dias=30')).cuerpo.resumen.tickets, 3);
+});
+
+test('la API rechaza con 400 un rango que no se puede atender, en reporte, tickets, CSV y equipo', async () => {
+  const { pedir } = tienda();
+  const manana = hoyTienda(Date.now() + 86_400_000);
+  for (const ruta of ['/api/reportes', '/api/reportes/tickets', '/api/reportes/tickets.csv', '/api/reportes/equipo']) {
+    for (const consulta of ['desde=2026-01-01', `desde=${hoyTienda()}&hasta=${manana}`, 'desde=2024-01-01&hasta=2026-01-01', 'desde=x&hasta=y']) {
+      const r = await pedir(`${ruta}?${consulta}`, undefined, 'GET');
+      assert.equal(r.status, 400, `${ruta}?${consulta}`);
+    }
+  }
+});
+
+test('/api/reportes trae el dia de la primera venta (para «Desde la apertura») o null sin ventas', async () => {
+  const { db, pedir } = tienda();
+  db.prepare('update productos set stock = 100 where id = ?').run(PRODUCTO);
+  assert.equal((await pedir('/api/reportes?dias=7')).cuerpo.primera_venta, null);
+  const v = await vender(pedir, 'Caja 1');
+  const cuando = '2026-01-01T03:30:00.000Z';   // 31 dic 21:30 en la tienda
+  db.prepare('update ventas set creado_en = ?, registrado_en = ? where id = ?').run(cuando, cuando, v.id);
+  await vender(pedir, 'Caja 1');
+  assert.equal((await pedir('/api/reportes?dias=7')).cuerpo.primera_venta, '2025-12-31');
+});
+
+/* ---------- #802 A6: `partes=` calcula solo las secciones que pide la vista ---------- */
+
+const CABECERA = ['dias', 'dia_desde', 'dia_hasta', 'tienda', 'tiendas'];
+
+async function sembrarParaPartes(t: ReturnType<typeof tienda>) {
+  const { db, pedir } = t;
+  db.prepare('update productos set stock = 100 where id = ?').run(PRODUCTO);
+  pieza(db, 'P1', { dias: 30, precio: 12000, stock: 3 });
+  pieza(db, 'P2', { dias: 3, estado_fisico: 'caducado', stock: 1 });
+  await vender(pedir, 'Caja 1');
+  await vender(pedir, 'Caja 1', { forma_pago: 'tarjeta', efectivo: 0 });
+  const salk = await vender(pedir, 'Caja 2', { forma_pago: 'transferencia', efectivo: 0 });
+  db.prepare("update ventas set tienda = 'salk', descuento = 1000, promo = 1000 where id = ?").run(salk.id);
+  const cancelada = await vender(pedir, 'Caja 2');
+  assert.equal((await pedir(`/api/ventas/${cancelada.id}/cancelar`, { motivo: 'prueba', caja: 'Caja 2' })).status, 200);
+  db.prepare("insert into cajon_aperturas (id, abierto_por, abierto_en, registrado_en, caja) values ('a1', 'x@x', ?, ?, 'Caja 1')").run(new Date().toISOString(), new Date().toISOString());
+}
+
+test('partes=: cada seccion sola trae exactamente lo mismo que en la respuesta completa y sin el parametro no cambia nada', async () => {
+  const t = tienda();
+  await sembrarParaPartes(t);
+  assert.deepEqual([...PARTES_REPORTE].sort(), Object.keys(CLAVES_DE_PARTE).sort(), 'cada parte tiene sus claves en este contrato');
+  for (const tiendaQ of ['', '&tienda=salk']) {
+    const completo = (await t.pedir(`/api/reportes?dias=7${tiendaQ}`)).cuerpo;
+    assert.ok(completo.resumen.ventas > 0 && completo.por_dia.length > 0 && completo.inventario.piezas > 0, 'hay datos: la igualdad no es entre vacios');
+    for (const clave of [...CABECERA, 'primera_venta', ...Object.values(CLAVES_DE_PARTE).flat()]) assert.ok(clave in completo, `la respuesta completa trae ${clave}`);
+    for (const [parte, claves] of Object.entries(CLAVES_DE_PARTE)) {
+      const sola = (await t.pedir(`/api/reportes?dias=7${tiendaQ}&partes=${parte}`)).cuerpo;
+      assert.deepEqual(Object.keys(sola).sort(), [...CABECERA, ...claves].sort(), `${parte}: solo su cabecera y sus claves`);
+      for (const clave of [...CABECERA, ...claves]) assert.deepEqual(sola[clave], completo[clave], `${parte}.${clave}${tiendaQ}`);
+    }
+    // Todas juntas (en cualquier orden) son la respuesta completa, clave por clave y en el mismo orden.
+    const juntas = (await t.pedir(`/api/reportes?dias=7${tiendaQ}&partes=${[...PARTES_REPORTE].reverse().join(',')}`)).cuerpo;
+    assert.deepEqual(juntas, completo);
+    assert.deepEqual(Object.keys(juntas), Object.keys(completo));
+    // Dos partes mezcladas traen cada una lo suyo.
+    const dos = (await t.pedir(`/api/reportes?dias=7${tiendaQ}&partes=cuadre,resumen`)).cuerpo;
+    assert.deepEqual([dos.cuadre, dos.resumen], [completo.cuadre, completo.resumen]);
+  }
+  // La respuesta completa de siempre: ni una clave de menos.
+  const sin = (await t.pedir('/api/reportes?dias=7')).cuerpo;
+  assert.deepEqual(Object.keys(sin), ['dias', 'dia_desde', 'dia_hasta', 'primera_venta', 'tienda', 'tiendas', 'resumen', 'anterior', 'cuadre', 'por_forma_pago', 'por_dia', 'por_hora',
+    'por_categoria', 'por_categoria_anterior', 'inventario', 'merma_caducidad', 'top_productos', 'precio_sugerido', 'dias_en_venta_por_categoria', 'cancelaciones',
+    'aperturas_cajon', 'cortes', 'retiros', 'revendedoras', 'descuentos']);
+  t.db.close();
+});
+
+test('partes=: lo desconocido es 400, `partes=` vacio trae solo la cabecera y cada parte corre solo sus sentencias', async () => {
+  const t = tienda();
+  await sembrarParaPartes(t);
+  for (const q of ['partes=nada', 'partes=resumen,nada', 'partes=INVENTARIO']) assert.equal((await t.pedir(`/api/reportes?dias=7&${q}`)).status, 400, q);
+  assert.deepEqual(Object.keys((await t.pedir('/api/reportes?dias=7&partes=')).cuerpo), CABECERA);
+  const visto: string[] = [];
+  const preparar = t.env.DB.prepare.bind(t.env.DB);
+  (t.env.DB as unknown as { prepare: (sql: string) => unknown }).prepare = (sql: string) => { visto.push(sql); return preparar(sql); };
+  const cuenta = async (q: string) => { visto.length = 0; assert.equal((await t.pedir(`/api/reportes?dias=7${q}`)).status, 200); return visto.length; };
+  const base = await cuenta('&partes=');                       // el acceso del usuario
+  assert.equal(await cuenta('&partes=primera_venta'), base + 1);
+  assert.equal(await cuenta('&partes=inventario'), base + 1);
+  assert.equal(await cuenta('&partes=resumen,anterior'), base + 2);
+  assert.equal(await cuenta('&partes=categorias'), base + 2);
+  assert.equal(await cuenta('&partes=por_dia'), base + 2);
+  assert.equal(await cuenta(''), base + 21, 'sin partes: las 21 de siempre');
+  t.db.close();
+});
+
+test('A7: los tickets «con Dolarones» se cuentan por ticket: el redondeo por pieza de un ticket con anticipo no cuenta un ticket que no uso Dolarones', async () => {
+  const { db, pedir } = tienda();
+  const ahora = new Date().toISOString();
+  const ticket = (anticipo: number, dolarones: number, piezas: number, precio: number) => {
+    const id = crypto.randomUUID();
+    db.prepare(`insert into ventas (id, total, forma_pago, efectivo, cambio, creado_en, registrado_en, caja, cajero, anticipo, dolarones)
+                values (?, ?, 'efectivo', ?, 0, ?, ?, 'Caja 1', 'x@x', ?, ?)`).run(id, piezas * precio - 0, piezas * precio - dolarones, ahora, ahora, anticipo, dolarones);
+    for (let i = 0; i < piezas; i++) db.prepare(`insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad, propietario, cancelada_cantidad) values (?, ?, 'X', 'x', ?, 1, 'dolaron', 0)`).run(id, PRODUCTO, precio);
+    return id;
+  };
+  ticket(10000, 0, 3, 11900);   // 3 piezas iguales y $100 de anticipo: el cobrado y el anticipo se reparten con +1 y -1 centavo por pieza, y el ticket no usa Dolarones
+  const { desde, hasta } = rangoDias(1);
+  // El defecto, comprobado: por pieza SI hay diferencias distintas de cero aunque el ticket sume cero.
+  const porPieza = db.prepare(`${lineasNetas('v.creado_en >= ? and v.creado_en < ?')} select count(distinct venta) as n, sum(neta - cobrado - anticipo_linea) as suma from cobros where neta - cobrado - anticipo_linea <> 0`).get(desde, hasta) as { n: number; suma: number };
+  assert.deepEqual({ ...porPieza }, { n: 1, suma: 0 });
+  const dolarones = async (q = '') => (await pedir(`/api/reportes?dias=1${q}&partes=forma_pago`)).cuerpo.por_forma_pago.find((f: { forma_pago: string }) => f.forma_pago === 'dolarones');
+  assert.deepEqual(await dolarones(), { forma_pago: 'dolarones', tickets: 0, total: 0 });
+  ticket(0, 1000, 2, 25000);    // un ticket que si pago $10 con Dolarones
+  assert.deepEqual(await dolarones(), { forma_pago: 'dolarones', tickets: 1, total: 1000 });
+  // Lo mismo por dia (Ventas y Finanzas): la suma de los dias es el total y los tickets, los de arriba.
+  const porDia = (await pedir(`/api/reportes/ventas?dias=1`)).cuerpo;
+  assert.equal(porDia.pago.find((f: { clave: string }) => f.clave === 'dolarones').total, 1000);
 });

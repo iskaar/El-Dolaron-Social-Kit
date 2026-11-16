@@ -1,0 +1,11 @@
+/* Vista «Clientes» de /reportes (#802): la rejilla de Resumen para las tarjetas y lo propio de la vista. */
+#clientes-contenido { transition: opacity .15s; }
+#clientes-contenido .graf-c { min-width: 0; }
+#clientes-contenido .aviso-tienda { margin: 0; }
+#clientes-contenido .titulo-bloque { margin-top: 4px; }
+#clientes-contenido .pares { margin-top: 0; }
+
+/* Tarjetas: la misma rejilla que #r-kpis de Resumen (4 por fila en escritorio, 2 en celular). */
+#c-kpis .tarjeta { flex: 1 1 22%; min-width: 190px; display: flex; flex-direction: column; gap: 3px; }
+@media (max-width: 860px) { #c-kpis .tarjeta { flex-basis: 42%; min-width: 0; } #c-kpis .tarjeta .valor { font-size: 19px; } }
+@media (prefers-reduced-motion: reduce) { #clientes-contenido { transition: none; } }

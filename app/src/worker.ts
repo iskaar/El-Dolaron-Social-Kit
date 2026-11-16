@@ -43,10 +43,19 @@ import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaEspejoCaptura } from './espejo-captura.ts';
 import { rutaNomina } from './nomina.ts';
 import { reporteEquipo, registrarBonoSemana } from './equipo.ts';
+import { reporteCapturas } from './reportes-capturas.ts';
+import { reporteControl } from './reportes-control.ts';
+import { reporteDolarones } from './reportes-dolarones.ts';
 import { rutaPlano } from './plano.ts';
 import { misRetos, otorgarLogros, esCorridaDiaria } from './retos.ts';
 import { rutaTablero } from './tablero.ts';
-import { diaTienda, hoyTienda, rangoDias, rangoDe, delDia, DIA, reportes } from './reportes.ts';
+import { diaTienda, hoyTienda, rangoDias, rangoDe, delDia, DIA, reportes, RangoInvalido } from './reportes.ts';
+import { reporteResumen } from './reportes-resumen.ts';
+import { reporteInventario } from './reportes-inventario.ts';
+import { reporteVentas } from './reportes-ventas.ts';
+import { reporteClientes } from './reportes-clientes.ts';
+import { reporteFinanzas } from './reportes-finanzas.ts';
+import { configInvalida } from '../public/reportes-finanzas.js';
 
 // Las pruebas importan estos dos desde aqui.
 export { hoyTienda, rangoDias };
@@ -1640,7 +1649,7 @@ async function guardarConfig(request: Request, env: Env): Promise<Response> {
   }
   for (const [clave, valor] of entradas) {
     const numero = Math.round(Number(valor));
-    if (!/^[a-z_0-9]{1,40}$/.test(clave) || !Number.isFinite(numero) || numero < 0) {
+    if (!/^[a-z_0-9]{1,40}$/.test(clave) || !Number.isFinite(numero) || numero < 0 || configInvalida(clave, valor)) {
       return json({ error: `Valor invalido para ${clave}.` }, 400);
     }
     await env.DB.prepare(
@@ -2326,10 +2335,10 @@ const TICKETS_POR_PAGINA = 50;
  */
 function filtrosTickets(url: URL) {
   const q = url.searchParams;
-  const { desde } = rangoDe(url);
+  const { desde, hasta } = rangoDe(url);
 
-  const filtros = ['v.creado_en >= ?'];
-  const datos: string[] = [desde];
+  const filtros = ['v.creado_en >= ? and v.creado_en < ?'];
+  const datos: string[] = [desde, hasta];
   const forma = q.get('forma_pago') ?? '';
   if (FORMAS_PAGO.has(forma)) { filtros.push('v.forma_pago = ?'); datos.push(forma); }
   for (const campo of ['caja', 'cajero']) {
@@ -2350,7 +2359,7 @@ function filtrosTickets(url: URL) {
   if (q.get('socio') === '1') filtros.push('v.cliente_id is not null');
   if (q.get('dolarones') === '1') filtros.push('v.dolarones > 0');
   const donde = filtros.join(' and ');
-  return { desde, donde, datos };
+  return { desde, hasta, donde, datos };
 }
 
 /**
@@ -2360,7 +2369,7 @@ function filtrosTickets(url: URL) {
  * sin los cancelados ni lo devuelto por piezas.
  */
 async function ticketsDelRango(url: URL, env: Env): Promise<Response> {
-  const { desde, donde, datos } = filtrosTickets(url);
+  const { desde, hasta, donde, datos } = filtrosTickets(url);
   const pagina = Math.min(1000, Math.max(0, Math.floor(Number(url.searchParams.get('pagina'))) || 0));
 
   const resumen = await env.DB.prepare(
@@ -2382,11 +2391,11 @@ async function ticketsDelRango(url: URL, env: Env): Promise<Response> {
     .all();
   // Para los selectores: lo que hubo en el rango, sin importar los filtros.
   const { results: cajas } = await env.DB.prepare(
-    `select distinct caja as valor from ventas where creado_en >= ? and caja != '' order by caja`,
-  ).bind(desde).all<{ valor: string }>();
+    `select distinct caja as valor from ventas where creado_en >= ? and creado_en < ? and caja != '' order by caja`,
+  ).bind(desde, hasta).all<{ valor: string }>();
   const { results: cajeros } = await env.DB.prepare(
-    `select distinct cajero as valor from ventas where creado_en >= ? and cajero != '' order by cajero`,
-  ).bind(desde).all<{ valor: string }>();
+    `select distinct cajero as valor from ventas where creado_en >= ? and creado_en < ? and cajero != '' order by cajero`,
+  ).bind(desde, hasta).all<{ valor: string }>();
 
   return json({
     resumen,
@@ -2947,8 +2956,16 @@ export default {
       if (pathname === '/api/reportes') {
         return await reportes(url, env);
       }
+      if (pathname === '/api/reportes/dolarones' && request.method === 'GET') return await reporteDolarones(url, env);
+      if (pathname === '/api/reportes/resumen' && request.method === 'GET') return await reporteResumen(url, env);
+      if (pathname === '/api/reportes/inventario' && request.method === 'GET') return await reporteInventario(url, env);
+      if (pathname === '/api/reportes/ventas' && request.method === 'GET') return await reporteVentas(url, env);
+      if (pathname === '/api/reportes/clientes' && request.method === 'GET') return await reporteClientes(url, env);
+      if (pathname === '/api/reportes/finanzas' && request.method === 'GET') return await reporteFinanzas(url, env);
       if (pathname === '/api/reportes/equipo' && request.method === 'GET') return await reporteEquipo(url, env);
       if (pathname === '/api/reportes/equipo/bono' && request.method === 'POST') return await registrarBonoSemana(request, env, correo);
+      if (pathname === '/api/reportes/capturas' && request.method === 'GET') return await reporteCapturas(url, env);
+      if (pathname === '/api/reportes/control' && request.method === 'GET') return await reporteControl(url, env);
       if (pathname === '/api/reportes/tickets') {
         return await ticketsDelRango(url, env);
       }
@@ -3065,7 +3082,7 @@ export default {
       }
       return pantalla;
     } catch (error) {
-      if (error instanceof CajaAjena) return json({ error: error.message }, 400);
+      if (error instanceof CajaAjena || error instanceof RangoInvalido) return json({ error: error.message }, 400);
       // El segmento secreto de /api/ml/notificaciones/<secreto> no va al log.
       console.error(JSON.stringify({ mensaje: 'fallo en la peticion', pathname: pathname.replace(/^(\/api\/ml\/notificaciones\/).+/, '$1<secreto>'), error: String(error),
         pila: error instanceof Error ? error.stack?.slice(0, 2000) : undefined }));

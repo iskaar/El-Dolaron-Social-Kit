@@ -1,0 +1,11 @@
+/* Vista «Ventas» de /reportes (#802): la rejilla de Resumen para las tarjetas y el cuerpo que se atenua mientras se pide otra cosa. */
+#ventas-cuerpo { display: grid; gap: 16px; min-width: 0; transition: opacity .15s; }
+#ventas-cuerpo.pidiendo { opacity: .55; }
+#ventas-cuerpo .graf-v { min-width: 0; }
+
+/* Tarjetas: la misma rejilla que #r-kpis de Resumen (4 por fila en escritorio, 2 en celular). */
+#v-kpis .tarjeta { flex: 1 1 22%; min-width: 190px; display: flex; flex-direction: column; gap: 3px; }
+@media (max-width: 860px) { #v-kpis .tarjeta { flex-basis: 42%; min-width: 0; } #v-kpis .tarjeta .valor { font-size: 19px; } }
+@media (prefers-reduced-motion: reduce) { #ventas-cuerpo { transition: none; } }
+.dos-graf { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+.dos-graf > div { min-width: 0; }
