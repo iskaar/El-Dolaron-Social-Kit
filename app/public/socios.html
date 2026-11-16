@@ -30,6 +30,7 @@
   #listo p { margin: 6px 0; }
   a.boton { display: block; margin-top: 16px; padding: 16px; font-size: 18px; font-weight: 800; border-radius: 12px;
     background: #25D366; color: #073b1c; text-decoration: none; }
+  html.incrustado header { display: none; }
   a.boton:focus-visible, button:focus-visible { outline: 3px solid var(--azul); outline-offset: 2px; }
 </style>
 <script src="/cajero.js"></script>
@@ -79,6 +80,7 @@
     <a id="listo-wa" class="boton" href="#" target="_blank" rel="noopener">Mandar por WhatsApp</a>
     <button id="acreditar-alta" type="button">Acreditar llegada física</button>
     <button id="otro" type="button">Registrar a otro cliente</button>
+    <button id="seguir" type="button" hidden>Seguir con la venta</button>
   </section>
 
   <details class="panel" style="margin-top:16px">
@@ -102,6 +104,22 @@ const d = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} Dolarones`;
 // Un id por alta: si la red falla despues de guardar, reintentar no crea otro socio.
 let idAlta = crypto.randomUUID();
 let ultimoSocio = null;
+
+// Dentro de la caja (#820): se oculta el encabezado y se avisa del alta por postMessage al mismo origen.
+// Solo viaja el numero de socio. Suelto (pestaña propia, celular) nada de esto aplica.
+const incrustado = parent !== window && new URLSearchParams(location.search).get('incrustado') === '1';
+const avisarCaja = (mensaje) => parent.postMessage(mensaje, location.origin);
+if (incrustado) {
+  document.documentElement.classList.add('incrustado');
+  $('otro').hidden = true;
+  $('seguir').hidden = false;
+  $('seguir').addEventListener('click', () => avisarCaja({ tipo: 'alta-cerrar' }));
+  // El lector escribe digitos y Enter: Enter dentro de un campo no registra (solo el boton), y Esc cierra la ventana de la caja.
+  $('alta').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.preventDefault(); });
+  addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !document.querySelector('#dialogo-cajero[open]')) avisarCaja({ tipo: 'alta-cerrar' });
+  });
+}
 
 $('telefono-confirma').addEventListener('paste', (e) => e.preventDefault());
 $('alta').addEventListener('input', (e) => {
@@ -147,6 +165,7 @@ $('alta').addEventListener('submit', async (e) => {
     $('listo-wa').href = enlaceCliente(socio.telefono, textoBienvenidaSocio(socio));
     $('alta').hidden = true;
     $('listo').hidden = false;
+    if (incrustado) avisarCaja({ tipo: 'alta-socio', numero: socio.numero });
   } catch {
     $('aviso').textContent = 'Sin red: el alta necesita conexión. Intenta de nuevo.';
   } finally {
