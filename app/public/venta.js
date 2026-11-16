@@ -319,6 +319,20 @@ export function avisoExistencia(nombre, stock, enTicket, cantidad) {
   return `${nombre} ya se vendió, está apartada o no está en esta tienda. Si es de un pedido, escanea su folio (P-…).`;
 }
 
+/**
+ * «La tengo en la mano» (#832): la pieza que el cliente trae y la caja da por vendida. Los tres motivos de un toque (el servidor los
+ * guarda tal cual en el rastro) y la regla de cuándo se ofrece: pieza con etiqueta y precio, de inventario, no caducada, sin existencia
+ * en esta tienda y que aún no está en el ticket. Es la misma situación del último mensaje de `avisoExistencia`.
+ */
+export const MOTIVOS_EN_MANO = {
+  otra_etiqueta: 'Tiene otra etiqueta igual',
+  devuelta_o_apartada: 'Estaba devuelta o apartada',
+  no_se: 'No sé',
+};
+export const SIN_RED_EN_MANO = 'Sin red: no se puede vender una pieza sin existencia.';
+export const puedeVenderEnMano = (pieza, enTicket) =>
+  !pieza.sin_inventario && pieza.estado_fisico !== 'caducado' && !!pieza.codigo && pieza.precio > 0 && pieza.stock <= 0 && enTicket === 0;
+
 /** Sugerencia resaltada tras una flecha (-1 = ninguna). Arriba desde la primera vuelve a «ninguna»: Enter entonces es el del lector. */
 export const moverSugerencia = (actual, total, tecla) =>
   total <= 0 ? -1 : tecla === 'ArrowDown' ? Math.min(actual + 1, total - 1) : Math.max(actual - 1, -1);

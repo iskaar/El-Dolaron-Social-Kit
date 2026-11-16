@@ -13,6 +13,7 @@ import {
 import { LIMITE_GASTO_CAJERO } from './corte.ts';
 import { codigoDeDigitos, codigoEnDigitos } from '../public/code128.js';
 import { agregar, guiaVale, descuentoDe, TOPE_DESCUENTO } from '../public/venta.js';
+import { puedeVenderEnMano } from '../public/venta.js';
 import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
@@ -788,7 +789,7 @@ function montarAgregar(piezas: any[], { enLinea = true, recarga = [] as any[] } 
   const recargas: number[] = [];
   const catalogo = new Map(piezas.map((p) => [p.codigo, p]));
   const contexto: Record<string, unknown> = {
-    $, catalogo, agregar, leerMultiplicador, codigoDeDigitos, avisoExistencia, precioHoy: (p: any) => p.precio, Map, Date,
+    $, catalogo, agregar, leerMultiplicador, codigoDeDigitos, avisoExistencia, precioHoy: (p: any) => p.precio, Map, Date, puedeVenderEnMano, ocultarEnMano() {}, ofrecerEnMano() {},
     navigator: { onLine: enLinea }, pintar() {}, cargarPedido() {}, buscarSocio() {},
     // El catálogo que baja la recarga: reemplaza lo que había (como cargarCatalogo).
     cargarCatalogo: async () => { recargas.push(1); for (const p of recarga) catalogo.set(p.codigo, p); },

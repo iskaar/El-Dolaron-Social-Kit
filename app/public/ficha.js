@@ -186,7 +186,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     if (pieza.tiene_foto) { $('foto').src = `/api/foto/${pieza.id}?v=${encodeURIComponent(pieza.actualizado_en)}`; $('foto').alt = pieza.nombre; }
   }
 
-  const MOTIVOS_TEXTO = { fusion:'Fusión', descarte:'Descarte' };   // el resto ya se lee tal cual
+  const MOTIVOS_TEXTO = { fusion:'Fusión', descarte:'Descarte', hallada_en_caja:'Hallada en caja (venta sin existencia)' };   // el resto ya se lee tal cual
   // #798: dónde está la pieza. Un servidor viejo no manda `existencia`: sin ella no se pinta nada y la ficha queda como antes.
   const LUGARES = { soledad:'Soledad', salk:'Avenida Salk', romero:'Coronel Romero' };
   const lugar = (clave) => LUGARES[clave] ?? clave;

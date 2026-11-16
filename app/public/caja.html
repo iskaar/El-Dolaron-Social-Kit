@@ -92,6 +92,11 @@
   #rechazadas .ticket button { margin-left: 6px; }
   #rechazadas .ticket .nota { color: #5b6478; }
   .renglon.sin-existencia { outline: 2px solid var(--rojo); background: #fdecec; }
+  /* «La tengo en la mano» (#832): junto al aviso del escaneo; nunca toma el foco (el Enter del lector sigue en #codigo). */
+  #en-mano { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; font-size: 14px; }
+  #en-mano[hidden] { display: none; }
+  #en-mano button { padding: 10px 14px; font-size: 14px; border: 1px solid var(--azul); border-radius: 10px; background: #fff; color: var(--azul); cursor: pointer; }
+  .en-mano { color: var(--rojo); }
   #pie { padding: 8px 18px 14px; font-size: 13px; color: #5b6478; display: flex; gap: 18px; flex-wrap: wrap; }
   #tickets { margin-top: 14px; border-top: 1px solid var(--linea); padding-top: 10px; }
   #tickets summary { font-size: 13px; color: #5b6478; cursor: pointer; }
@@ -201,6 +206,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       <button id="abrir-camara" type="button">Cámara</button>
     </div>
     <div id="aviso" role="status"></div>
+    <div id="en-mano" hidden></div>
     <div id="sugerencias"></div>
     <div id="ticket"></div>
   </section>
@@ -504,7 +510,8 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
 import { totales, agregar, leerMultiplicador, efectivoAlcanza, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
-  esBusquedaPorTexto, avisoExistencia, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo } from '/venta.js';
+  esBusquedaPorTexto, avisoExistencia, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo,
+  MOTIVOS_EN_MANO, SIN_RED_EN_MANO, puedeVenderEnMano } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -892,6 +899,7 @@ function pintarPromoCupo() {
 function pintar() {
   pintarPromoCupo();
   revisarCancelarArmado();
+  if (cobrando) ocultarEnMano();   // #832: la oferta «en la mano» no sobrevive al cobro
   // Uno en % se aprueba para ese ticket exacto: si cambia, hay que pedir otro. Uno en
   // pesos se queda en el ticket hasta vaciarlo o quitarlo (Isaac, 17/10).
   const subtotal = totales(lineas).subtotal;
@@ -908,7 +916,7 @@ function pintar() {
   $('ticket').innerHTML = lineas.map((l, i) => `
     <div class="renglon${l.sin_existencia ? ' sin-existencia' : ''}">
       ${l.producto_id ? `<img class="foto" src="/api/foto/${encodeURIComponent(l.producto_id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div></div>'}
-      <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}${l.precio_lista > l.precio ? ` · Descuento, antes <s>${pesos(l.precio_lista)}</s>` : ''}</div></div>
+      <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}${l.precio_lista > l.precio ? ` · Descuento, antes <s>${pesos(l.precio_lista)}</s>` : ''}${l.en_mano ? ' · <b class="en-mano">Sin existencia en el sistema</b>' : ''}</div></div>
       <div>x${l.cantidad}</div>
       <div class="importe">${pesos(l.precio * l.cantidad)}</div>
       <button type="button" data-quitar="${i}" aria-label="Quitar ${escapar(l.nombre)}"${l.cantidad > 1 ? ' title="Quita una pieza; Mayús + clic quita el renglón entero"' : ''} ${cobrando ? 'disabled' : ''}>✕</button>
@@ -983,6 +991,44 @@ function pintar() {
   }
 }
 
+/* ---------- «La tengo en la mano» (#832) ---------- */
+// La oferta y sus tres motivos no toman el foco (ni con el ratón: mousedown no lo mueve) y el escaneo siguiente los quita: el Enter del lector
+// siempre cae en #codigo, nunca en uno de estos botones. Tras tocar uno, el foco vuelve a #codigo.
+const ocultarEnMano = () => { $('en-mano').hidden = true; $('en-mano').replaceChildren(); };
+$('en-mano').addEventListener('mousedown', (e) => e.preventDefault());
+function botonEnMano(texto, alClic) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = texto;
+  b.addEventListener('click', () => { alClic(); $('codigo').focus(); });
+  return b;
+}
+function ofrecerEnMano(pieza) {
+  const caja = $('en-mano');
+  caja.hidden = false;
+  // Sin red no se ofrece: el ajuste de existencia lo hace el servidor junto con la venta y esa venta no se encola.
+  if (!navigator.onLine) return caja.replaceChildren(SIN_RED_EN_MANO);
+  caja.replaceChildren(botonEnMano('La tengo en la mano: venderla', () => {
+    caja.replaceChildren('¿Por qué no estaba?', ...Object.entries(MOTIVOS_EN_MANO).map(([clave, texto]) => botonEnMano(texto, () => agregarEnMano(pieza.codigo, clave))));
+  }));
+}
+function agregarEnMano(codigo, motivo) {
+  ocultarEnMano();
+  if (cobrando) return;
+  const pieza = catalogo.get(codigo);   // el catálogo pudo refrescarse mientras tanto
+  const enTicket = lineas.filter((l) => l.codigo === codigo).reduce((suma, l) => suma + l.cantidad, 0);
+  const aviso = (texto, color) => { $('aviso').textContent = texto; $('aviso').style.color = color; };
+  if (!navigator.onLine) return aviso(SIN_RED_EN_MANO, '#D72B32');
+  if (!pieza || !puedeVenderEnMano(pieza, enTicket)) return aviso('La existencia cambió: escanea la pieza otra vez.', '#D72B32');
+  // `esperado` es la existencia que vio la caja: el servidor solo ajusta si sigue siendo esa.
+  lineas = agregar(lineas, { codigo: pieza.codigo, nombre: pieza.nombre, precio: precioHoy(pieza), precio_lista: pieza.precio, producto_id: pieza.id,
+    en_mano: { motivo, esperado: Math.max(0, pieza.stock) } }, 1);
+  idVenta = null;
+  aviso(`${pieza.nombre}: se vende sin existencia en el sistema; el dueño lo revisa después.`, '#5b6478');
+  sonar(TONO_PIEZA);
+  pintar();
+}
+
 /**
  * La etiqueta impresa codifica solo el numero (ver etiquetas.html: "123", no
  * "ED-000123") porque el codigo completo no cabe legible en 57 mm a un modulo
@@ -998,6 +1044,7 @@ function buscarPieza(codigo) {
 
 function agregarCodigo(leido, reintento = false) {
   if (cobrando) return;
+  ocultarEnMano();
   const multiplicado = leerMultiplicador(leido);
   if (!multiplicado) {
     $('aviso').textContent = 'La cantidad antes del * va de 1 a 99.';
@@ -1051,6 +1098,7 @@ function agregarCodigo(leido, reintento = false) {
     if (sinExistencia) {
       $('aviso').textContent = sinExistencia;
       $('aviso').style.color = '#D72B32';
+      if (puedeVenderEnMano(pieza, enTicket)) ofrecerEnMano(pieza);
       // La existencia local puede estar vieja (otra caja, una devolución): se baja el catálogo una vez, como con «no encontrado», y si
       // ahora sí hay, entra. El aviso ya está en pantalla: no se retrasa.
       if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (catalogo.get(pieza.codigo)?.stock > pieza.stock) escanear(leido, true); });
@@ -1649,6 +1697,13 @@ $('banco-emisor').append(...[...BANCOS, ['otro', 'Otro banco (no se verifica sol
 async function cobrar() {
   if (cobrando) return;                 // doble clic: el primero ya va en camino
   if (!exigirCaja()) return;
+  // #832: la pieza «en la mano» la ajusta el servidor junto con la venta; una venta con ella no se encola sin red.
+  if (lineas.some((l) => l.en_mano) && !navigator.onLine) {
+    $('aviso').textContent = SIN_RED_EN_MANO;
+    $('aviso').style.color = '#D72B32';
+    $('codigo').focus();
+    return;
+  }
   let efectivo = Math.round(Number($('efectivo').value || 0) * 100);
   let forma = $('forma').value;
   const imprimirEn = impresionRemota() ? $('imprimir-en').value : undefined;
@@ -1727,8 +1782,8 @@ async function cobrar() {
   try {
     const venta = {
       id: idVenta,
-      lineas: lineas.map(({ codigo, nombre, precio, precio_lista, cantidad, producto_id }) =>
-        ({ codigo, nombre, precio, ...(precio_lista > precio ? { precio_lista } : {}), cantidad, producto_id })),
+      lineas: lineas.map(({ codigo, nombre, precio, precio_lista, cantidad, producto_id, en_mano }) =>
+        ({ codigo, nombre, precio, ...(precio_lista > precio ? { precio_lista } : {}), cantidad, producto_id, ...(en_mano ? { en_mano } : {}) })),
       forma_pago: forma,
       efectivo: forma === 'efectivo' ? efectivo : 0,
       creado_en: creadoEnVenta,

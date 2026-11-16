@@ -79,6 +79,11 @@
     <div class="nota">Ventas que la caja cobró sin red y el servidor rechazó al sincronizar: el dinero ya está cobrado y no hay venta. Aquí no se mueve nada solo; resuélvela a mano y deja una nota.</div>
     <div id="l-rechazadas" aria-live="polite"></div>
   </section>
+  <section id="sinexistencia" class="grupo" hidden>
+    <h2 id="t-sinexistencia"></h2>
+    <div class="nota">Piezas que el cliente traía en la mano y la caja cobró con la existencia en 0 (últimos 7 días). El ajuste y la venta ya quedaron hechos; esta lista es solo para revisar de dónde salió la pieza (otra etiqueta igual, una devolución, un apartado). No requiere acción.</div>
+    <div id="l-sinexistencia" aria-live="polite"></div>
+  </section>
   <section id="apartados" class="grupo" hidden>
     <h2 id="t-apartados">Apartados de tu tienda</h2>
     <div class="nota">Piezas apartadas en línea o por otra tienda que pasan por aquí: sepáralas, mándalas o recíbelas y marca cada paso con un toque.</div>
@@ -178,7 +183,7 @@ function filaTransferencia(t) {
 // Cada sección se lee por separado: si una falla, las demás se siguen pintando.
 const erroresFila = {};   // por id de solicitud: sobrevive a un repintado
 const firmas = {};        // JSON de lo último pintado: si nada cambió no se repinta (y no se borra un error a la vista)
-const conteos = { ml: 0, apartados: 0, descuentos: 0, cancelaciones: 0, acceso: 0, precios: 0, rechazadas: 0 };
+const conteos = { ml: 0, apartados: 0, descuentos: 0, cancelaciones: 0, acceso: 0, precios: 0, rechazadas: 0, sinexistencia: 0 };   // sinexistencia es informativa: nunca suma al título
 const fallas = {};
 let ultimaFalla = '';
 function mostrarFallas() {
@@ -298,6 +303,17 @@ function filaRechazada(s) {
   })]);
 }
 
+// Piezas vendidas con la existencia en 0 porque el cliente las traía en la mano (#832): solo lectura, sin botón que resuelva.
+function filaSinExistencia(s) {
+  return tarjeta(s.id,
+    h('img', { src: `/api/foto/${encodeURIComponent(s.producto_id)}`, alt: '', loading: 'lazy', onerror: "this.style.visibility='hidden'" }), [
+      h('div', { class: 'nombre' }, h('span', { class: 'codigo' }, s.codigo), ' · ', s.nombre),
+      h('div', { class: 'nota' }, `${[s.caja, s.tienda_nombre].filter(Boolean).join(', ')} · cajero ${s.cajero} · ${fecha(s.ajustado_en)}`),
+      h('div', {}, `Existencia ${s.antes} → ${s.despues} y luego la venta la bajó. Motivo que escogió: `, h('b', {}, s.razon_texto)),
+      s.cancelada ? h('div', { class: 'accion' }, 'La venta se canceló después: la pieza volvió a la existencia.') : null,
+    ], [h('a', { class: 'boton', href: `/inventario?pieza=${encodeURIComponent(s.codigo)}` }, 'Abrir en Inventario ↗')]);
+}
+
 const SECCIONES = {
   descuentos: { url: '/api/solicitudes/descuentos', titulo: 'Descuentos por aprobar', fila: filaDescuento },
   cancelaciones: { url: '/api/solicitudes/cancelaciones', titulo: 'Cancelaciones por aprobar', fila: filaCancelacion },
@@ -305,16 +321,17 @@ const SECCIONES = {
   acceso: { url: '/api/cuentas', titulo: 'Solicitudes de acceso', fila: filaAcceso, lista: (d) => d.solicitudes.filter((x) => x.tipo === 'acceso') },
   precios: { url: '/api/solicitudes-precio?estado=pendiente', titulo: 'Precios por revisar', fila: filaPrecio, lista: (d) => d.solicitudes },
   rechazadas: { url: '/api/ventas-rechazadas', titulo: 'Ventas cobradas y rechazadas', fila: filaRechazada },
+  sinexistencia: { url: '/api/ventas-sin-existencia', titulo: 'Vendidas con la pieza en la mano', fila: filaSinExistencia, informativa: true },
 };
 
 async function cargarSeccion(clave) {
-  const { url, titulo, fila, lista = (d) => d } = SECCIONES[clave];
+  const { url, titulo, fila, lista = (d) => d, informativa = false } = SECCIONES[clave];
   try {
     const r = await fetch(url);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error ?? `Error ${r.status}`);
     const filas = lista(await r.json());
     fallas[clave] = '';
-    conteos[clave] = filas.length;
+    conteos[clave] = informativa ? 0 : filas.length;
     const firma = JSON.stringify(filas);
     if (firma === firmas[clave]) return;
     firmas[clave] = firma;
