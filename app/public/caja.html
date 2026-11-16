@@ -186,8 +186,10 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <button id="abrir-corte" type="button">Corte</button>
   <a href="/socios" id="alta-socios">Alta de socios</a>
   <a href="/bultos">Bultos</a>
+  <a href="/pedidos">Apartados</a>
   <a href="/admin">Cola de revisión</a>
   <a href="/avisos" id="avisos-ml" target="_blank" hidden></a>
+  <button id="abrir-guia" type="button" title="Guía de la caja: qué hacer cuando… (tecla F1)">¿Cómo se hace?</button>
   <button id="pedir-ayuda" type="button" aria-live="polite">Ayuda</button>
   <button id="cerrar-sesion" type="button">Cerrar sesión</button>
 </header>
@@ -3072,6 +3074,39 @@ await sincronizar();
 await reconectarImpresora();
 pintarImpresora();
 $('codigo').focus();
+</script>
+<dialog id="dialogo-guia" aria-labelledby="guia-titulo" style="width:min(760px,96vw);height:min(90vh,900px)">
+  <h2 id="guia-titulo">¿Cómo se hace?</h2>
+  <div id="guia-contenedor" style="overflow-y:auto;max-height:calc(min(90vh,900px) - 140px)"></div>
+  <div class="acciones"><button id="guia-cerrar" type="button">Cerrar</button></div>
+</dialog>
+<script type="module">
+// Issue #818: guía «¿Cómo se hace?» (botón de arriba o tecla F1). Se baja la primera vez y queda en la copia sin red del service worker.
+// Es modal: un código escaneado con la guía abierta cae en su buscador, nunca en la venta de atrás.
+const guia = document.getElementById('dialogo-guia');
+let montada = null;
+async function abrirGuia(ancla = '') {
+  if (guia.open) return;
+  const lugar = document.getElementById('guia-contenedor');
+  guia.showModal();
+  try {
+    if (!montada) {
+      lugar.textContent = 'Cargando la guía…';
+      montada = (await import('/ayuda.js')).montarAyuda(lugar, { ancla, nivel: 3 });
+    } else if (ancla) montada.abrir(ancla);
+    if (!ancla) montada.enfocar();
+  } catch {
+    lugar.textContent = 'No se pudo cargar la guía. Revisa la conexión e intenta otra vez.';
+  }
+}
+document.getElementById('abrir-guia').addEventListener('click', () => abrirGuia());
+document.getElementById('guia-cerrar').addEventListener('click', () => guia.close());
+guia.addEventListener('close', () => document.getElementById('codigo').focus());
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'F1' || e.repeat) return;
+  e.preventDefault();   // F1 es la ayuda del navegador; aquí es la de la caja
+  if (!document.querySelector('dialog[open]')) abrirGuia();
+});
 </script>
 </body>
 </html>

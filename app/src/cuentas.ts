@@ -110,6 +110,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/bultos': [...CAPTURA, ...CAJA],   // #795: arman dueño y capturista; reciben dueño y cajero (la API distingue; la computadora pide PIN para recibir)
   '/vender': VENDER,
   '/manual': VENDER,   // manual interactivo de la revendedora (#594): practica con datos de ejemplo, sin API
+  '/ayuda': RETOS,   // guía «¿Cómo se hace?» de la caja (#818): sin API, solo texto; RETOS = caja, computadora (sin PIN: la página no llama a /api) y capturista
   '/retos': RETOS,   // Mis retos (Issue #752)
   '/plano': RETOS,   // Plano del local (Issue #756): se lee en piso; asignar áreas lo cierra la API al dueño
   '/avisos': CAJA,   // ventas de Mercado Libre por atender (Issue #429)

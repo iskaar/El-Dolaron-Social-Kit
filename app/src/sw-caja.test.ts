@@ -13,7 +13,7 @@ const peticion = (ruta: string, metodo = 'GET', origen = 'https://caja.prueba') 
 const ok = { type: 'basic', status: 200, redirected: false };
 
 test('cachea GET 200 de la caja y sus scripts', () => {
-  for (const r of ['/caja', '/venta.js', '/cajero.js', '/camara.js', '/impresora.js', '/ticket.js', '/code128.js'])
+  for (const r of ['/caja', '/venta.js', '/cajero.js', '/camara.js', '/impresora.js', '/ticket.js', '/code128.js', '/ayuda.js', '/ayuda-contenido.js'])
     assert.equal(ctx.debeCachear(peticion(r), ok), true, r);
 });
 
@@ -38,7 +38,7 @@ test('el worker sirve /sw-caja.js como JavaScript a la cuenta de caja', async ()
   const r = await worker.fetch!(new Request('https://caja.prueba/sw-caja.js') as never, env, c as never);
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-type') ?? '', /javascript/);
-  assert.match(await r.text(), /caja-v2/);
+  assert.match(await r.text(), /caja-v3/);
 });
 
 test('al instalarse precarga la caja y sus scripts; lo que Access redirige no se guarda (Issue #253)', async () => {
@@ -55,7 +55,7 @@ test('al instalarse precarga la caja y sus scripts; lo que Access redirige no se
   let espera: Promise<unknown> = Promise.resolve();
   oyentes.install({ waitUntil: (p: Promise<unknown>) => { espera = p; } });
   await espera;
-  assert.deepEqual([...guardado.keys()].sort(), ['/cajero.js', '/camara.js', '/categorias.js', '/code128.js', '/impresora.js', '/ticket.js', '/venta.js']);
+  assert.deepEqual([...guardado.keys()].sort(), ['/ayuda-contenido.js', '/ayuda.js', '/cajero.js', '/camara.js', '/categorias.js', '/code128.js', '/impresora.js', '/ticket.js', '/venta.js']);
 });
 
 test('cada modulo que importa caja.html tiene copia sin red (Issue #326)', () => {
