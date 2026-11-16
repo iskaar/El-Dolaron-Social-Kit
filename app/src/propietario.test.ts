@@ -83,7 +83,7 @@ test('lo pagado con Dolarones en una pieza de FEP se descuenta de lo que se le d
   const socio = (await pedir('/api/socios', {
     id: crypto.randomUUID(), nombre: 'Cliente', telefono: '4449990000', pin: '1234', acepta_bases: true, declara_mayor_edad: true,
   })).cuerpo;
-  assert.equal((await pedir('/api/portal/llegada', { cliente_id: socio.id })).status, 200);
+  assert.equal((await pedir('/api/portal/llegada', { codigo: await codigoPrueba(db, socio.id) })).status, 200);
   // $1,200 de FEP: $50 en Dolarones y $1,150 en efectivo. A FEP se le deben $1,150.
   assert.equal((await pedir('/api/ventas', {
     id: crypto.randomUUID(), caja: 'Caja 1', cliente_id: socio.id, dolarones: 5000, codigo_socio: await codigoPrueba(db, socio.id),

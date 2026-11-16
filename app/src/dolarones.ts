@@ -497,18 +497,37 @@ export async function hashCodigo(codigo: string): Promise<string | null> {
   return hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codigo)));
 }
 
+/** Socio dueño de un código DC- vigente y sin usar, o null. No lo consume: sirve para identificar (caja, llegada física #839). */
+export async function clientePorCodigo(env: Env, codigo: unknown) {
+  const texto = String(codigo ?? '');
+  const hash = await hashCodigo(texto);
+  if (!hash || !texto.startsWith('DC-')) return undefined;
+  return await env.DB.prepare(`select c.id, c.numero, c.nombre, c.telefono, k.maximo, k.expira_en
+    from codigos_cliente k join clientes c on c.id = k.cliente_id
+    where token_hash = ? and venta_id = '' and expira_en > ? and k.auth_uid = c.auth_uid`)
+    .bind(hash, new Date().toISOString()).first<FilaCliente & { maximo: number; expira_en: string }>() ?? null;
+}
+
+/** La caja ofrece acreditar la llegada solo si acreditarla cambiaría algo: sin premio y con cupo de tienda, o a tiempo de ser la primera llegada. */
+export async function llegadaPendiente(env: Env, clienteId: string): Promise<boolean> {
+  if (!promocionAbierta(env) || env.PREMIOS_APERTURA !== 'si') return false;
+  return !!await env.DB.prepare(`select 1 where not exists (select 1 from premios_apertura where cliente_id = ? and canal = 'tienda')
+    and ((not exists (select 1 from premios_apertura where cliente_id = ?)
+      and exists (select 1 from premios_apertura where canal = 'tienda' and cliente_id is null))
+    or not exists (select 1 from primera_llegada))`).bind(clienteId, clienteId).first();
+}
+
+export function promocionAbierta(env: Env): boolean {
+  return env.PORTAL_REGISTRO_ABIERTO === 'si' && basesListas(env) && promocionIniciada(env, new Date());
+}
+
 /** El lector manda el código por POST: nunca tokens en URL, historial o logs. */
 export async function buscarPorCodigo(request: Request, env: Env): Promise<Response> {
   const body = await request.json().then((c) => c ?? {}, () => ({})) as { codigo?: unknown };
-  const codigo = String(body.codigo ?? '');
-  const hash = await hashCodigo(codigo);
-  if (!hash || !codigo.startsWith('DC-')) return json({ error: 'Código de socio inválido.' }, 400);
-  const cliente = await env.DB.prepare(`select c.id, c.numero, c.nombre, c.telefono, k.maximo, k.expira_en
-    from codigos_cliente k join clientes c on c.id = k.cliente_id
-    where token_hash = ? and venta_id = '' and expira_en > ? and k.auth_uid = c.auth_uid`)
-    .bind(hash, new Date().toISOString()).first<FilaCliente & { maximo: number; expira_en: string }>();
+  const cliente = await clientePorCodigo(env, body.codigo);
+  if (cliente === undefined) return json({ error: 'Código de socio inválido.' }, 400);
   if (!cliente) return json({ error: 'Código vencido o usado. Pide al cliente que genere otro.' }, 403);
-  const respuesta = json(await socioConSaldo(env, cliente));
+  const respuesta = json({ ...await socioConSaldo(env, cliente), llegada_pendiente: await llegadaPendiente(env, cliente.id) });
   respuesta.headers.set('cache-control', 'no-store');
   return respuesta;
 }

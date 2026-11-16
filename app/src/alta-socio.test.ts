@@ -6,6 +6,7 @@ import { leerMensajeAlta } from '../public/venta.js';
 
 test('el aviso del alta solo acepta el número de socio o el cierre', () => {
   assert.deepEqual(leerMensajeAlta({ tipo: 'alta-socio', numero: 42 }), { tipo: 'alta', numero: 42 });
+  assert.deepEqual(leerMensajeAlta({ tipo: 'alta-llegada' }), { tipo: 'llegada' });
   assert.deepEqual(leerMensajeAlta({ tipo: 'alta-cerrar' }), { tipo: 'cerrar' });
   // Los datos personales no pasan: del mensaje solo sale el número.
   assert.deepEqual(leerMensajeAlta({ tipo: 'alta-socio', numero: 7, telefono: '4421234567', nombre: 'Ana' }), { tipo: 'alta', numero: 7 });
@@ -29,4 +30,16 @@ test('la caja solo hace caso al marco del mismo origen y ya no abre otra pestañ
 
 test('el reloj de inactividad de cajero.js no corre dentro de un marco', () => {
   assert.match(readFileSync(new URL('../public/cajero.js', import.meta.url), 'utf8'), /window === window\.top\) setInterval/);
+});
+
+test('la llegada física pide el código del cliente: ni un número tecleado ni el id viajan a la API (#839)', () => {
+  const socios = readFileSync(new URL('../public/socios.html', import.meta.url), 'utf8');
+  const caja = readFileSync(new URL('../public/caja.html', import.meta.url), 'utf8');
+  assert.doesNotMatch(socios, /cliente_id/);
+  assert.doesNotMatch(socios, /llegada-numero/);
+  assert.match(socios, /Pide al cliente su código en su celular\./);
+  assert.match(socios, /body:JSON\.stringify\(\{ codigo \}\)/);
+  // El código pasa de la caja al marco por postMessage al mismo origen, no por la URL.
+  assert.match(caja, /postMessage\(\{ tipo: 'llegada-codigo', codigo: llegadaAEnviar \}, location\.origin\)/);
+  assert.match(caja, /\/socios\?incrustado=1'/);
 });

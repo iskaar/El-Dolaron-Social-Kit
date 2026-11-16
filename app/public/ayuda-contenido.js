@@ -472,14 +472,13 @@ export const ESCENARIOS = [
     pasos: [
       'Toca «Alta de socios», arriba: se abre una ventana.',
       'Abre «Acreditar llegada de un socio ya registrado en línea».',
-      'Escribe su «Número de socio» y toca «Buscar y confirmar llegada».',
+      'Pide al cliente que abra su cuenta de Dolarones y muestre su código. Escanéalo con el lector o toca «Escanear con la cámara»; un número escrito no acredita nada. Si ya lo escaneaste en «Buscar socio» y tiene la llegada pendiente, toca «Tiene su llegada pendiente: acreditarla» y la ventana lo recibe.',
       'Confirma en la ventana «¿Confirmas la llegada física de».',
       'Lee el resultado: «Llegada acreditada».',
     ],
     ver: ['alta-de-socio'],
     pantalla: 'socios',
-    textos: [['caja', 'Alta de socios'], 'Acreditar llegada de un socio ya registrado en línea', 'Número de socio', 'Buscar y confirmar llegada', '¿Confirmas la llegada física de', 'Llegada acreditada'],
-    pendiente: '¿Cuándo se acredita la llegada física de un socio registrado en línea y qué se le verifica al cliente?',
+    textos: [['caja', 'Alta de socios'], ['caja', 'Buscar socio'], ['caja', 'Tiene su llegada pendiente: acreditarla'], 'Acreditar llegada de un socio ya registrado en línea', 'Código del cliente (lo muestra en su celular)', 'Acreditar llegada', 'Escanear con la cámara', '¿Confirmas la llegada física de', 'Llegada acreditada'],
   },
   {
     id: 'pagar-con-dolarones', categoria: 'socios', titulo: 'El cliente quiere pagar con Dolarones',

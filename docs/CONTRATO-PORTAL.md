@@ -35,7 +35,7 @@ Todas las respuestas privadas usan `Cache-Control: no-store`. No se manda teléf
 | `POST /api/ventas` **caja** | contrato existente + `cliente_id`, `dolarones`, `codigo_socio` | D positivos requieren código válido del socio y dentro del máximo. `pin` ya no autoriza. Canje requiere red; no se guarda el código en cola offline. |
 | `GET /api/portal/recibos?limit=20&cursor=...` | `limit` 1–50; `cursor` opaco devuelto por la página anterior | `{recibos: [{id, registrado_en, creado_en, total, dolarones, forma_pago, cancelada, pago_monetario}], siguiente}`. Orden descendente estable. |
 | `GET /api/portal/recibos/:id` | UUID de venta | `{id, creado_en, registrado_en, total, dolarones, forma_pago, efectivo, cambio, cancelada, cancelada_en, pago_monetario, d_usados, d_ganados, lineas: [{codigo, nombre, precio, cantidad}], tipo: "recibo_de_compra_no_factura"}`. Venta ajena o inexistente: 404. |
-| `POST /api/portal/llegada` **sólo host del personal** | `{cliente_id}` | `{premio}`; primera llegada recibe 500 D, demás usan 49 cupos presenciales. Reintento devuelve el mismo premio. |
+| `POST /api/portal/llegada` **sólo host del personal** | `{codigo}` (el código `DC-` que el cliente genera en su cuenta; no se consume; el socio sale del código, un número o `cliente_id` tecleado da 400, vencido o usado 403) | `{premio}`; primera llegada recibe 500 D, demás usan 49 cupos presenciales. Reintento devuelve el mismo premio. |
 
 Errores: 400 entrada inválida, 401 token faltante/inválido/vencido/revocado, 404 ruta o recibo inaccesible, 409 conflicto de teléfono, autorización de gasto o reemplazo pendiente, 429 regeneración demasiado rápida, 503 portal cerrado o proveedor no disponible. No devolver detalle de cuentas ajenas.
 

@@ -128,6 +128,8 @@
     padding: 0 14px; font-size: 14px; cursor: pointer; }
   #socio-info { font-size: 14px; margin-top: 6px; min-height: 18px; }
   #socio-info b { color: var(--azul); }
+  #llegada-pendiente { margin-top: 6px; padding: 8px 12px; font-size: 14px; font-weight: 700; border: 2px solid var(--azul);
+    background: #fff; color: var(--azul); border-radius: 10px; cursor: pointer; }
   #dolarones { width: 100%; padding: 12px; font-size: 18px; border: 1px solid var(--linea); border-radius: 10px; }
   .dolarones-fila { display:flex; gap:6px; }
   #dlg-dolarones { border:2px solid var(--azul); border-radius:14px; padding:18px; max-width:min(92vw,420px); }
@@ -266,6 +268,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       <button id="quitar-socio" type="button" hidden aria-label="Quitar socio">✕</button>
     </div>
     <div id="socio-info"></div>
+    <button id="llegada-pendiente" type="button" hidden>Tiene su llegada pendiente: acreditarla</button>
     <p id="regla-regalo" aria-live="polite" hidden></p>
     <div id="pagar-dolarones" hidden>
       <label for="dolarones">Pagar con Dolarones</label>
@@ -632,6 +635,7 @@ let pedidoCargado = null;
 // Socio de la venta en curso: { id, numero, nombre, disponible, por_liberar, regalo_disponible } o null.
 let socio = null;
 let codigoSocio = '';
+let codigoLlegada = '';   // código DC- escaneado de un socio con la llegada pendiente (#839)
 let valesCargados = [];          // vales impresos juntos en este ticket: { codigo, disponible, expira_en } (Isaac, 17/10)
 // Ticket vacío + «Usar todos»: se recuerda la elección y pintar() reaplica el máximo en cada cambio
 // (nunca más que maximoCanje, así no se cobra de más). Se apaga al teclear a mano o quitar socio.
@@ -976,7 +980,7 @@ function pintar() {
   // Con la respuesta de este folio en duda (#817), el código se sigue dando por bueno: el servidor contesta `duplicada` sin validarlo.
   const autorizado = !usados || (codigoSocio && usados <= socio.maximo && ((folioIncierto && folioIncierto === idVenta) || Date.parse(socio.expira_en) > Date.now()));
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
-  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'dolarones', 'efectivo', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido', 'banco-emisor', 'comprobante']) $(id).disabled = cobrando;
+  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'llegada-pendiente', 'dolarones', 'efectivo', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido', 'banco-emisor', 'comprobante']) $(id).disabled = cobrando;
   // Transferencia desde $300 (#593): aparecen la clave de rastreo y el monto del comprobante.
   // Los datos aparecen con el primer clic en «Transferencia» (cobrar()); aquí se esconden si ya no hacen falta, y con el ticket vacío no queda nada de la anterior.
   if (t.aPagar < CLAVE_DESDE) $('datos-transferencia').hidden = true;
@@ -1348,6 +1352,7 @@ $('descuento-valor').placeholder = `Máximo ${TOPE_DESCUENTO}% del ticket`;
 
 function pintarSocio() {
   $('quitar-socio').hidden = !socio;
+  $('llegada-pendiente').hidden = !socio || !codigoLlegada;
   $('pagar-dolarones').hidden = !socio || socio.disponible === 0;
   $('socio-info').innerHTML = socio
     ? (socio.vale ? `<b>${valesCargados.length > 1 ? `${valesCargados.length} vales impresos` : 'Vale impreso'}</b>`
@@ -1359,6 +1364,7 @@ function pintarSocio() {
 function quitarSocio() {
   socio = null;
   codigoSocio = '';
+  codigoLlegada = '';
   valesCargados = [];
   usarTodos = false;
   busquedaSocio++;
@@ -1434,6 +1440,8 @@ async function buscarSocio() {
     socio = sumar ? { ...socio, disponible:socio.disponible + cuerpo.disponible, maximo:socio.maximo + cuerpo.maximo,
       expira_en:Date.parse(cuerpo.expira_en) < Date.parse(socio.expira_en) ? cuerpo.expira_en : socio.expira_en } : cuerpo;
     codigoSocio = sumar ? codigoSocio : esCodigo ? q : '';
+    // #839: un código escaneado de un socio con la llegada pendiente ofrece acreditarla en la ventana de alta.
+    codigoLlegada = !esVale && esCodigo && cuerpo.llegada_pendiente ? q : '';
     // Vacío con vale: el siguiente vale se escanea aquí mismo.
     $('socio').value = esVale ? '' : '#' + socio.numero;
     $('dolarones').value = '';
@@ -1459,7 +1467,8 @@ $('quitar-socio').addEventListener('click', () => { if (ticketEnDuda()) return; 
 // Alta de socio en una ventana (#820): la misma pantalla /socios, incrustada. Al terminar solo avisa su numero
 // (mismo origen y desde ese marco); el socio se liga al ticket al cerrar la ventana, con el mismo camino que «Buscar».
 let numeroAlta = null;
-function abrirAlta() {
+let llegadaAEnviar = '', llegadaAcreditada = false;
+function abrirAlta(codigo = '') {
   const d = $('dlg-alta');
   if (d.open) return;
   const sinRed = !navigator.onLine;
@@ -1467,21 +1476,37 @@ function abrirAlta() {
   $('dlg-alta-marco').hidden = sinRed;
   if (!sinRed) $('dlg-alta-marco').src = '/socios?incrustado=1';
   numeroAlta = null;
+  llegadaAEnviar = sinRed ? '' : codigo;
+  llegadaAcreditada = false;
   d.showModal();
 }
 $('alta-socios').addEventListener('click', (e) => { if (!(e.ctrlKey || e.metaKey || e.shiftKey)) { e.preventDefault(); abrirAlta(); } });
 $('dlg-alta-cerrar').addEventListener('click', () => $('dlg-alta').close());
-$('dlg-alta-marco').addEventListener('load', () => { if ($('dlg-alta').open) $('dlg-alta-marco').contentWindow.focus(); });
+$('dlg-alta-marco').addEventListener('load', () => {
+  if (!$('dlg-alta').open) return;
+  $('dlg-alta-marco').contentWindow.focus();
+  // El código viaja por postMessage al mismo origen, nunca en la URL del marco.
+  if (llegadaAEnviar) $('dlg-alta-marco').contentWindow.postMessage({ tipo: 'llegada-codigo', codigo: llegadaAEnviar }, location.origin);
+  llegadaAEnviar = '';
+});
+$('llegada-pendiente').addEventListener('click', () => { if (codigoLlegada) abrirAlta(codigoLlegada); });
 addEventListener('message', (e) => {
   if (e.origin !== location.origin || e.source !== $('dlg-alta-marco').contentWindow) return;
   const m = leerMensajeAlta(e.data);
   if (m?.tipo === 'alta') numeroAlta = m.numero;
+  else if (m?.tipo === 'llegada') llegadaAcreditada = true;
   else if (m?.tipo === 'cerrar') $('dlg-alta').close();
 });
 $('dlg-alta').addEventListener('close', async () => {
   $('dlg-alta-marco').src = 'about:blank';   // no deja datos del cliente anterior en la ventana
   const numero = numeroAlta;
   numeroAlta = null;
+  // Llegada acreditada con el código escaneado: se vuelve a buscar con ese mismo código para traer el saldo nuevo.
+  if (llegadaAcreditada && codigoLlegada && !numero) {
+    llegadaAcreditada = false;
+    $('socio').value = codigoLlegada;
+    await buscarSocio();
+  }
   if (numero) {
     $('socio').value = String(numero);
     await buscarSocio();

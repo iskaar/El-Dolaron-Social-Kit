@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.ts';
-import { tienda, PRODUCTO } from './prueba-d1.ts';
+import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
 import { readFileSync } from 'node:fs';
 import { vencerPedidos } from './pedidos.ts';
 import { viernesDeEnvio } from '../public/venta.js';
@@ -128,9 +128,9 @@ test('cupos 50/50, reemplazo atómico, cupo online recuperado y presupuesto', as
   try {
     const online = await p.registrar('uid-0', '+524440000000');
     assert.equal(online.body.premio.importe, 300_00);
-    const first = await p.pedir('/api/portal/llegada', { cliente_id: online.body.id });
+    const first = await p.pedir('/api/portal/llegada', { codigo: await codigoPrueba(p.db, online.body.id) });
     assert.equal(first.cuerpo.premio.importe, 500_00);
-    assert.equal((await p.pedir('/api/portal/llegada', { cliente_id: online.body.id })).cuerpo.premio.importe, 500_00);
+    assert.equal((await p.pedir('/api/portal/llegada', { codigo: await codigoPrueba(p.db, online.body.id) })).cuerpo.premio.importe, 500_00);
     const next = await p.registrar('uid-1', '+524440000001');
     assert.equal(next.body.premio.importe, 300_00); // cupo online devuelto
     for (let n = 2; n <= 50; n++) await p.registrar(`uid-${n}`, `+52444${String(n).padStart(7, '0')}`);
@@ -141,13 +141,93 @@ test('cupos 50/50, reemplazo atómico, cupo online recuperado y presupuesto', as
       const staff = await p.pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Cliente',
         telefono: `555${String(n).padStart(7, '0')}`, pin: '1234', acepta_bases: true, declara_mayor_edad:true });
       assert.equal(staff.status, 201);
-      const arrival = await p.pedir('/api/portal/llegada', { cliente_id: staff.cuerpo.id });
+      const arrival = await p.pedir('/api/portal/llegada', { codigo: await codigoPrueba(p.db, staff.cuerpo.id) });
       assert.equal(arrival.cuerpo.premio === null, n === 50);
     }
     const sums = p.db.prepare('select canal, count(cliente_id) as n, sum(importe) as total from premios_apertura group by canal order by canal').all() as { canal: string; n: number; total: number }[];
     assert.deepEqual(sums.map((s) => ({ ...s })), [{ canal: 'online', n: 50, total: 730000 }, { canal: 'tienda', n: 50, total: 770000 }]);
     assert.equal(p.db.prepare("select sum(importe) as n from dolarones_lotes where origen='regalo'").get()!.n, 15_000_00 + 300_00);
     assert.equal(p.db.prepare("select sum(importe) as n from dolarones_movimientos where tipo in ('regalo','reemplazo')").get()!.n, 15_000_00);
+  } finally { p.cerrar(); }
+});
+
+test('la llegada física se acredita con el código que el cliente genera, no con un número (#839)', async () => {
+  const p = portalDePrueba();
+  try {
+    const a = await p.registrar('uid-a', '+524441110001');
+    const c = await p.pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Cliente', telefono: '5551110002',
+      acepta_bases: true, declara_mayor_edad: true });
+    const codigoA = (await p.llamar('/api/portal/codigo', token('uid-a', '+524441110001'), undefined, 'POST')).body.codigo as string;
+    const codigoC = await codigoPrueba(p.db, c.cuerpo.id);
+    const tienda = (id: string) => p.db.prepare("select count(*) as n from premios_apertura where canal = 'tienda' and cliente_id = ?").get(id)!.n;
+    // Un número o un id tecleado ya no bastan; ni un código con forma pero inventado.
+    for (const cuerpo of [{ cliente_id: a.body.id }, { codigo: String(a.body.numero) }, { codigo: '' }, {}]) {
+      const r = await p.pedir('/api/portal/llegada', cuerpo);
+      assert.equal(r.status, 400, JSON.stringify(cuerpo));
+      assert.match(r.cuerpo.error, /código en su celular/);
+    }
+    assert.equal((await p.pedir('/api/portal/llegada', { codigo: 'DC-AAAAAAAAAAAAAAAA' })).status, 403);
+    assert.equal(p.db.prepare('select count(*) as n from primera_llegada').get()!.n, 0);
+    // La caja, al escanearlo, sabe que la llegada está pendiente.
+    assert.equal((await p.pedir('/api/socios/codigo', { codigo: codigoA })).cuerpo.llegada_pendiente, true);
+    // El código de A no acredita a C aunque la caja mande el id de C: el servidor decide el socio por el código.
+    const cruzado = await p.pedir('/api/portal/llegada', { cliente_id: c.cuerpo.id, codigo: codigoA });
+    assert.equal(cruzado.status, 200);
+    assert.equal(tienda(c.cuerpo.id), 0);
+    assert.equal(tienda(a.body.id), 1);
+    // Con su código C sí; el reintento da lo mismo y no acredita dos veces.
+    assert.equal((await p.pedir('/api/socios/codigo', { codigo: codigoC })).cuerpo.llegada_pendiente, true);
+    const primera = await p.pedir('/api/portal/llegada', { codigo: codigoC });
+    assert.equal(primera.status, 200);
+    assert.equal(primera.cuerpo.premio.canal, 'tienda');
+    const reintento = await p.pedir('/api/portal/llegada', { codigo: codigoC });
+    assert.equal(reintento.cuerpo.premio.lote_id, primera.cuerpo.premio.lote_id);
+    assert.equal(tienda(c.cuerpo.id), 1);
+    assert.equal(p.db.prepare("select count(*) as n from dolarones_movimientos where cliente_id = ? and tipo = 'regalo'").get(c.cuerpo.id)!.n, 1);
+    // Acreditar no consume el código: sigue sirviendo para identificar y pagar, y ya no hay llegada pendiente.
+    assert.equal(p.db.prepare('select venta_id from codigos_cliente where cliente_id = ?').get(c.cuerpo.id)!.venta_id, '');
+    assert.equal((await p.pedir('/api/socios/codigo', { codigo: codigoC })).cuerpo.llegada_pendiente, false);
+  } finally { p.cerrar(); }
+});
+
+test('la llegada rechaza el código vencido, usado o cerrado desde la cuenta (#839)', async () => {
+  const p = portalDePrueba();
+  try {
+    const a = await p.registrar('uid-a', '+524441110003');
+    const nuevo = async () => (await p.llamar('/api/portal/codigo', token('uid-a', '+524441110003'), undefined, 'POST')).body.codigo as string;
+    const tope = (campo: string, valor: string) => p.db.prepare(`update codigos_cliente set ${campo} = ? where cliente_id = ?`).run(valor, a.body.id);
+    const rechazado = async (codigo: string) => {
+      const r = await p.pedir('/api/portal/llegada', { codigo });
+      assert.equal(r.status, 403);
+      assert.equal(p.db.prepare('select count(*) as n from primera_llegada').get()!.n, 0);
+    };
+    let codigo = await nuevo();
+    tope('expira_en', '2020-01-01T00:00:00.000Z');
+    await rechazado(codigo);
+    p.db.prepare('update codigos_cliente set creado_en = ? where cliente_id = ?').run('2020-01-01T00:00:00.000Z', a.body.id);
+    codigo = await nuevo();
+    tope('venta_id', crypto.randomUUID());
+    await rechazado(codigo);
+    p.db.prepare('update codigos_cliente set creado_en = ? where cliente_id = ?').run('2020-01-01T00:00:00.000Z', a.body.id);
+    codigo = await nuevo();
+    await p.llamar('/api/portal/codigo', token('uid-a', '+524441110003'), undefined, 'DELETE');
+    await rechazado(codigo);
+    p.db.prepare('update codigos_cliente set creado_en = ? where cliente_id = ?').run('2020-01-01T00:00:00.000Z', a.body.id);
+    // El mismo código vigente sí acredita, aunque antes lo hayan rechazado otra vez.
+    assert.equal((await p.pedir('/api/portal/llegada', { codigo: await nuevo() })).status, 200);
+  } finally { p.cerrar(); }
+});
+
+test('dos cajas acreditando la misma llegada a la vez dan un solo premio de tienda (#839)', async () => {
+  const p = portalDePrueba();
+  try {
+    await p.registrar('uid-a', '+524441110004');
+    const codigo = (await p.llamar('/api/portal/codigo', token('uid-a', '+524441110004'), undefined, 'POST')).body.codigo as string;
+    const respuestas = await Promise.all([1, 2, 3].map(() => p.pedir('/api/portal/llegada', { codigo })));
+    assert.deepEqual(respuestas.map((r) => r.status), [200, 200, 200]);
+    assert.equal(new Set(respuestas.map((r) => r.cuerpo.premio.lote_id)).size, 1);
+    assert.equal(p.db.prepare("select count(*) as n from premios_apertura where canal = 'tienda' and cliente_id is not null").get()!.n, 1);
+    assert.equal(p.db.prepare('select count(*) as n from primera_llegada').get()!.n, 1);
   } finally { p.cerrar(); }
 });
 
@@ -161,10 +241,10 @@ test('la primera llegada con premio parcialmente usado queda reservada para reso
       lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 90000,
       dolarones: 10000, codigo_socio:codigo.body.codigo });
     assert.equal(venta.status, 201);
-    assert.equal((await p.pedir('/api/portal/llegada', { cliente_id: online.body.id })).status, 409);
+    assert.equal((await p.pedir('/api/portal/llegada', { codigo: await codigoPrueba(p.db, online.body.id) })).status, 409);
     const segundo = await p.pedir('/api/socios', { id: crypto.randomUUID(), nombre: 'Otro',
       telefono: '5552223333', pin: '1234', acepta_bases: true, declara_mayor_edad:true });
-    assert.equal((await p.pedir('/api/portal/llegada', { cliente_id: segundo.cuerpo.id })).cuerpo.premio.importe, 300_00);
+    assert.equal((await p.pedir('/api/portal/llegada', { codigo: await codigoPrueba(p.db, segundo.cuerpo.id) })).cuerpo.premio.importe, 300_00);
     assert.equal(p.db.prepare("select count(*) as n from premios_apertura where canal='tienda' and orden=1 and cliente_id is not null").get()!.n, 0);
   } finally { p.cerrar(); }
 });
@@ -195,7 +275,7 @@ test('un regalo del esquema anterior cierra el alta antes de crear socio o cupo'
     assert.equal(registro.status, 409);
     assert.match(registro.body.error, /conciliación/);
     assert.equal(p.db.prepare("select count(*) as n from clientes where auth_uid = 'nuevo'").get()!.n, 0);
-    assert.equal((await p.pedir('/api/portal/llegada', { cliente_id: anterior.cuerpo.id })).status, 409);
+    assert.equal((await p.pedir('/api/portal/llegada', { codigo: await codigoPrueba(p.db, anterior.cuerpo.id) })).status, 409);
     assert.equal(p.db.prepare('select count(cliente_id) as n from premios_apertura').get()!.n, 0);
   } finally { p.cerrar(); }
 });
@@ -382,7 +462,7 @@ test('un canje entre lectura y reemplazo aborta regalo, cupo y presupuesto junto
       p.db.prepare('update dolarones_lotes set restante=restante-100 where id=?').run(lote);
       return batch(sentencias);
     };
-    const r = await p.pedir('/api/portal/llegada', { cliente_id:a.body.id });
+    const r = await p.pedir('/api/portal/llegada', { codigo: await codigoPrueba(p.db, a.body.id) });
     assert.equal(r.status, 409);
     assert.equal(p.db.prepare('select restante from dolarones_lotes where id=?').get(lote)!.restante, 29900);
     assert.equal(p.db.prepare("select count(*) as n from premios_apertura where canal='tienda' and cliente_id is not null").get()!.n, 0);
@@ -480,7 +560,7 @@ test('sin PREMIOS_APERTURA no se otorgan premios nuevos ni primera llegada (Issu
     assert.equal(p.db.prepare("select count(*) as n from dolarones_lotes where origen = 'regalo'").get()!.n, 0);
     assert.equal(p.db.prepare("select count(*) as n from dolarones_movimientos where tipo = 'regalo'").get()!.n, 0);
     assert.equal(p.db.prepare('select count(cliente_id) as n from premios_apertura').get()!.n, 0);
-    const r = await p.pedir('/api/portal/llegada', { cliente_id: a.body.id });
+    const r = await p.pedir('/api/portal/llegada', { codigo: await codigoPrueba(p.db, a.body.id) });
     assert.equal(r.status, 200);
     assert.equal(r.cuerpo.premio, null);
     assert.equal(p.db.prepare('select count(*) as n from primera_llegada').get()!.n, 0);
@@ -494,7 +574,7 @@ test('apagar la promoción respeta el premio ya otorgado (Issue #611)', async ()
     const a = await p.registrar('uid-previo', '+524440000612');
     assert.equal(a.body.premio.importe, 300_00);
     delete p.env.PREMIOS_APERTURA;
-    const r = await p.pedir('/api/portal/llegada', { cliente_id: a.body.id });
+    const r = await p.pedir('/api/portal/llegada', { codigo: await codigoPrueba(p.db, a.body.id) });
     assert.equal(r.cuerpo.premio.importe, 300_00);
     assert.equal(r.cuerpo.premio.lote_id, a.body.premio.lote_id);
     assert.equal(p.db.prepare('select count(*) as n from primera_llegada').get()!.n, 0);

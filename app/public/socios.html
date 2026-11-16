@@ -83,13 +83,21 @@
     <button id="seguir" type="button" hidden>Seguir con la venta</button>
   </section>
 
-  <details class="panel" style="margin-top:16px">
+  <details id="llegada" class="panel" style="margin-top:16px">
     <summary>Acreditar llegada de un socio ya registrado en línea</summary>
-    <label for="llegada-numero">Número de socio</label>
-    <input id="llegada-numero" type="text" inputmode="numeric">
-    <button id="acreditar-llegada" type="button">Buscar y confirmar llegada</button>
+    <label for="llegada-codigo">Código del cliente (lo muestra en su celular)</label>
+    <input id="llegada-codigo" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="nota">Escanéalo con el lector o con la cámara. Un número escrito no acredita la llegada.</div>
+    <button id="acreditar-llegada" type="button">Acreditar llegada</button>
+    <button id="llegada-camara" type="button">Escanear con la cámara</button>
     <div id="aviso-llegada" role="status"></div>
   </details>
+  <dialog id="dialogo-camara">
+    <h2>Escanear el código del cliente</h2>
+    <div id="lector-camara" style="width:100%;min-height:240px"></div>
+    <div id="camara-info" role="status"></div>
+    <button id="camara-cerrar" type="button">Listo</button>
+  </dialog>
   <details class="panel" style="margin-top:16px">
     <summary>Bases y aviso para leer antes del alta</summary>
     <p id="texto-bases" style="white-space:pre-wrap"></p>
@@ -99,11 +107,12 @@
 
 <script type="module">
 import { textoBienvenidaSocio, enlaceCliente } from '/vender.js';
+import { codigoDeDigitos } from '/code128.js';
+import { abrirCamara } from '/camara.js';
 const $ = (id) => document.getElementById(id);
 const d = (centavos) => `${(centavos / 100).toLocaleString('es-MX')} Dolarones`;
 // Un id por alta: si la red falla despues de guardar, reintentar no crea otro socio.
 let idAlta = crypto.randomUUID();
-let ultimoSocio = null;
 
 // Dentro de la caja (#820): se oculta el encabezado y se avisa del alta por postMessage al mismo origen.
 // Solo viaja el numero de socio. Suelto (pestaña propia, celular) nada de esto aplica.
@@ -117,7 +126,7 @@ if (incrustado) {
   // El lector escribe digitos y Enter: Enter dentro de un campo no registra (solo el boton), y Esc cierra la ventana de la caja.
   $('alta').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.preventDefault(); });
   addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !document.querySelector('#dialogo-cajero[open]')) avisarCaja({ tipo: 'alta-cerrar' });
+    if (e.key === 'Escape' && !document.querySelector('#dialogo-cajero[open], #dialogo-camara[open]')) avisarCaja({ tipo: 'alta-cerrar' });
   });
 }
 
@@ -151,8 +160,6 @@ $('alta').addEventListener('submit', async (e) => {
     });
     const socio = await r.json();
     if (!r.ok) { $('aviso').textContent = socio.error ?? 'No se pudo registrar.'; return; }
-    ultimoSocio = socio;
-    $('acreditar-alta').disabled = false;
 
     $('listo-numero').textContent = `#${socio.numero}`;
     $('listo-nombre').textContent = socio.nombre;
@@ -182,30 +189,73 @@ $('otro').addEventListener('click', () => {
   $('nombre').focus();
 });
 
-async function acreditar(socio, aviso) {
-  if (!confirm(`¿Confirmas la llegada física de #${socio.numero}, ${socio.nombre}? Si la promoción de apertura está activa, el premio que se otorgue no se puede cambiar desde esta pantalla.`)) return;
-  const r = await fetch('/api/portal/llegada', { method:'POST', headers:{ 'content-type':'application/json' },
-    body:JSON.stringify({ cliente_id:socio.id }) });
+// #839: la llegada se acredita con el código DC- que el cliente muestra en su cuenta; el servidor decide el socio por el código.
+// El lector escribe dígitos y Enter: sin un código válido no se acredita nada.
+const SIN_CODIGO = 'Pide al cliente su código en su celular.';
+async function acreditar(texto, aviso) {
+  const codigo = codigoDeDigitos(texto) ?? String(texto).trim();
+  if (!/^DC-[A-Za-z0-9_-]{16}$/.test(codigo)) { aviso.textContent = SIN_CODIGO; return false; }
+  const busqueda = await fetch('/api/socios/codigo', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ codigo }) });
+  const socio = await busqueda.json();
+  if (!busqueda.ok) throw new Error(socio.error || 'No se pudo leer el código.');
+  if (!socio.llegada_pendiente) { aviso.textContent = `#${socio.numero}, ${socio.nombre}: no tiene una llegada por acreditar.`; return false; }
+  if (!confirm(`¿Confirmas la llegada física de #${socio.numero}, ${socio.nombre}? Si la promoción de apertura está activa, el premio que se otorgue no se puede cambiar desde esta pantalla.`)) return false;
+  const r = await fetch('/api/portal/llegada', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ codigo }) });
   const cuerpo = await r.json();
   if (!r.ok) throw new Error(cuerpo.error || 'No se pudo acreditar. Intenta otra vez.');
   aviso.textContent = cuerpo.premio ? `Llegada acreditada. Premio: ${d(cuerpo.premio.importe)}, vigente hasta ${new Date(cuerpo.premio.vence_en).toLocaleDateString('es-MX')}.` : 'Llegada acreditada; sin premio nuevo disponible.';
+  if (incrustado) avisarCaja({ tipo: 'alta-llegada' });
+  return true;
 }
-$('acreditar-alta').addEventListener('click', async () => {
-  $('acreditar-alta').disabled = true;
-  try { await acreditar(ultimoSocio, $('listo-saldo')); }
-  catch (e) { $('listo-saldo').textContent = e.message; }
-  finally { $('acreditar-alta').disabled = false; }
-});
-$('acreditar-llegada').addEventListener('click', async () => {
+async function acreditarDelCampo() {
+  const campo = $('llegada-codigo'), aviso = $('aviso-llegada');
   $('acreditar-llegada').disabled = true;
-  try {
-    const r = await fetch('/api/socios?q=' + encodeURIComponent($('llegada-numero').value.trim()));
-    const socio = await r.json();
-    if (!r.ok) throw new Error(socio.error);
-    await acreditar(socio, $('aviso-llegada'));
-  } catch (e) { $('aviso-llegada').textContent = e.message || 'Sin red. Intenta de nuevo.'; }
+  aviso.textContent = '';
+  try { if (await acreditar(campo.value, aviso)) campo.value = ''; }
+  catch (e) { aviso.textContent = e.message || 'Sin red. Intenta de nuevo.'; }
   finally { $('acreditar-llegada').disabled = false; }
+}
+function pedirCodigo() {
+  $('llegada').open = true;
+  $('aviso-llegada').textContent = SIN_CODIGO;
+  $('llegada-codigo').focus();
+}
+$('acreditar-alta').addEventListener('click', pedirCodigo);
+$('acreditar-llegada').addEventListener('click', acreditarDelCampo);
+$('llegada-codigo').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); acreditarDelCampo(); } });
+// La caja manda el código que ya escaneó en «Buscar socio» para acreditarlo aquí mismo (mismo origen, solo desde la caja).
+addEventListener('message', (e) => {
+  if (!incrustado || e.origin !== location.origin || e.source !== parent || e.data?.tipo !== 'llegada-codigo' || typeof e.data.codigo !== 'string') return;
+  $('llegada').open = true;
+  $('llegada-codigo').value = e.data.codigo;
+  acreditarDelCampo();
 });
+let apagarCamara = null;
+async function cerrarCamara() {
+  const apagar = apagarCamara;
+  apagarCamara = null;
+  await apagar?.();
+  $('dialogo-camara').close();
+  $('llegada-codigo').focus();
+}
+$('llegada-camara').addEventListener('click', async () => {
+  const info = $('camara-info');
+  info.textContent = 'Abriendo la cámara…';
+  $('dialogo-camara').showModal();
+  try {
+    apagarCamara = await abrirCamara('lector-camara', (texto) => {
+      if (!apagarCamara) return;
+      const ok = /^DC-/.test(codigoDeDigitos(texto) ?? texto);
+      navigator.vibrate?.(ok ? 60 : [80, 60, 80]);
+      if (!ok) { info.textContent = SIN_CODIGO; return; }
+      $('llegada-codigo').value = texto;
+      cerrarCamara().then(acreditarDelCampo);
+    });
+    info.textContent = 'Lista: apunta al código del cliente.';
+  } catch (e) { info.textContent = e.message; }
+});
+$('camara-cerrar').addEventListener('click', cerrarCamara);
+$('dialogo-camara').addEventListener('cancel', (e) => { e.preventDefault(); cerrarCamara(); });
 try {
   const legal = await (await fetch('/api/socios/legal')).json();
   $('texto-bases').textContent = legal.bases;
