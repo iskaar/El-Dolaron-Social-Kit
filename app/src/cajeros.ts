@@ -7,7 +7,7 @@
  * correo del dueno (ver worker.ts).
  */
 import { hashPin, hex, INTENTOS_PIN, BLOQUEO_PIN } from './dolarones.ts';
-import { leerUsuario, leerRoles, type Usuario, type Rol } from './cuentas.ts';
+import { leerUsuario, leerRoles, tiendaDe, TIENDAS, esTienda, type Usuario, type Rol } from './cuentas.ts';
 
 export const ENCABEZADO = 'x-cajero';
 // ponytail: la sesion aguanta un turno largo; el bloqueo por 1 hora sin uso lo
@@ -25,8 +25,15 @@ function json(cuerpo: unknown, status = 200): Response {
   });
 }
 
-/** El cajero en turno segun `x-cajero`, o null. Desactivarlo o quitarle el rol corta su sesion al momento. */
-export async function cajeroEnTurno(request: Request, env: Env): Promise<Usuario | null> {
+/**
+ * Cajero, supervisor y quien atiende solo valen en la tienda de su cuenta (#850: sin tienda = Soledad, como tiendaDe); el dueño, en cualquiera.
+ * `tienda` es la de la terminal (la decide el servidor, nunca el navegador): '' = computadora sin tienda, donde solo vale el dueño.
+ */
+export const valeEnTienda = (cuenta: { roles: Rol[]; tienda: string }, tienda: string): boolean =>
+  cuenta.roles.includes('dueno') || tiendaDe(cuenta as Usuario) === tienda;
+
+/** El cajero en turno segun `x-cajero`, o null. Desactivarlo, quitarle el rol o ser de otra tienda corta su sesion al momento. */
+export async function cajeroEnTurno(request: Request, env: Env, tienda: string): Promise<Usuario | null> {
   const token = request.headers.get(ENCABEZADO);
   if (!token) return null;
   const fila = await env.DB.prepare('select correo from sesiones_cajero where token_hash = ? and expira_en > ?')
@@ -34,36 +41,41 @@ export async function cajeroEnTurno(request: Request, env: Env): Promise<Usuario
     .first<{ correo: string }>();
   if (!fila) return null;
   const usuario = await leerUsuario(env, fila.correo);
-  return usuario?.activo && puedeCobrar(usuario.roles) ? usuario : null;
+  return usuario?.activo && puedeCobrar(usuario.roles) && valeEnTienda(usuario, tienda) ? usuario : null;
 }
 
 /** Los nombres para la pantalla de bloqueo: quien puede cobrar y ya tiene PIN. */
-export async function listarCajeros(env: Env): Promise<Response> {
+export async function listarCajeros(env: Env, tienda: string): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `select correo, nombre, roles from usuarios where activo = 1 and pin_hash != '' order by nombre`,
-  ).all<{ correo: string; nombre: string; roles: string }>();
-  return json(results.filter((u) => puedeCobrar(leerRoles(u.roles))).map(({ correo, nombre }) => ({ correo, nombre })));
+    `select correo, nombre, roles, tienda from usuarios where activo = 1 and pin_hash != '' order by nombre`,
+  ).all<{ correo: string; nombre: string; roles: string; tienda: string }>();
+  return json(results.filter((u) => puedeCobrar(leerRoles(u.roles)) && valeEnTienda({ roles: leerRoles(u.roles), tienda: u.tienda }, tienda))
+    .map(({ correo, nombre }) => ({ correo, nombre })));
 }
 
 export const atiende = (roles: Rol[]) => roles.includes('cajero') || roles.includes('capturista');
 
-/** Quien puede figurar como «quien atendio» una venta (#750): cuentas activas con rol cajero o capturista. */
-export async function vendedoras(env: Env): Promise<{ correo: string; nombre: string }[]> {
-  const { results } = await env.DB.prepare(`select correo, nombre, roles from usuarios where activo = 1 order by nombre`)
-    .all<{ correo: string; nombre: string; roles: string }>();
-  return results.filter((u) => atiende(leerRoles(u.roles))).map(({ correo, nombre }) => ({ correo, nombre }));
+/**
+ * Quien puede figurar como «quien atendio» una venta (#750): cuentas activas con rol cajero o capturista. Con `tienda` (la caja, #850) solo las de
+ * esa tienda; sin ella (nomina: ligar un empleado a su cuenta) todas.
+ */
+export async function vendedoras(env: Env, tienda?: string): Promise<{ correo: string; nombre: string }[]> {
+  const { results } = await env.DB.prepare(`select correo, nombre, roles, tienda from usuarios where activo = 1 order by nombre`)
+    .all<{ correo: string; nombre: string; roles: string; tienda: string }>();
+  return results.filter((u) => atiende(leerRoles(u.roles)) && (tienda === undefined || valeEnTienda({ roles: leerRoles(u.roles), tienda: u.tienda }, tienda)))
+    .map(({ correo, nombre }) => ({ correo, nombre }));
 }
 
-export async function listarVendedoras(env: Env): Promise<Response> {
-  return json(await vendedoras(env));
+export async function listarVendedoras(env: Env, tienda: string): Promise<Response> {
+  return json(await vendedoras(env, tienda));
 }
 
-export async function esVendedora(env: Env, correo: string): Promise<boolean> {
+export async function esVendedora(env: Env, correo: string, tienda?: string): Promise<boolean> {
   const usuario = await leerUsuario(env, correo);
-  return !!usuario?.activo && atiende(usuario.roles);
+  return !!usuario?.activo && atiende(usuario.roles) && (tienda === undefined || valeEnTienda(usuario, tienda));
 }
 
-interface FilaPin { correo: string; nombre: string; roles: string; caja: string; pin_hash: string; pin_sal: string; pin_bloqueo: string }
+interface FilaPin { correo: string; nombre: string; roles: string; tienda: string; caja: string; pin_hash: string; pin_sal: string; pin_bloqueo: string }
 
 /**
  * Verifica el PIN de 6 digitos de `correo` (PBKDF2, contador de fallos y bloqueo
@@ -75,7 +87,7 @@ export async function verificarPin(
 ): Promise<{ fila: FilaPin } | { error: string; status: number }> {
   if (!/^\d{6}$/.test(pin)) return { error: 'El PIN es de 6 digitos.', status: 400 };
   const fila = await env.DB.prepare(
-    `select correo, nombre, roles, caja, pin_hash, pin_sal, pin_bloqueo from usuarios
+    `select correo, nombre, roles, tienda, caja, pin_hash, pin_sal, pin_bloqueo from usuarios
      where correo = ? and activo = 1 and pin_hash != ''`,
   )
     .bind(correo)
@@ -127,14 +139,17 @@ export async function verificarPin(
  * y el bloqueo de uno no frena al otro: 5 intentos por cada contador, por caja, siguen siendo ~35 intentos por ventana contra 1,000,000 de PIN.
  */
 export async function verificarPinAprobacion(
-  env: Env, correo: string, pin: string, caja: string, admite: (roles: Rol[]) => boolean,
+  env: Env, correo: string, pin: string, caja: string, admite: (roles: Rol[]) => boolean, tienda: string,
 ): Promise<{ fila: FilaPin } | { error: string; status: number }> {
   if (!/^\d{6}$/.test(pin)) return { error: 'El PIN es de 6 digitos.', status: 400 };
   const fila = await env.DB.prepare(
-    `select correo, nombre, roles, caja, pin_hash, pin_sal, pin_bloqueo from usuarios
+    `select correo, nombre, roles, tienda, caja, pin_hash, pin_sal, pin_bloqueo from usuarios
      where correo = ? and activo = 1 and pin_hash != ''`,
   ).bind(correo).first<FilaPin>();
   if (!fila || !admite(leerRoles(fila.roles))) return { error: 'Sin PIN. Pideselo al dueno.', status: 404 };
+  // #850: un supervisor aprueba solo en su tienda (el dueño, en todas). Antes de contar el intento: no gasta los del aprobador.
+  if (!valeEnTienda({ roles: leerRoles(fila.roles), tienda: fila.tienda }, tienda))
+    return { error: 'Esa persona es de otra tienda: pide el PIN a un supervisor de esta tienda o al dueño.', status: 403 };
 
   const ahora = new Date();
   const ahoraIso = ahora.toISOString();
@@ -164,9 +179,18 @@ export async function verificarPinAprobacion(
   return { fila };
 }
 
-export async function entrar(request: Request, env: Env): Promise<Response> {
+export async function entrar(request: Request, env: Env, tienda: string): Promise<Response> {
   const cuerpo = (await request.json().then((c) => c ?? {}, () => ({}))) as { correo?: unknown; pin?: unknown };
   const correo = String(cuerpo.correo ?? '').trim().toLowerCase();
+  // #850: la tienda se compara ANTES del PIN, sin contar intento. Solo dice que esa cuenta es de otra tienda (ya no sale en la lista de esta caja);
+  // despues del PIN habria gastado PBKDF2 y fallos del cajero en una caja que no es suya, y exigido el PIN correcto para dar el mismo aviso.
+  const cuenta = await leerUsuario(env, correo);
+  if (cuenta?.activo && puedeCobrar(cuenta.roles) && !valeEnTienda(cuenta, tienda)) {
+    const de = tiendaDe(cuenta);
+    return json({ error: esTienda(tienda)
+      ? `Tu cuenta es de ${esTienda(de) ? TIENDAS[de].nombre : de}; esta caja es de ${TIENDAS[tienda].nombre}. Pídele al dueño que te cambie de tienda.`
+      : 'Esta computadora no tiene tienda asignada. Pídele al dueño que se la asigne en Cuentas.' }, 403);
+  }
   const verificado = await verificarPin(env, correo, String(cuerpo.pin ?? ''));
   if ('error' in verificado) return json({ error: verificado.error }, verificado.status);
   const { fila } = verificado;

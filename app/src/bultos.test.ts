@@ -28,9 +28,11 @@ function montar() {
   const terminal = async (pc: string, cajero = ANA) => {   // la computadora de caja de una tienda con el PIN del cajero
     if (!conPin) { como(DUENO); await t.pedir('/api/cuentas/pin', { correo: ANA, pin: PIN }, 'PUT'); conPin = true; }   // poner el PIN cierra sus sesiones: una sola vez
     como(pc);
+    // #850: la cajera solo vale en la tienda de su cuenta; estas pruebas la mueven de terminal, asi que su cuenta sigue a la computadora en turno.
+    t.db.prepare('update usuarios set tienda = (select tienda from usuarios where correo = ?) where correo = ?').run(pc, cajero);
     const token = sesiones.get(pc) ?? (await t.pedir('/api/cajeros/entrar', { correo: cajero, pin: PIN })).cuerpo.token as string;
     sesiones.set(pc, token);
-    return (ruta: string, cuerpo?: unknown, metodo = 'POST') => { como(pc); return t.pedir(ruta, cuerpo, metodo, { 'x-cajero': token }); };
+    return (ruta: string, cuerpo?: unknown, metodo = 'POST') => { como(pc); t.db.prepare('update usuarios set tienda = (select tienda from usuarios where correo = ?) where correo = ?').run(pc, cajero); return t.pedir(ruta, cuerpo, metodo, { 'x-cajero': token }); };
   };
   const yo = (correo: string) => (ruta: string, cuerpo?: unknown, metodo = 'POST') => { como(correo); return t.pedir(ruta, cuerpo, metodo); };
   const nuevoBulto = async (quien: ReturnType<typeof yo>, destino = 'salk', origen?: string) => {

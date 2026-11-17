@@ -9,7 +9,7 @@ import { cajaDe, nombreCaja } from './corte.ts';
 import { estadoVigente } from './descuentos.ts';
 import { sentenciasMover } from './existencias.ts';
 import { leerUsuario, leerRoles, apruebaDinero, TIENDA_CENTRAL, tiendaDeCaja } from './cuentas.ts';
-import { verificarPinAprobacion } from './cajeros.ts';
+import { verificarPinAprobacion, valeEnTienda } from './cajeros.ts';
 import { sentenciasDeReverso } from './reversos.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
 import { avisarDueno } from './avisos.ts';
@@ -114,22 +114,24 @@ export async function cancelarCore(
 }
 
 /** Los que pueden aprobar con PIN en la caja que salga dinero (dueño y supervisores con PIN): lo que ofrece el 403 de cancelar y de devolver dinero. Los descuentos y cupones siguen usando solo duenos. */
-export async function aprobadoresDeDinero(env: Env): Promise<{ correo: string; nombre: string }[]> {
+export async function aprobadoresDeDinero(env: Env, tienda: string): Promise<{ correo: string; nombre: string }[]> {
   const { results } = await env.DB.prepare(
-    `select correo, nombre, roles from usuarios where activo = 1 and pin_hash != '' order by nombre`,
-  ).all<{ correo: string; nombre: string; roles: string }>();
-  return results.filter((u) => apruebaDinero(leerRoles(u.roles))).map(({ correo, nombre }) => ({ correo, nombre }));
+    `select correo, nombre, roles, tienda from usuarios where activo = 1 and pin_hash != '' order by nombre`,
+  ).all<{ correo: string; nombre: string; roles: string; tienda: string }>();
+  // #850: el supervisor de otra tienda no se ofrece (no aprobaria); el dueño, en todas.
+  return results.filter((u) => apruebaDinero(leerRoles(u.roles)) && valeEnTienda({ roles: leerRoles(u.roles), tienda: u.tienda }, tienda))
+    .map(({ correo, nombre }) => ({ correo, nombre }));
 }
 
 /**
  * Aprobacion con PIN en la caja (#837): el PIN de otra cuenta con rol de dueño o supervisor, con 5 intentos y 15 minutos por aprobador
  * y por caja (verificarPinAprobacion). Quien cobra no se aprueba a si mismo: si ya es dueño o supervisor, ni llega aqui (cancela directo).
  */
-export async function aprobadorConPin(env: Env, solicitante: string, aprobador: unknown, pin: unknown, caja = ''):
+export async function aprobadorConPin(env: Env, solicitante: string, aprobador: unknown, pin: unknown, caja: string, tienda: string):
   Promise<{ por: string } | { error: string; status: number }> {
   const por = String(aprobador).trim().toLowerCase();
   // Los fallos se cuentan aparte de los del acceso a la caja (verificarPinAprobacion, migración 082): equivocarse aquí no bloquea al supervisor.
-  const verificado = await verificarPinAprobacion(env, por, String(pin ?? ''), caja, apruebaDinero);
+  const verificado = await verificarPinAprobacion(env, por, String(pin ?? ''), caja, apruebaDinero, tienda);
   if ('error' in verificado) return verificado;
   if (por === solicitante) return { error: 'No puedes aprobar tu propia devolución: pide a otra persona.', status: 403 };
   return { por };
@@ -194,7 +196,7 @@ export async function cancelarVenta(id: string, request: Request, env: Env, corr
 
   // Aprobada en la caja con el PIN del dueno: se cancela y se deja el rastro en el mismo batch.
   if (cuerpo.aprobador) {
-    const aprobo = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin, caja);
+    const aprobo = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin, caja, tienda);
     if ('error' in aprobo) return json({ error: aprobo.error }, aprobo.status);
     return responder(await cancelarCore(env, id, motivo, correo, cuerpo.caja, tienda, (ahora) => [
       insertarSolicitud(env, crypto.randomUUID(), correo, nombre, motivo, { ...datos, via: 'pin' }, ahora, aprobo.por),
@@ -219,7 +221,7 @@ export async function cancelarVenta(id: string, request: Request, env: Env, corr
   return json({
     requiere_aprobacion: true,
     error: `Pasaron más de ${VENTANA_CANCELACION_MS / 60_000} minutos: necesita aprobación del supervisor o del dueño.`,
-    duenos: await aprobadoresDeDinero(env),   // dueño y supervisores con PIN; la solicitud a distancia sigue yendo al dueño
+    duenos: await aprobadoresDeDinero(env, tienda),   // dueño y supervisores de esta tienda con PIN; la solicitud a distancia sigue yendo al dueño
   }, 403);
 }
 

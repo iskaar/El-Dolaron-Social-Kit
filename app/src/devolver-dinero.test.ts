@@ -397,10 +397,10 @@ test('el PIN de otro cajero (sin rol de supervisor) no aprueba, ni devolviendo n
 
 test('nadie se aprueba a sí mismo: aunque su PIN y su rol sean válidos, quien cobra no es su propio aprobador', async () => {
   const { env } = await montar();
-  const yo = await aprobadorConPin(env, SUP, SUP, PIN_SUP, 'Caja 1');   // la defensa del servidor, aislada: un supervisor que cobra ni llega aquí
+  const yo = await aprobadorConPin(env, SUP, SUP, PIN_SUP, 'Caja 1', 'soledad');   // la defensa del servidor, aislada: un supervisor que cobra ni llega aquí
   assert.deepEqual({ status: (yo as { status: number }).status, error: (yo as { error: string }).error },
     { status: 403, error: 'No puedes aprobar tu propia devolución: pide a otra persona.' });
-  assert.deepEqual(await aprobadorConPin(env, ANA, SUP, PIN_SUP, 'Caja 1'), { por: SUP });
+  assert.deepEqual(await aprobadorConPin(env, ANA, SUP, PIN_SUP, 'Caja 1', 'soledad'), { por: SUP });
 });
 
 test('el bloqueo por PIN malos de aprobación es de 5 intentos, también para un supervisor, y es por caja', async () => {

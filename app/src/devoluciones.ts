@@ -262,7 +262,7 @@ export async function cancelarPieza(
 
   // Aprobada en la caja con el PIN del dueno: se devuelve y se deja el rastro en el mismo batch.
   if (cuerpo.aprobador) {
-    const aprobo = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin, caja);
+    const aprobo = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin, caja, tienda);
     if ('error' in aprobo) return json({ error: aprobo.error }, aprobo.status);
     return responder(await escribirPieza(env, ventaId, pedido, prep, correo, tienda, (ahora) => [
       insertarSolicitud(env, id, correo, nombre, motivo, { ...datos, via: 'pin' }, ahora, aprobo.por, 'devolucion'),
@@ -289,7 +289,7 @@ export async function cancelarPieza(
     requiere_aprobacion: true,
     error: 'Devolver dinero necesita la aprobación del supervisor o del dueño. Ofrece primero «Devolver en cupón» (lo haces tú). '
       + 'Si el cliente insiste en dinero: aprueba con el PIN del supervisor o del dueño, o envía la solicitud al dueño (si esta pantalla no lo ofrece, recarga la caja).',
-    duenos: await aprobadoresDeDinero(env),   // dueño y supervisores con PIN
+    duenos: await aprobadoresDeDinero(env, tienda),   // dueño y supervisores de esta tienda con PIN
   }, 403);
 }
 

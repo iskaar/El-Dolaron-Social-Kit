@@ -12,7 +12,7 @@ const ANA = 'ana@prueba.mx';
 function montar(tiendaPc: string, cajaAna = '') {
   const t = tienda();
   t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, caja, tienda, creado_en, actualizado_en) values
-    (?, 'Computadora', 'computadora', 1, '', ?, '', ''), (?, 'Ana', 'cajero', 1, ?, '', '', '')`).run(PC, tiendaPc, ANA, cajaAna);
+    (?, 'Computadora', 'computadora', 1, '', ?, '', ''), (?, 'Ana', 'cajero', 1, ?, ?, '', '')`).run(PC, tiendaPc, ANA, cajaAna, tiendaPc);   // #850: Ana es de la tienda de la terminal (una cajera de otra no entra)
   const como = (correo: string) => { (t.env as unknown as { DEV_USUARIO: string }).DEV_USUARIO = correo; };
   const entrar = async () => {
     como(DUENO);
@@ -105,8 +105,13 @@ test('la computadora sin tienda no cobra (R2): 403 en lo de caja, después del P
   assert.equal(sinPin.status, 401);
   como(DUENO);
   await pedir('/api/cuentas/pin', { correo: ANA, pin: '482913' }, 'PUT');
+  await pedir('/api/cuentas/pin', { correo: DUENO, pin: '111222' }, 'PUT');
   como(PC);
-  const token = (await pedir('/api/cajeros/entrar', { correo: ANA, pin: '482913' })).cuerpo.token;
+  // #850: una cajera no entra en una computadora sin tienda (antes entraba y recibia este 403 despues); el dueño si, y la caja sigue sin cobrar.
+  const rechazo = await pedir('/api/cajeros/entrar', { correo: ANA, pin: '482913' });
+  assert.equal(rechazo.status, 403);
+  assert.match(rechazo.cuerpo.error, /no tiene tienda/);
+  const token = (await pedir('/api/cajeros/entrar', { correo: DUENO, pin: '111222' })).cuerpo.token;
   const r = await pedir('/api/ventas', { id: crypto.randomUUID(), lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 25000 }, 'POST', { 'x-cajero': token });
   assert.equal(r.status, 403);
   assert.match(r.cuerpo.error, /tienda/);

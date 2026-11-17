@@ -126,14 +126,14 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
     const usuario = await leerUsuario(env, correo);
     if (usuario && apruebaDinero(usuario.roles)) aprobo = correo;
     else if (cuerpo.aprobador) {
-      const aprobada = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin, caja);
+      const aprobada = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin, caja, tienda);
       if ('error' in aprobada) return json({ error: aprobada.error }, aprobada.status);
       aprobo = aprobada.por;
     } else {
       return json({
         requiere_aprobacion: true,
         error: 'Este retiro necesita la aprobación del supervisor o del dueño: teclea su PIN en esta ventana.',
-        duenos: await aprobadoresDeDinero(env),
+        duenos: await aprobadoresDeDinero(env, tienda),
       }, 403);
     }
   }
