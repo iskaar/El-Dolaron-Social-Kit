@@ -365,7 +365,7 @@ const DETALLE = {
             <span class="nota">${notaML(cs.mercado_libre)}</span></div></article>`,
         `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Del cobrado a lo vendido</p>
           ${fila('Total de los tickets del mes', q.cobrado)}${fila('Devoluciones de piezas', q.devoluciones, '− ')}${fila('Tickets cancelados', q.cancelaciones, '− ')}
-          ${q.otros_duenos > 0 ? fila('Mercancía de otro dueño', q.otros_duenos, '− ') : ''}
+          ${q.otros_duenos > 0 ? fila('Mercancía de otro propietario', q.otros_duenos, '− ') : ''}
           <div class="tabla-cuadre"><div class="fila"><span>Ventas del mes</span><span>${pesos(q.vendido)}</span></div></div></article>`,
         `<article class="tarjeta" style="gap:10px"><p class="etiqueta">Descuentos que dimos</p>
           <div class="fila"><span>Promoción</span><span>${pesos(ds.promo)} · ${entero(ds.promo_tickets)} compras</span></div>
@@ -375,7 +375,7 @@ const DETALLE = {
           '<strong>Ventas:</strong> lo cobrado ya sin descuentos, devoluciones ni cancelaciones, solo de la tienda. No incluye Mercado Libre. Cada día va de las 12 a. m. a las 12 a. m., hora de la tienda (centro de México).',
           '<strong>Esta semana:</strong> de lunes a hoy, contra la semana anterior hasta el mismo día.',
           '<strong>Por canal:</strong> tienda es lo cobrado en la caja; WhatsApp, los pedidos apartados por WhatsApp. Con menos de 5 revendedoras con ventas, lo suyo va sumado a WhatsApp.',
-          '<strong>Del cobrado a lo vendido:</strong> el total de los tickets del mes menos lo devuelto por piezas y lo cancelado (y lo de otros dueños, si hay) da las ventas del mes.',
+          '<strong>Del cobrado a lo vendido:</strong> el total de los tickets del mes menos lo devuelto por piezas y lo cancelado (y lo de otros propietarios, si hay) da las ventas del mes.',
           TEXTO_ML,
         ]),
       ];
@@ -444,7 +444,7 @@ const DETALLE = {
         vendidas.length ? `<article class="tarjeta" style="gap:12px"><p class="etiqueta">Días que tardó en venderse lo ya vendido</p>
           ${vendidas.map((c) => `<div class="fila"><span>${escapar(categoria(c.categoria))}</span><span>${dias(c.dias_promedio)}</span></div>`).join('')}</article>` : '',
         detalleDe([
-          '<strong>Mercancía en el piso:</strong> piezas con existencia y etiqueta, valoradas a su precio de venta. Sin las bandas ni el inventario de otros dueños.',
+          '<strong>Mercancía en el piso:</strong> piezas con existencia y etiqueta, valoradas a su precio de venta. Sin las bandas ni el inventario de otros propietarios.',
           '<strong>Cuánto lleva:</strong> semanas completas desde que la pieza se capturó.',
           '<strong>Días que tardó en venderse:</strong> promedio histórico entre capturar una pieza y venderla, por categoría; solo categorías con 3 o más ventas.',
         ]),

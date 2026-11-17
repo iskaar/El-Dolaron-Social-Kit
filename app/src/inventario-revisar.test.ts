@@ -4,7 +4,7 @@ import { cuerpoRevision, existenciaNueva, filtrarRevision, diaTienda, ocultoEnLi
 import worker from './worker.ts';
 import { tienda, PRODUCTO } from './prueba-d1.ts';
 
-test('Revisar preserva precio/destino, no manda stock sin tocarlo y solo dueño recalcula una etiquetada',()=>{
+test('Revisar preserva precio/destino, no manda stock sin tocarlo y solo gerencia recalcula una etiquetada',()=>{
   const p={nombre:'Lámpara',marca:'',talla:'',categoria:'hogar',estado_fisico:'nuevo',precio:24900,precio_lista:50000,destino:'etiqueta',stock:9,codigo:'ED-000001'};
   const campos={...p,precio:'200',precio_lista:'500',stock:'9'};
   assert.equal(cuerpoRevision(p,campos,false).cuerpo.precio,24900);

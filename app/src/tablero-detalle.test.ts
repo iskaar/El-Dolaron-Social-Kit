@@ -233,7 +233,7 @@ test('vistas: una que no existe es 404, solo se lee con GET y cada vista tiene s
     assert.equal(r.status, 404, nombre);
     assert.equal(JSON.stringify(r.cuerpo).includes('Vista'), true);
   }
-  assert.equal((await t.pedir('/api/tablero?vista=ventas', {}, 'POST')).status, 405);   // el dueno pasa el permiso; la ruta solo lee
+  assert.equal((await t.pedir('/api/tablero?vista=ventas', {}, 'POST')).status, 405);   // gerencia pasa el permiso; la ruta solo lee
   assert.equal((await t.pedir('/api/tablero/ventas', undefined, 'GET')).status, 404);     // la ruta es una sola
 
   // Una cache en memoria en lugar de caches.default: la llave lleva el host y la vista.

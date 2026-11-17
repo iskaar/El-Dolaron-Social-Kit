@@ -7,7 +7,7 @@ import { tienda } from './prueba-d1.ts';
 const pieza = (extra: Record<string, unknown> = {}) =>
   ({ id: crypto.randomUUID(), nombre: 'Licuadora Oster', categoria: 'hogar', estado_fisico: 'nuevo', precio_lista: 89900, stock: 2, ...extra });
 
-test('el dueno captura sin foto: la pieza queda revisada, con precio calculado y lista para etiqueta', async () => {
+test('gerencia captura sin foto: la pieza queda revisada, con precio calculado y lista para etiqueta', async () => {
   const { db, pedir } = tienda();
   const cuerpo = pieza();
   const r = await pedir('/api/borradores/manual', cuerpo);

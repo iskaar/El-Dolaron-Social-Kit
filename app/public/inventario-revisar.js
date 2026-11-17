@@ -46,7 +46,7 @@ export function cuerpoRevision(p, campos, dueno, recalcular=false) {
   const e=existenciaNueva(p,campos);if(e?.error)return e;
   const cuerpo={...r.cuerpo,...(e&&p.estado_analisis!=='listo'?{stock:e.valor,stock_esperado:e.esperado}:{}),categoria:campos.categoria||p.categoria,estado_fisico:campos.estado_fisico||p.estado_fisico};
   // #708: solo cambió el grado y el precio sigue igual → cuerpoCorreccion ya omitió el precio (el servidor recalcula con la banda).
-  if(recalcular){if(p.codigo&&!dueno)return {error:'El precio lo cambia el dueño'};delete cuerpo.precio;}
+  if(recalcular){if(p.codigo&&!dueno)return {error:'El precio lo cambia gerencia'};delete cuerpo.precio;}
   return {cuerpo};
 }
 
@@ -73,7 +73,7 @@ export async function iniciar(ctx) {
   mas.setAttribute('aria-label','Más acciones');guardarTodo.hidden=true;
   controles.append(botonFiltros);
   if(puedeEditar)controles.append(guardarTodo);
-  else controles.append(boton('Solo consulta',()=>hoja('Solo consulta',nodo('p','Tu cuenta no puede editar. Pídelo al dueño.')),'solo-consulta'));
+  else controles.append(boton('Solo consulta',()=>hoja('Solo consulta',nodo('p','Tu cuenta no puede editar. Pídelo a gerencia.')),'solo-consulta'));
   controles.append(mas);
   izquierda.append(chips,controles,activos,nota,lista,barra);
   const vacio=(texto,accion)=>{const li=nodo('li',undefined,'vacio');li.append(nodo('p',texto));if(accion)li.append(accion);return li;};

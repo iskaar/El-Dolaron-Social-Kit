@@ -329,11 +329,11 @@ export function htmlVista(d) {
       ${panel('ctl-motivos', 'Por motivo', 'movimientos · importe', motivosHtml(d), d.motivos.lista.length ? tablaMotivos(d) : '', textoMotivos(d))}
       ${panel('ctl-demora', 'Tiempo entre la venta y el movimiento', 'tickets completos y piezas',
         `${leyendaSeries([{ nombre: 'Ticket completo', color: 'var(--serie-1)' }, { nombre: 'Pieza devuelta', color: 'var(--serie-2)' }])}<div data-grafica="demora"></div>`, tablaDemora(d),
-        'Hasta 5 minutos es lo que el cajero puede cancelar sin aprobación del dueño. Lo que llega otro día suele ser una devolución legítima, pero es lo que más conviene mirar.')}
+        'Hasta 5 minutos es lo que el cajero puede cancelar sin aprobación de gerencia. Lo que llega otro día suele ser una devolución legítima, pero es lo que más conviene mirar.')}
     </div>
     ${panel('ctl-persona', 'Por persona', 'periodo elegido', `<div style="overflow-x:auto">${tablaPersonas(d)}</div>`, '',
       `«% de sus tickets» es lo que la persona canceló entre los tickets que ella cobró; pueden ser tickets de otra persona. Los descuentos son los aprobados fuera de la promoción:
-       «pedidos» por quien los pidió en la caja y «aprobados» por quien los autorizó; «autoaprobados» los pidió y aprobó la misma cuenta (el dueño que descuenta por su cuenta).
+       «pedidos» por quien los pidió en la caja y «aprobados» por quien los autorizó; «autoaprobados» los pidió y aprobó la misma cuenta (gerencia que descuenta por su cuenta).
        ${d.descuentos.sin_solicitud ? `${cuenta(d.descuentos.sin_solicitud, 'ticket tiene', 'tickets tienen')} descuento sin solicitud ligada. ` : ''}${quien}`)}
     <div class="malla iguales">
       ${panel('ctl-calor-mov', 'Cuándo se cancela', 'movimientos por hora de la tienda', mov.mejor ? mapaCalorHtml(mov, formatoCalor('movimiento', 'movimientos', 'Cancelaciones y devoluciones por día de la semana y hora')) : vacio('Sin cancelaciones ni devoluciones en este periodo.'),

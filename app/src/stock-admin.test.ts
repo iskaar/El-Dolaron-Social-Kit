@@ -95,7 +95,7 @@ test('la camara reenvia el mismo id: actualiza la talla pero conserva el stock (
   assert.deepEqual({ ...fila }, { stock: 1, talla: 'L' });
 });
 
-test('con etiqueta, solo el dueno cambia el precio; sin etiqueta, el capturista lo pone (#75)', async () => {
+test('con etiqueta, solo gerencia cambia el precio; sin etiqueta, el capturista lo pone (#75)', async () => {
   const t = tienda();
   t.db.prepare("insert into usuarios(correo, roles, activo, editar_inventario, creado_en, actualizado_en) values ('cap@prueba.mx', 'capturista', 1, 1, '', '')").run();
   t.env.DEV_USUARIO = 'cap@prueba.mx';

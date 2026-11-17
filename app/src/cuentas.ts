@@ -117,7 +117,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/manual': VENDER,   // manual interactivo de la revendedora (#594): practica con datos de ejemplo, sin API
   '/ayuda': RETOS,   // guía «¿Cómo se hace?» de la caja (#818): sin API, solo texto; RETOS = caja, computadora (sin PIN: la página no llama a /api) y capturista
   '/retos': RETOS,   // Mis retos (Issue #752)
-  '/plano': RETOS,   // Plano del local (Issue #756): se lee en piso; asignar áreas lo cierra la API al dueño
+  '/plano': RETOS,   // Plano del local (Issue #756): se lee en piso; asignar áreas lo cierra la API a gerencia
   '/avisos': CAJA,   // ventas de Mercado Libre por atender (Issue #429)
   '/tarjeta-bandas': TODOS,
   '/reportes': DUENO,
@@ -504,7 +504,7 @@ export async function listarCuentas(env: Env): Promise<Response> {
  * asi dos cambios a la vez no pasan los dos (Issue #253); aqui solo se traduce.
  */
 function sinDueno(error: unknown): Response {
-  if (String(error).includes('sin_dueno')) return json({ error: 'Tiene que quedar al menos un dueno activo.' }, 400);
+  if (String(error).includes('sin_dueno')) return json({ error: 'Tiene que quedar al menos una cuenta de gerencia activa.' }, 400);
   throw error;
 }
 

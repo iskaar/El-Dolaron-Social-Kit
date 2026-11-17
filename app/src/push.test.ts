@@ -46,7 +46,7 @@ async function conPush() {
   return { ...t, jwk, llaves, keys, llegadas, correos, responder: (s: number) => { respuesta = s; } };
 }
 
-test('el dueño activa push: se guarda, recibe una prueba con VAPID válido; la ayuda de caja le llega por push', async () => {
+test('gerencia activa push: se guarda, recibe una prueba con VAPID válido; la ayuda de caja le llega por push', async () => {
   const t = await conPush();
   const clave = await t.pedir('/api/push/clave', undefined);
   assert.equal(clave.cuerpo.clave, clavePublica(t.jwk));

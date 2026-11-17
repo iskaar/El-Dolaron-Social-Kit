@@ -130,7 +130,7 @@ test('datos invalidos no hacen corte ni retiro', async () => {
   assert.equal((await pedir('/api/retiros', { id: crypto.randomUUID(), caja: 'Caja 1', importe: 100, motivo: '' })).status, 400);
 });
 
-test('la venta guarda caja y cajero; el cajero corta y retira, quien solo captura no; el dueno ve los cortes', async () => {
+test('la venta guarda caja y cajero; el cajero corta y retira, quien solo captura no; gerencia ve los cortes', async () => {
   const { db, env, pedir } = tienda();
   db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values
     ('caja@prueba.mx', 'K', 'cajero', 1, '', ''), ('captura@prueba.mx', 'C', 'capturista', 1, '', '')`).run();
@@ -154,7 +154,7 @@ test('la venta guarda caja y cajero; el cajero corta y retira, quien solo captur
   assert.equal(r.cortes[0].cajero, 'caja@prueba.mx');
 });
 
-test('gastos: el cajero registra hasta $100 sin aprobacion; mas de $100, solo el dueno', async () => {
+test('gastos: el cajero registra hasta $100 sin aprobacion; mas de $100, solo gerencia', async () => {
   const { db, env, pedir } = tienda();
   db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values
     ('caja@prueba.mx', 'K', 'cajero', 1, '', '')`).run();
@@ -167,12 +167,12 @@ test('gastos: el cajero registra hasta $100 sin aprobacion; mas de $100, solo el
   assert.equal(gasto.cuerpo.cajero, 'caja@prueba.mx');
   const mayor = await salida(pedir, 'gasto', 10001);                       // $100.01: no
   assert.equal(mayor.status, 403);
-  assert.match(mayor.cuerpo.error, /dueno/);
+  assert.match(mayor.cuerpo.error, /gerencia/);
   assert.equal((await salida(pedir, 'retiro', 500000)).status, 403);       // un retiro sin tope fijado pide aprobacion (#846; el tope y el PIN, en retiros-tope.test.ts)
 
   como(DUENO);
-  assert.equal((await salida(pedir, 'retiro', 500000)).status, 201);        // el dueno lo registra en su sesion
-  assert.equal((await salida(pedir, 'gasto', 35000)).status, 201);          // el dueno registra el gasto mayor
+  assert.equal((await salida(pedir, 'retiro', 500000)).status, 201);        // gerencia lo registra en su sesion
+  assert.equal((await salida(pedir, 'gasto', 35000)).status, 201);          // gerencia registra el gasto mayor
 
   const r = (await pedir('/api/reportes?dias=1')).cuerpo;
   assert.deepEqual(r.retiros.map((x: { tipo: string; importe: number }) => [x.tipo, x.importe]).sort(),
@@ -287,7 +287,7 @@ test('el conteo por billete y moneda suma lo contado y se guarda; uno invalido n
   assert.equal((db.prepare('select count(*) as n from cortes').get() as { n: number }).n, 1);
 });
 
-test('#515: el pago de la terminal que entra al cajón se suma al esperado; el que recibe el dueño no toca el corte', async () => {
+test('#515: el pago de la terminal que entra al cajón se suma al esperado; el que recibe gerencia no toca el corte', async () => {
   const { db, env, pedir } = tienda();
   db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values ('caja@prueba.mx', 'K', 'cajero', 1, '', '')`).run();
   const como = (correo: string) => { (env as unknown as { DEV_USUARIO: string }).DEV_USUARIO = correo; };

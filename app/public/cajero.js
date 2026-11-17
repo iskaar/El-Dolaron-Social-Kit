@@ -110,7 +110,7 @@
         const cajeros = await (await original('/api/cajeros')).json();
         $('cajero-lista').innerHTML = cajeros.length
           ? cajeros.map((c) => `<button type="button" data-correo="${escapar(c.correo)}">${escapar(c.nombre || c.correo)}</button>`).join('')
-          : '<p>Nadie tiene PIN todavía. El dueño lo pone en Cuentas.</p>';
+          : '<p>Nadie tiene PIN todavía. Gerencia lo pone en Cuentas.</p>';
       } catch {
         $('cajero-aviso').textContent = 'Sin conexión: no se puede entrar.';
       }

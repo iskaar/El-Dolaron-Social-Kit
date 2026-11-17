@@ -105,7 +105,7 @@ test('el cajero cuenta, pero no ajusta ni ve el rastro', async () => {
   assert.equal(stock(ALTO), 4);
 });
 
-test('el dueno ve el rastro de los ultimos 30 dias', async () => {
+test('gerencia ve el rastro de los ultimos 30 dias', async () => {
   const { pedir, db } = montar();
   await pedir('/api/conteo/ajustes', { id: crypto.randomUUID(), esperado: 4, producto_id: ALTO, cantidad: 1, motivo: 'merma' });
   db.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en)

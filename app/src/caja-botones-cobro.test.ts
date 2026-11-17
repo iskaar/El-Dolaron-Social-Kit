@@ -186,7 +186,7 @@ const SALIDAS: [string, Opciones, string, RegExp, string][] = [
   ['efectivo vacío', { efectivo: '' }, 'cobrar-efectivo', /^Escribe cuánto te dio el cliente/, 'codigo'],
   ['efectivo insuficiente', { efectivo: '100' }, 'cobrar-efectivo', /^Faltan/, 'codigo'],
   ['efectivo en el celular con impresión remota', { remota: true }, 'cobrar-efectivo', /En el celular sólo tarjeta o transferencia/, 'codigo'],
-  ['descuento esperando al dueño', { descuento: { estado: 'pendiente', tipo: 'monto', subtotal: 30000, monto: 1000 } }, 'cobrar-tarjeta', /esperando al dueño/, 'codigo'],
+  ['descuento esperando a gerencia', { descuento: { estado: 'pendiente', tipo: 'monto', subtotal: 30000, monto: 1000 } }, 'cobrar-tarjeta', /esperando a gerencia/, 'codigo'],
   ['ventana de socio: «Es socio: buscarlo»', { respuestaSocio: 'buscar' }, 'cobrar-tarjeta', /^$/, 'socio'],
   ['ventana de socio: «Darlo de alta»', { respuestaSocio: 'alta' }, 'cobrar-tarjeta', /^$/, 'socio'],
   ['ventana de socio: cerrada con Enter o Escape', { respuestaSocio: '' }, 'cobrar-tarjeta', /^$/, 'socio'],

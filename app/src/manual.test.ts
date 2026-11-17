@@ -13,7 +13,7 @@ const manual = html + script;
 const app = leer('public/vender.html') + leer('public/vender.js');
 const cuenta = (...roles: Rol[]) => ({ correo: 'x@prueba.mx', nombre: '', caja: '', activo: true, editar_inventario: false, roles });
 
-test('/manual abre para quien abre /vender (revendedora, cajero, computadora) y el dueno; cierra para el resto', () => {
+test('/manual abre para quien abre /vender (revendedora, cajero, computadora) y gerencia; cierra para el resto', () => {
   for (const ruta of ['/manual', '/manual.html']) {
     const regla = permiso(ruta, 'GET');
     assert.deepEqual(regla, permiso('/vender', 'GET'), ruta);

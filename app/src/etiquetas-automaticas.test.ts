@@ -1160,7 +1160,7 @@ test('D2 (#464): FEP sigue el análisis de su captura por la revisión propia (e
     t.db.prepare("update productos set propietario='fep', upc='0191907910414', capturado_por=? where id=?").run(DUENO, id);
     t.db.prepare("insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values ('fep@prueba.mx', 'FEP', 'finanzas', 1, '', '')").run();
     const dueno = await t.pedir(`/api/borradores/upc/${id}`, undefined, 'GET');
-    assert.equal(dueno.status, 404, 'el dueño de la tienda no ve piezas de FEP');
+    assert.equal(dueno.status, 404, 'gerencia de la tienda no ve piezas de FEP');
     t.env.DEV_USUARIO = 'fep@prueba.mx';
     t.db.prepare('update productos set capturado_por=? where id=?').run('fep@prueba.mx', id);
     // El estado por UPC es solo de la tienda (FEP no tiene manifiesto): el seguimiento usa la revisión de su propia captura.

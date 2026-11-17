@@ -113,7 +113,7 @@ test('si alguien subió la existencia entre lo que vio la caja y el cobro, no se
   assert.equal(t.ajustes().length, 0);
   assert.equal(t.db.prepare(`select count(*) n from movimientos_existencia where producto_id = ? and tipo = 'hallada_en_caja'`).get(CERO)!.n, 0);
   await t.esperar();
-  assert.equal(t.correos.length, 0, 'sin ajuste no hay aviso al dueño');
+  assert.equal(t.correos.length, 0, 'sin ajuste no hay aviso a gerencia');
 });
 
 /** Como si el impedimento apareciera DESPUÉS de la lectura previa: se agrega justo antes de que corra el batch de la venta. */
@@ -278,7 +278,7 @@ test('venta y cancelación: la existencia queda en 1 (la unidad existe y vuelve 
   assert.equal(suma, 1, 'los movimientos de la pieza suman lo que dice productos.stock');
 });
 
-test('el dueño se entera después: un solo aviso por venta con pieza, motivo y caja; ninguno cuando no se ajustó', async () => {
+test('gerencia se entera después: un solo aviso por venta con pieza, motivo y caja; ninguno cuando no se ajustó', async () => {
   const t = montar();
   const token = await t.entrar();
   assert.equal((await t.vender(token, t.cuerpo([mano(CERO, { en_mano: { motivo: 'devuelta_o_apartada', esperado: 0 } })]))).status, 201);
@@ -292,10 +292,10 @@ test('el dueño se entera después: un solo aviso por venta con pieza, motivo y 
   // El reintento (duplicada) no vuelve a avisar.
 });
 
-test('lista del dueño en /avisos: solo él, solo los últimos 7 días, con tienda, caja, cajero, motivo y si se canceló', async () => {
+test('lista de gerencia en /avisos: solo él, solo los últimos 7 días, con tienda, caja, cajero, motivo y si se canceló', async () => {
   const t = montar();
   const token = await t.entrar();
-  assert.deepEqual(permiso('/api/ventas-sin-existencia', 'GET'), []);   // por omisión, solo el dueño (como /api/ventas-rechazadas)
+  assert.deepEqual(permiso('/api/ventas-sin-existencia', 'GET'), []);   // por omisión, solo gerencia (como /api/ventas-rechazadas)
   const c = t.cuerpo([mano()]);
   assert.equal((await t.vender(token, c)).status, 201);
   t.db.prepare(`insert into conteo_ajustes (id, producto_id, codigo, nombre, motivo, cantidad, antes, despues, ajustado_por, ajustado_en, venta_id)
@@ -409,7 +409,7 @@ test('una cancelación pendiente de una venta de esta pieza la frena; resuelta o
   cancelacionPendiente(t, anterior.id as string);
   const r = await t.vender(token, t.cuerpo([mano()]));
   assert.equal(r.status, 409);
-  assert.match(r.cuerpo.error, /Hay una cancelación pendiente de una venta de esta pieza: espera la respuesta del dueño\./);
+  assert.match(r.cuerpo.error, /Hay una cancelación pendiente de una venta de esta pieza: espera la respuesta de gerencia\./);
   assert.equal(t.ajustes().length, 0);
   // La misma pendiente no frena otra pieza.
   const otra = await t.vender(token, t.cuerpo([{ producto_id: PRODUCTO, cantidad: 1 }], { efectivo: 25000 }));
@@ -433,12 +433,12 @@ test('una devolución de dinero pendiente de esa pieza (#837) también la frena;
   pendiente(lineaDe(CERO));
   const r = await t.vender(token, t.cuerpo([mano()]));
   assert.equal(r.status, 409);
-  assert.match(r.cuerpo.error, /Hay una devolución de dinero pendiente de una venta de esta pieza: espera la respuesta del dueño./);
+  assert.match(r.cuerpo.error, /Hay una devolución de dinero pendiente de una venta de esta pieza: espera la respuesta de gerencia./);
   t.db.exec(`update solicitudes set estado = 'rechazada'`);
   assert.equal((await t.vender(token, t.cuerpo([mano()]))).status, 201);
 });
 
-test('unidades registradas en OTRA tienda no impiden vender: se avisa al dueño y queda en la fila de /avisos', async () => {
+test('unidades registradas en OTRA tienda no impiden vender: se avisa a gerencia y queda en la fila de /avisos', async () => {
   const t = montar();
   const token = await t.entrar();
   t.db.exec(`insert into existencia_tienda (producto_id, tienda, unidades, actualizado_en) values ('${CERO}', 'salk', 1, ''), ('${CERO}', 'romero', 2, '')`);
@@ -463,7 +463,7 @@ test('unidades registradas en OTRA tienda no impiden vender: se avisa al dueño 
   assert.equal(sola.ajustes()[0].otras, '', 'sin unidades en otras tiendas no hay nada que decir');
 });
 
-test('cancelar o devolver una venta anterior de la pieza, cuando después se vendió «en la mano», avisa al dueño sin cambiar la existencia', async () => {
+test('cancelar o devolver una venta anterior de la pieza, cuando después se vendió «en la mano», avisa a gerencia sin cambiar la existencia', async () => {
   const t = montar();
   const token = await t.entrar();
   t.db.prepare('update productos set stock = 1 where id = ?').run(CERO);
@@ -510,14 +510,14 @@ test('devolver una pieza suelta de una venta anterior también avisa', async () 
   await t.vender(token, t.cuerpo([mano()]));
   await t.esperar();
   const lineaId = (t.db.prepare('select id from venta_lineas where venta_id = ?').get(anterior.id) as { id: number }).id;
-  t.como(DUENO);   // devolver dinero lo hace el dueño (#837); el aviso de la unidad fantasma es el mismo
+  t.como(DUENO);   // devolver dinero lo hace gerencia (#837); el aviso de la unidad fantasma es el mismo
   const r = await t.pedir(`/api/ventas/${anterior.id}/lineas/${lineaId}/cancelar`, { id: crypto.randomUUID(), cantidad: 1, motivo: 'se arrepintió', caja: 'Caja 1' }, 'POST');
   assert.ok([200, 201].includes(r.status), JSON.stringify(r.cuerpo));
   await t.esperar();
   assert.equal(t.correos.at(-1)!.subject, 'Revisa la existencia: Devolución de una pieza');
 });
 
-test('la devolución de dinero que el dueño aprueba a distancia (#837) también avisa; pedirla, no', async () => {
+test('la devolución de dinero que gerencia aprueba a distancia (#837) también avisa; pedirla, no', async () => {
   const t = montar();
   const token = await t.entrar();
   t.db.prepare('update productos set stock = 1 where id = ?').run(CERO);
@@ -540,7 +540,7 @@ test('la devolución de dinero que el dueño aprueba a distancia (#837) también
   assert.equal(t.correos.at(-1)!.subject, 'Revisa la existencia: Devolución aprobada de una pieza');
 });
 
-test('un reintento del mismo folio no vuelve a avisar al dueño', async () => {
+test('un reintento del mismo folio no vuelve a avisar a gerencia', async () => {
   const t = montar();
   const token = await t.entrar();
   const c = t.cuerpo([mano()]);

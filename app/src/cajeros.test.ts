@@ -29,7 +29,7 @@ test('la computadora sin PIN no cobra; con el PIN de Ana, la venta queda a nombr
   const sinPin = await venta();
   assert.equal(sinPin.status, 401);
   assert.equal(sinPin.cuerpo.pin, true);
-  assert.deepEqual((await pedir('/api/cajeros')).cuerpo, [{ correo: ANA, nombre: 'Ana' }]);   // el dueno no tiene PIN aun
+  assert.deepEqual((await pedir('/api/cajeros')).cuerpo, [{ correo: ANA, nombre: 'Ana' }]);   // gerencia no tiene PIN aun
 
   const { cuerpo: sesion, status } = await pedir('/api/cajeros/entrar', { correo: ANA, pin: '482913' });
   assert.equal(status, 201);
@@ -45,7 +45,7 @@ test('la computadora sin PIN no cobra; con el PIN de Ana, la venta queda a nombr
   assert.equal((await venta(sesion.token)).status, 401);
 });
 
-test('el PIN solo abre lo de caja: con el del dueno, reportes y cuentas siguen cerrados', async () => {
+test('el PIN solo abre lo de caja: con el dgerencia, reportes y cuentas siguen cerrados', async () => {
   const { pedir, como, venta } = montar();
   await pedir('/api/cuentas/pin', { correo: DUENO, pin: '111222' }, 'PUT');
   como(TIENDA);

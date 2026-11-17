@@ -19,7 +19,7 @@ test('el pedido exige sentido y un sugerido que vaya en esa dirección, sin pasa
   assert.equal(MAXIMO, 10_000_000);
 });
 
-test('el dueño no puede cambiar a un precio inválido, igual o por encima de la lista', () => {
+test('gerencia no puede cambiar a un precio inválido, igual o por encima de la lista', () => {
   const s = { precio: 25000, precio_lista: 40000 };
   assert.equal(motivoCambio('300', s), '');
   assert.equal(motivoCambio('400', s), '');
@@ -47,7 +47,7 @@ test('la hora se dice en la hora de la tienda, no del navegador', () => {
   assert.equal(quien('ana.lopez@gmail.com'), 'ana.lopez');
 });
 
-test('el botón es de capturistas sobre piezas de etiqueta ya listas; el dueño edita directo', () => {
+test('el botón es de capturistas sobre piezas de etiqueta ya listas; gerencia edita directo', () => {
   const p = { destino: 'etiqueta', estado_analisis: 'listo', precio: 25000 };
   const como = (roles: string[]) => ({ usuario: { roles } });
   assert.equal(puedePedirPrecio(como(['capturista']), p), true);

@@ -26,7 +26,7 @@ function ropa(t: Tienda, { codigo = 'ED-000002', capturadoPor = CAP } = {}) {
 const fila = (t: Tienda, id: string) => t.db.prepare('select nombre, precio, precio_sugerido, estado_analisis, estado_fisico from productos where id = ?').get(id) as any;
 const solicitudes = (t: Tienda) => t.db.prepare('select * from solicitudes_precio').all() as any[];
 
-test('autorizarPrecio: el dueño siempre; las demás cuentas solo sin etiqueta; el precio de sistema es del dueño', () => {
+test('autorizarPrecio: gerencia siempre; las demás cuentas solo sin etiqueta; el precio de sistema es de gerencia', () => {
   const u = (roles: string[], activo = true) => ({ activo, roles } as unknown as Usuario);
   assert.equal(autorizarPrecio(u(['dueno']), { codigo: 'ED-000001' }), true);
   assert.equal(autorizarPrecio(u(['capturista']), { codigo: 'ED-000001' }), false);
@@ -37,14 +37,14 @@ test('autorizarPrecio: el dueño siempre; las demás cuentas solo sin etiqueta; 
   assert.equal(autorizarPrecio(u(['dueno'], false), { codigo: 'ED-000001' }), false);
 });
 
-test('miniatura 24 h con etiqueta: el capturista no cambia el precio, se pide al dueño y lo demás se guarda', async (t0) => {
+test('miniatura 24 h con etiqueta: el capturista no cambia el precio, se pide a gerencia y lo demás se guarda', async (t0) => {
   const t = tienda(); t0.after(() => t.db.close()); equipo(t);
   const id = ropa(t), ruta = `/api/borradores/${id}/revision`;
   como(t, CAP);
   const r = await t.pedir(ruta, { precio: 20000, estado_fisico: 'danado' }, 'PATCH');
   assert.equal(r.status, 200);
   assert.equal(r.cuerpo.solicitud_precio, true);
-  assert.equal(r.cuerpo.aviso, 'Se pidió el cambio de precio al dueño');
+  assert.equal(r.cuerpo.aviso, 'Se pidió el cambio de precio a gerencia');
   assert.equal(r.cuerpo.precio, 15000);
   assert.deepEqual({ precio: fila(t, id).precio, estado_fisico: fila(t, id).estado_fisico }, { precio: 15000, estado_fisico: 'danado' });
   const pendientes = solicitudes(t);
@@ -59,7 +59,7 @@ test('miniatura 24 h con etiqueta: el capturista no cambia el precio, se pide al
   assert.equal((await t.pedir(ruta, { precio: 15000, estado_fisico: 'nuevo' }, 'PATCH')).cuerpo.solicitud_precio, undefined);
 });
 
-test('miniatura con etiqueta: el dueño cambia el precio directo; sin etiqueta el capturista también', async (t0) => {
+test('miniatura con etiqueta: gerencia cambia el precio directo; sin etiqueta el capturista también', async (t0) => {
   const t = tienda(); t0.after(() => t.db.close()); equipo(t);
   const etiquetada = ropa(t, { capturadoPor: DUENO });
   const r = await t.pedir(`/api/borradores/${etiquetada}/revision`, { precio: 8000 }, 'PATCH');

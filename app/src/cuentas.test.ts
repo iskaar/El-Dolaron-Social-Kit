@@ -10,7 +10,7 @@ import { tienda, DUENO } from './prueba-d1.ts';
 
 const usuario = (roles: Usuario['roles'], activo = true): Usuario => ({ correo: 'a@b.mx', nombre: 'A', roles, activo, caja:'', editar_inventario:false });
 
-test('cada rol entra a lo suyo y el dueno a todo', () => {
+test('cada rol entra a lo suyo y gerencia a todo', () => {
   const cajero = usuario(['cajero']);
   const capturista = usuario(['capturista']);
   const dueno = usuario(['dueno']);
@@ -37,7 +37,7 @@ test('cada rol entra a lo suyo y el dueno a todo', () => {
   assert.equal(puede(ambos, permiso('/caja', 'GET')) && puede(ambos, permiso('/captura', 'GET')), true);
 });
 
-test('una pantalla o API que nadie listo es solo del dueno', () => {
+test('una pantalla o API que nadie listo es solo dgerencia', () => {
   assert.deepEqual(permiso('/pantalla-nueva', 'GET'), []);
   assert.deepEqual(permiso('/api/algo-nuevo', 'POST'), []);
   assert.deepEqual(permiso('/api/ropa-ia', 'GET'), ['capturista']);
@@ -134,7 +134,7 @@ test('dos dueños quitandose el rol a la vez: uno pasa y el otro no; nunca queda
   assert.equal(duenos(), 1);
 });
 
-test('Editar inventario: solo dueño lo guarda; se lee en cuentas y yo; cliente anterior conserva la casilla', async (t) => {
+test('Editar inventario: solo gerencia lo guarda; se lee en cuentas y yo; cliente anterior conserva la casilla', async (t) => {
   const { db, env, pedir } = tienda(); t.after(() => db.close());
   const cuenta = { correo:'cap@prueba.mx', nombre:'Captura', roles:['capturista'] };
   const guardar = (extra = {}) => pedir('/api/cuentas', { ...cuenta, ...extra }, 'PUT');
@@ -199,7 +199,7 @@ test('050 sobre la base anterior conserva usuarios, stock e historial y no recon
   assert.deepEqual(db.prepare('pragma foreign_key_check').all(), []);
 });
 
-test('inversionista (#610): solo GET /tablero y GET /api/tablero; todo lo demas es del dueno', () => {
+test('inversionista (#610): solo GET /tablero y GET /api/tablero; todo lo demas es dgerencia', () => {
   const inversionista = usuario(['inversionista']);
   assert.equal(puede(inversionista, permiso('/tablero', 'GET')), true);
   assert.equal(puede(inversionista, permiso('/tablero.html', 'GET')), true);

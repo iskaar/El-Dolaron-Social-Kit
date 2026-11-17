@@ -277,7 +277,7 @@ $('buscar').addEventListener('submit', async (e) => {
 /* ---------- Mis áreas ---------- */
 $('mias').onclick = () => {
   if (borrador) return;
-  if (!yo) return resaltar(null, 'Tu cuenta no está ligada a una persona de Nómina: pídele al dueño que la ligue.');
+  if (!yo) return resaltar(null, 'Tu cuenta no está ligada a una persona de Nómina: pídele a gerencia que la ligue.');
   const mios = deQuien(yo);
   if ($('mias').getAttribute('aria-pressed') === 'true') return resaltar(null);
   resaltar(mios, mios.length ? `Tus letreros: ${mios.join(', ')}.` : 'Todavía no tienes letreros asignados.');

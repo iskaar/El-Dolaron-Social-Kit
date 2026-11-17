@@ -42,12 +42,12 @@ test('una cajera de Soledad con su PIN correcto en la computadora de Salk: 403 c
   const { entrar, sesiones } = await montar();
   const r = await entrar(PC_SALK, ANA);
   assert.equal(r.status, 403);
-  assert.equal(r.cuerpo.error, 'Tu cuenta es de Soledad; esta caja es de Avenida Salk. Pídele al dueño que te cambie de tienda.');
+  assert.equal(r.cuerpo.error, 'Tu cuenta es de Soledad; esta caja es de Avenida Salk. Pídele a gerencia que te cambie de tienda.');
   assert.equal(r.cuerpo.token, undefined);
   assert.equal(sesiones(), 0);
   assert.equal((await entrar(PC_SOLEDAD, ANA)).status, 201);    // en su tienda sí
   assert.equal((await entrar(PC_SALK, SOFI)).status, 201);      // y la de Salk en Salk
-  assert.equal((await entrar(PC_SOLEDAD, SOFI)).cuerpo.error, 'Tu cuenta es de Avenida Salk; esta caja es de Soledad. Pídele al dueño que te cambie de tienda.');
+  assert.equal((await entrar(PC_SOLEDAD, SOFI)).cuerpo.error, 'Tu cuenta es de Avenida Salk; esta caja es de Soledad. Pídele a gerencia que te cambie de tienda.');
 });
 
 test('el aviso de otra tienda no gasta intentos de PIN ni delata el PIN: con PIN malo o bueno es el mismo 403', async () => {
@@ -77,7 +77,7 @@ test('cajeroEnTurno compara la tienda de la terminal', async () => {
   assert.equal(await cajeroEnTurno(peticion, env, ''), null);
 });
 
-test('el dueño entra con su PIN en la computadora de cualquier tienda y cobra', async () => {
+test('gerencia entra con su PIN en la computadora de cualquier tienda y cobra', async () => {
   const { entrar, venta } = await montar();
   for (const pc of [PC_SOLEDAD, PC_SALK]) {
     const r = await entrar(pc, DUENO, PIN_DUENO);
@@ -96,7 +96,7 @@ test('la pantalla de bloqueo lista solo a los de esta tienda más los dueños; /
   assert.ok(!soledad.includes(SOFI) && !soledad.includes(SUSI));
 
   const vendedorasDe = async (pc: string) => {
-    const token = (await entrar(pc, DUENO, PIN_DUENO)).cuerpo.token as string;   // el dueño entra en cualquiera: ve lo mismo que una cajera de la tienda
+    const token = (await entrar(pc, DUENO, PIN_DUENO)).cuerpo.token as string;   // gerencia entra en cualquiera: ve lo mismo que una cajera de la tienda
     return (await pedir('/api/vendedoras', undefined, 'GET', { 'x-cajero': token })).cuerpo.map((c: { correo: string }) => c.correo) as string[];
   };
   const salk = await vendedorasDe(PC_SALK);
@@ -115,7 +115,7 @@ test('quien atendió debe ser de esta tienda: la venta en Salk con una vendedora
   assert.equal(buena.status, 201, JSON.stringify(buena.cuerpo));
 });
 
-test('el supervisor de otra tienda no aprueba un retiro; el de la tienda y el dueño sí; y no se ofrece como aprobador', async () => {
+test('el supervisor de otra tienda no aprueba un retiro; el de la tienda y gerencia sí; y no se ofrece como aprobador', async () => {
   const { entrar, como, pedir, db } = await montar();
   como(DUENO);
   assert.equal((await pedir('/api/config', { tope_retiro: 1000 }, 'PUT')).status, 200);

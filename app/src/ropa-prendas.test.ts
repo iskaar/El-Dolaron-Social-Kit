@@ -120,7 +120,7 @@ test('Unitalla (adulto y niño) es talla válida y sale legible en la etiqueta T
   assert.equal(nombre(t, id).talla, 'Niño Unitalla');
 });
 
-test('precio libre en ropa sin código: lo acepta el dueño; la captura y la revisión del capturista siguen con los escalones', async (t0) => {
+test('precio libre en ropa sin código: lo acepta gerencia; la captura y la revisión del capturista siguen con los escalones', async (t0) => {
   const t = tienda(); t0.after(() => t.db.close());
   t.db.prepare("insert into usuarios(correo,roles,activo,editar_inventario,creado_en,actualizado_en) values('cap@prueba.mx','capturista',1,1,'','')").run();
   const DUENO = t.env.DEV_USUARIO as string;

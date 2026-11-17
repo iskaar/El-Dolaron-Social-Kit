@@ -60,7 +60,7 @@ async function montar() {
   return { ...t, correos, como, ana, vender, linea, devolver, cupon, stock, venta, devoluciones, solicitudes, cortar };
 }
 
-test('el cajero devuelve en cupón sin pedir nada al dueño, aun pasados 5 minutos', async () => {
+test('el cajero devuelve en cupón sin pedir nada a gerencia, aun pasados 5 minutos', async () => {
   const { vender, linea, cupon, stock, venta, devoluciones, solicitudes } = await montar();
   const id = await vender(VIEJA);
   const antes = stock();
@@ -81,7 +81,7 @@ test('el cajero que pide dinero por pieza recibe la exigencia de aprobación: no
     const r = await devolver(id, await linea(id));
     assert.equal(r.status, 403);
     assert.equal(r.cuerpo.requiere_aprobacion, true);
-    assert.match(r.cuerpo.error, /aprobación del supervisor o del dueño/);
+    assert.match(r.cuerpo.error, /aprobación del supervisor o de gerencia/);
     assert.match(r.cuerpo.error, /cupón/);
     assert.deepEqual(r.cuerpo.duenos, [{ correo: DUENO, nombre: 'Isaac' }, { correo: SUP, nombre: 'Sara' }]);
     assert.equal(stock(), antes);
@@ -96,13 +96,13 @@ test('compatibilidad: una caja con la página anterior (sin aprobador ni solicit
   const id = await vender();
   const r = await devolver(id, await linea(id), { devolver_en: 'efectivo' });   // el cuerpo exacto de la página anterior
   assert.equal(r.status, 403);
-  assert.match(r.cuerpo.error, /Devolver dinero necesita la aprobación del supervisor o del dueño/);
+  assert.match(r.cuerpo.error, /Devolver dinero necesita la aprobación del supervisor o de gerencia/);
   assert.match(r.cuerpo.error, /Devolver en cupón/);
-  assert.match(r.cuerpo.error, /PIN del supervisor o del dueño/);
+  assert.match(r.cuerpo.error, /PIN del supervisor o de gerencia/);
   assert.equal(devoluciones().length, 0);
 });
 
-test('el dueño en la caja (PIN de dueño al entrar) devuelve dinero directo y sin solicitud', async () => {
+test('gerencia en la caja (PIN de dueño al entrar) devuelve dinero directo y sin solicitud', async () => {
   const { como, vender, linea, devolver, stock, venta, solicitudes } = await montar();
   const id = await vender(VIEJA);
   const antes = stock();
@@ -115,7 +115,7 @@ test('el dueño en la caja (PIN de dueño al entrar) devuelve dinero directo y s
   assert.equal(solicitudes().length, 0);
 });
 
-test('PIN del dueño: devuelve una sola vez a nombre de Ana y deja la solicitud aprobada por pin con el mismo id; un reintento no repite', async () => {
+test('PIN de gerencia: devuelve una sola vez a nombre de Ana y deja la solicitud aprobada por pin con el mismo id; un reintento no repite', async () => {
   const { vender, linea, devolver, stock, venta, devoluciones, solicitudes } = await montar();
   const id = await vender(VIEJA);
   const antes = stock();
@@ -150,7 +150,7 @@ test('PIN del dueño: devuelve una sola vez a nombre de Ana y deja la solicitud 
 });
 
 
-test('solicitud remota: queda pendiente sin mover nada; el reintento devuelve la misma; el dueño la ve en la lista', async () => {
+test('solicitud remota: queda pendiente sin mover nada; el reintento devuelve la misma; gerencia la ve en la lista', async () => {
   const { como, vender, linea, devolver, stock, venta, devoluciones, solicitudes, pedir, correos, esperar } = await montar();
   const id = await vender(VIEJA);
   const antes = stock();
@@ -164,7 +164,7 @@ test('solicitud remota: queda pendiente sin mover nada; el reintento devuelve la
   assert.equal(otra.status, 202);
   assert.equal(otra.cuerpo.solicitud_id, idDev);
   await esperar();
-  assert.deepEqual(correos.map((c) => [c.to, c.subject]), [[DUENO, 'Devolución de dinero por aprobar: $250.00']]);   // un solo aviso al dueño
+  assert.deepEqual(correos.map((c) => [c.to, c.subject]), [[DUENO, 'Devolución de dinero por aprobar: $250.00']]);   // un solo aviso a gerencia
   assert.ok(correos[0].text.startsWith('Ana pide devolver 1 × Ventilador por $250.00 (efectivo) de una venta de $500.00.\nMotivo: no le quedo'));
 
   assert.equal(stock(), antes);
@@ -190,7 +190,7 @@ test('solicitud remota: queda pendiente sin mover nada; el reintento devuelve la
   assert.deepEqual(pendientes.map((x) => x.tipo), ['devolucion']);
 });
 
-test('el dueño aprueba: se devuelve exactamente lo pedido una sola vez y el corte resta el efectivo solo desde entonces', async () => {
+test('gerencia aprueba: se devuelve exactamente lo pedido una sola vez y el corte resta el efectivo solo desde entonces', async () => {
   const { como, vender, linea, devolver, stock, venta, devoluciones, solicitudes, pedir, ana } = await montar();
   const id = await vender(VIEJA);                              // $500 en la Caja 2 de Ana
   const antes = stock();
@@ -250,7 +250,7 @@ test('aprobaciones simultáneas (o aprobar y rechazar a la vez): solo gana una y
   assert.equal(stock(), antes + hechas);
 });
 
-test('el dueño rechaza: no se mueve nada, la caja se entera, y reenviar el mismo folio no devuelve; uno nuevo vuelve a pedir', async () => {
+test('gerencia rechaza: no se mueve nada, la caja se entera, y reenviar el mismo folio no devuelve; uno nuevo vuelve a pedir', async () => {
   const { como, vender, linea, devolver, stock, venta, devoluciones, solicitudes, pedir, ana } = await montar();
   const id = await vender(VIEJA);
   const antes = stock();
@@ -297,7 +297,7 @@ test('un 409 definitivo al aprobar (el ticket ya se canceló) deja la solicitud 
   assert.match(estado.rechazo, /cancelado/);
 });
 
-test('no se pide al dueño lo que la devolución no haría: pieza ajena, cantidad de más o sin motivo se rechazan antes de crear la solicitud', async () => {
+test('no se pide a gerencia lo que la devolución no haría: pieza ajena, cantidad de más o sin motivo se rechazan antes de crear la solicitud', async () => {
   const { vender, linea, devolver, solicitudes } = await montar();
   const id = await vender(VIEJA);
   const l = await linea(id);
@@ -363,7 +363,7 @@ test('un supervisor aprueba con su PIN la cancelación pasados 5 minutos', async
   assert.equal(solicitudes()[0].resuelto_por, SUP);
 });
 
-test('la caja ofrece como aprobadores al dueño y a los supervisores con PIN, no a los cajeros', async () => {
+test('la caja ofrece como aprobadores a gerencia y a los supervisores con PIN, no a los cajeros', async () => {
   const { vender, linea, devolver, ana, pedir } = await montar();
   const id = await vender(VIEJA);
   const esperados = [{ correo: DUENO, nombre: 'Isaac' }, { correo: SUP, nombre: 'Sara' }];
@@ -372,10 +372,10 @@ test('la caja ofrece como aprobadores al dueño y a los supervisores con PIN, no
   const ticket = await pedir(`/api/ventas/${id}/cancelar`, { motivo: 'x', caja: 'Caja 1' }, 'POST', ana);
   assert.equal(ticket.status, 403);
   assert.deepEqual(ticket.cuerpo.duenos, esperados);
-  assert.match(ticket.cuerpo.error, /supervisor o del dueño/);
+  assert.match(ticket.cuerpo.error, /supervisor o de gerencia/);
 });
 
-test('el PIN de un supervisor no vale para descuentos ni cupones (siguen siendo del dueño)', async () => {
+test('el PIN de un supervisor no vale para descuentos ni cupones (siguen siendo de gerencia)', async () => {
   const { pedir, ana } = await montar();
   const descuento = await pedir('/api/descuentos', { tipo: 'porcentaje', valor: 10, motivo: 'cliente frecuente', subtotal: 25000, lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], aprobador: SUP, pin: PIN_SUP }, 'POST', ana);
   assert.equal(descuento.status, 404, JSON.stringify(descuento.cuerpo));
@@ -428,7 +428,7 @@ test('equivocarse al aprobar NO bloquea al supervisor fuera de su propio acceso 
   assert.equal(entrada.status, 201, JSON.stringify(entrada.cuerpo));                       // y entra a su caja con su PIN
 });
 
-test('si quien cobra es supervisor, devuelve y cancela directo, como el dueño, sin solicitud', async () => {
+test('si quien cobra es supervisor, devuelve y cancela directo, como gerencia, sin solicitud', async () => {
   const { como, pedir, vender, linea, devolver, stock, solicitudes, devoluciones } = await montar();
   como(TIENDA);
   const token = (await pedir('/api/cajeros/entrar', { correo: SUP, pin: PIN_SUP })).cuerpo.token as string;
@@ -444,7 +444,7 @@ test('si quien cobra es supervisor, devuelve y cancela directo, como el dueño, 
   assert.equal(solicitudes().length, 0);
 });
 
-test('solo el dueño asigna el rol de supervisor; la solicitud a distancia sigue siendo del dueño', async () => {
+test('solo gerencia asigna el rol de supervisor; la solicitud a distancia sigue siendo de gerencia', async () => {
   const { como, pedir, ana, vender, linea, devolver } = await montar();
   const asignar = (encabezados: Record<string, string>) =>
     pedir('/api/cuentas', { correo: BETO, nombre: 'Beto', roles: ['cajero', 'supervisor'] }, 'PUT', encabezados);
@@ -469,7 +469,7 @@ test('solo el dueño asigna el rol de supervisor; la solicitud a distancia sigue
 
 /* ---------- la solicitud atada al ticket (revisión de #843) ---------- */
 
-test('mientras una devolución espera al dueño el ticket no cambia por otro camino: cupón, otra devolución, corrección de pago y cancelar, todos rechazados', async () => {
+test('mientras una devolución espera a gerencia el ticket no cambia por otro camino: cupón, otra devolución, corrección de pago y cancelar, todos rechazados', async () => {
   const { como, vender, linea, devolver, cupon, pedir, ana, stock, venta, devoluciones, solicitudes, db } = await montar();
   const id = await vender(0);                                    // reciente: aun dentro de los 5 minutos
   const l = await linea(id);
@@ -535,7 +535,7 @@ test('si el ticket cambió de verdad entre pedir y aprobar (una carrera que las 
   }
 });
 
-test('el cajero retira su propia solicitud desde el ticket: queda rechazada, ya no frena nada y el dueño ya no puede aprobarla', async () => {
+test('el cajero retira su propia solicitud desde el ticket: queda rechazada, ya no frena nada y gerencia ya no puede aprobarla', async () => {
   const { como, vender, linea, devolver, pedir, ana, solicitudes, stock, devoluciones } = await montar();
   const id = await vender(VIEJA);
   const l = await linea(id);

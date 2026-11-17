@@ -69,7 +69,7 @@ test('el banco que captura el cajero: opcional, «otro» no se verifica, uno fue
   assert.deepEqual((await t.pedir('/api/cep/pendientes')).cuerpo.transferencias, []);
 });
 
-test('/api/cep/*: solo el service token configurado; sin identidad, con otra, sin CEP_CLIENT_ID o una persona (ni el dueno) = 401', async () => {
+test('/api/cep/*: solo el service token configurado; sin identidad, con otra, sin CEP_CLIENT_ID o una persona (ni gerencia) = 401', async () => {
   const t = conServicio();
   await transferencia(t);
   assert.equal((await t.pedir('/api/cep/pendientes')).status, 200);
@@ -128,7 +128,7 @@ test('JWT de servicio: el common_name sale de un token firmado, vigente y de est
   assert.equal(await verificarJwtServicio(servicio.slice(0, -4) + 'AAAA', AUD, EMISOR, llave), null);
 });
 
-test('la ruta de validar a mano es solo del dueno en el mapa de permisos', () => {
+test('la ruta de validar a mano es solo dgerencia en el mapa de permisos', () => {
   const ruta = permiso('/api/avisos/transferencias/7/validar', 'POST');
   const usuario = (roles: string[]) => ({ correo: 'a@b.mx', nombre: 'A', roles, activo: true, caja: '', editar_inventario: false }) as never;
   assert.equal(puede(usuario(['dueno']), ruta), true);
@@ -192,7 +192,7 @@ test('encontrada con monto y cuenta correctos: banxico_ok, verificacion banxico;
   assert.equal(t.correos.length, 0);   // todo bien: nadie se entera
 });
 
-test('no coincide (monto distinto o cuenta ajena): no_coincide al primer reporte y el dueno recibe un solo aviso', async () => {
+test('no coincide (monto distinto o cuenta ajena): no_coincide al primer reporte y gerencia recibe un solo aviso', async () => {
   const t = conServicio();
   const a = await transferencia(t);
   const b = await transferencia(t);
@@ -204,7 +204,7 @@ test('no coincide (monto distinto o cuenta ajena): no_coincide al primer reporte
   assert.equal(fila(t.db, a).verificacion, 'cajero');
 });
 
-test('no existe dos veces (el dia y el anterior): no_encontrada y aviso al dueno por correo, con el enlace a Avisos y sin la clave', async () => {
+test('no existe dos veces (el dia y el anterior): no_encontrada y aviso a gerencia por correo, con el enlace a Avisos y sin la clave', async () => {
   const t = conServicio();
   const id = await transferencia(t);
   assert.equal((await reportar(t, { id, intento: 1, estado: 'no_existe' })).cuerpo.estado, 'pendiente');
@@ -227,7 +227,7 @@ test('no existe dos veces (el dia y el anterior): no_encontrada y aviso al dueno
   assert.deepEqual((await t.pedir('/api/cep/pendientes')).cuerpo.transferencias, []);
 });
 
-test('con un dispositivo del dueno suscrito, el aviso llega por push (sin la clave) y no por correo', async () => {
+test('con un dispositivo dgerencia suscrito, el aviso llega por push (sin la clave) y no por correo', async () => {
   const t = conServicio();
   const llaves = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']) as CryptoKeyPair;
   t.env.VAPID_JWK = JSON.stringify(await crypto.subtle.exportKey('jwk', llaves.privateKey));
@@ -284,7 +284,7 @@ test('dos reportes a la vez del mismo intento: gana uno y el aviso sale una sola
 
 /* ---------- avisos y validacion manual ---------- */
 
-test('Avisos trae las transferencias por validar para la caja; validar a mano es solo del dueno, deja quien y cuando, y es idempotente', async () => {
+test('Avisos trae las transferencias por validar para la caja; validar a mano es solo dgerencia, deja quien y cuando, y es idempotente', async () => {
   const t = conServicio();
   const id = await transferencia(t);
   const pendiente = await transferencia(t);
@@ -417,7 +417,7 @@ test('si el modelo falla o no hay llave, la foto se guarda igual y la captura si
   assert.equal((await subir(t, new Uint8Array(4 * 1024 * 1024 + 1))).status, 413);
 });
 
-test('el comprobante se guarda con la transferencia; solo el dueno lo ve y el cajero ve apenas que existe', async () => {
+test('el comprobante se guarda con la transferencia; solo gerencia lo ve y el cajero ve apenas que existe', async () => {
   const t = conServicio();
   conModelo(t, { clave_rastreo: '', banco_emisor: '', monto_mxn: 0, fecha: '' });
   const { key } = (await subir(t)).cuerpo;

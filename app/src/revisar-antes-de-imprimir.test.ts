@@ -75,7 +75,7 @@ test('servidor: «Guardar e imprimir» de la revisión confirma de una vez con l
   assert.equal(t.fila(lista.id).por_revisar, 1);
 });
 
-test('servidor: nombre solo con la casilla «Editar inventario»; el precio de una pieza con etiqueta lo pide el capturista al dueño (#479) y aun así confirma', async (t0) => {
+test('servidor: nombre solo con la casilla «Editar inventario»; el precio de una pieza con etiqueta lo pide el capturista a gerencia (#479) y aun así confirma', async (t0) => {
   const t = montar(); t0.after(async () => { await t.esperar(); t.db.close(); });
   t.env.DEV_USUARIO = 'cap@prueba.mx';
   const { id } = await t.foto();
@@ -92,12 +92,12 @@ test('servidor: nombre solo con la casilla «Editar inventario»; el precio de u
   const caro = t.fila(otra).precio - 100;
   const pedido = await t.pedir(`/api/borradores/${otra}/revision`, { confirmar: true, precio: caro }, 'PATCH');
   assert.equal(pedido.status, 200);
-  assert.ok(pedido.cuerpo.aviso, 'se pidió el cambio de precio al dueño');
+  assert.ok(pedido.cuerpo.aviso, 'se pidió el cambio de precio a gerencia');
   assert.equal(t.fila(otra).precio, antes.precio, 'el precio no cambió');
   assert.equal(t.fila(otra).por_revisar, 0);
 });
 
-test('tarjeta UPC: elegir el grado cambia el precio mostrado al de ese grado y respeta el que el dueño ya escribió; el grado viaja en el alta', async () => {
+test('tarjeta UPC: elegir el grado cambia el precio mostrado al de ese grado y respeta el que gerencia ya escribió; el grado viaja en el alta', async () => {
   const llamadas: any[] = [];
   const ficha = { nombre: 'Lámpara', precio: 9000, precio_lista: 12000, precios: { nuevo: 9000, danado: 6000, liquidacion: 3000 } };
   const flujo = crearCaptura({ enLinea: () => true, imprimir: async () => true, api: async (ruta, cuerpo) => {
@@ -110,7 +110,7 @@ test('tarjeta UPC: elegir el grado cambia el precio mostrado al de ese grado y r
   assert.equal(flujo.actual().precio, undefined, 'sin precio escrito, la tarjeta muestra el de la banda del grado');
   flujo.actual().precio = '75.00';
   flujo.gradoNueva('liquidacion');
-  assert.equal(flujo.actual().precio, '75.00', 'el precio que escribió el dueño se conserva');
+  assert.equal(flujo.actual().precio, '75.00', 'el precio que escribió gerencia se conserva');
   flujo.actual().precio = '60.00';   // igual al de la banda anterior = sin tocar
   flujo.gradoNueva('danado'); flujo.gradoNueva('nuevo');
   await flujo.guardar();

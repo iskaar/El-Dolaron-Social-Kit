@@ -64,7 +64,7 @@ test('cupón de un ticket de un turno anterior: no sale dinero de este corte', a
   } finally { t.db.close(); }
 });
 
-test('el porcentaje del dueño, reenvío sin duplicar y pieza ya devuelta', async () => {
+test('el porcentaje de gerencia, reenvío sin duplicar y pieza ya devuelta', async () => {
   const t = await abrir();
   try {
     assert.equal((await t.pedir('/api/config', { cupon_porcentaje: 80 }, 'PUT')).status, 200);
@@ -82,7 +82,7 @@ test('el porcentaje del dueño, reenvío sin duplicar y pieza ya devuelta', asyn
   } finally { t.db.close(); }
 });
 
-test('cupón manual: el dueño lo emite directo; un reenvío no emite dos', async () => {
+test('cupón manual: gerencia lo emite directo; un reenvío no emite dos', async () => {
   const t = tienda();
   try {
     const id = crypto.randomUUID();

@@ -64,7 +64,7 @@ for (const a of document.querySelectorAll('a.tool')) {
   a.hidden = !dueno && !piden.some((r) => roles.includes(r));
 }
 document.getElementById('salir').onclick = async () => (await import('/cerrar-sesion.js')).cerrarSesion();
-document.getElementById('quien').textContent = `${usuario?.nombre || correo} · ${roles.join(', ')}`;
+document.getElementById('quien').textContent = `${usuario?.nombre || correo} · ${roles.map((r) => (r === 'dueno' ? 'gerencia' : r)).join(', ')}`;
 // Issue #429: cuántas ventas de ML esperan a alguien.
 const avisos = document.getElementById('avisos');
 if (!avisos.hidden) {

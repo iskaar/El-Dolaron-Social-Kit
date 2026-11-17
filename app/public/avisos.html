@@ -91,7 +91,7 @@
   </section>
   <section id="transferencias" hidden>
     <h2>Transferencias por validar</h2>
-    <div class="nota">Banxico no confirmó estas transferencias (no la encontró o no coincide con lo capturado). El cobro ya se hizo: revisa el dinero en la cuenta de la tienda y, si llegó, márcala como validada. Solo el dueño puede validarlas.</div>
+    <div class="nota">Banxico no confirmó estas transferencias (no la encontró o no coincide con lo capturado). El cobro ya se hizo: revisa el dinero en la cuenta de la tienda y, si llegó, márcala como validada. Solo gerencia puede validarlas.</div>
     <div id="lista-transferencias" aria-live="polite"></div>
   </section>
   <h2>Ventas de Mercado Libre por atender</h2>
@@ -176,7 +176,7 @@ function filaTransferencia(t) {
       h('div', { class: 'accion' }, motivo),
       esDueno ? h('div', { class: 'botones' }, boton,
         t.comprobante ? h('a', { class: 'boton', href: `/api/transferencias/${t.id}/comprobante`, target: '_blank', rel: 'noopener noreferrer' }, 'Ver comprobante ↗') : null)
-        : h('div', { class: 'nota' }, 'Lo valida el dueño.')));
+        : h('div', { class: 'nota' }, 'Lo valida gerencia.')));
 }
 
 // Aprobaciones del dueño desde el celular (Issue #607): mismas APIs que /cuentas e /inventario.

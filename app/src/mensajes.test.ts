@@ -109,7 +109,7 @@ test('si Meta rechaza el envío, no se guarda como enviado', async () => {
   } finally { envios.restaurar(); console.error = original; }
 });
 
-test('la lectura y la respuesta son solo del dueño', () => {
+test('la lectura y la respuesta son solo de gerencia', () => {
   assert.deepEqual(permiso('/mensajes', 'GET'), []);
   assert.deepEqual(permiso('/api/mensajes', 'GET'), []);
   assert.deepEqual(permiso('/api/mensajes/responder', 'POST'), []);

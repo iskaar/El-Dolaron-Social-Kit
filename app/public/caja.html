@@ -245,12 +245,12 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       <input id="descuento-valor" type="number" min="1" step="1" inputmode="numeric" placeholder="Cuánto" aria-label="Cuánto">
       <div id="descuento-tope" role="status" hidden></div>
       <input id="descuento-motivo" maxlength="200" placeholder="Motivo (obligatorio)" autocomplete="off">
-      <button id="enviar-descuento" type="button">Enviar al dueño</button>
+      <button id="enviar-descuento" type="button">Enviar a gerencia</button>
       <div id="descuento-pin">
-        <h3>O aprobar aquí con PIN del dueño</h3>
-        <select id="descuento-aprobador" aria-label="Dueño que aprueba"></select>
+        <h3>O aprobar aquí con PIN de gerencia</h3>
+        <select id="descuento-aprobador" aria-label="Gerencia que aprueba"></select>
         <input id="descuento-pin-dueno" type="password" inputmode="numeric" maxlength="6" autocomplete="off"
-          placeholder="PIN del dueño (6 dígitos)" aria-label="PIN del dueño">
+          placeholder="PIN de gerencia (6 dígitos)" aria-label="PIN de gerencia">
         <button id="aprobar-descuento-pin" type="button">Aprobar con PIN</button>
       </div>
       <button id="cerrar-descuento" class="claro" type="button">Cerrar</button>
@@ -347,13 +347,13 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
         <button id="vale-por-folio" type="button">Imprimir vale</button></div>
     </details>
     <details id="cupon-manual" style="margin-top:10px">
-      <summary>Cupón de Dolarones (lo autoriza el dueño)</summary>
+      <summary>Cupón de Dolarones (lo autoriza gerencia)</summary>
       <div class="socio-fila">
         <input id="cupon-importe" type="number" min="1" max="10000" step="1" inputmode="numeric" placeholder="Dolarones (1 D = $1)" style="min-width:0;flex:1">
         <input id="cupon-motivo" maxlength="200" placeholder="Motivo (obligatorio)" autocomplete="off" style="min-width:0;flex:2"></div>
       <div class="socio-fila">
-        <select id="cupon-aprobador" aria-label="Dueño que autoriza" style="min-width:0;flex:1"></select>
-        <input id="cupon-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN del dueño" style="min-width:0;flex:1"></div>
+        <select id="cupon-aprobador" aria-label="Gerencia que autoriza" style="min-width:0;flex:1"></select>
+        <input id="cupon-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN de gerencia" style="min-width:0;flex:1"></div>
       <button id="emitir-cupon" type="button">Emitir e imprimir cupón</button>
       <div id="cupon-aviso" role="status"></div>
     </details>
@@ -396,7 +396,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <input id="retiro-motivo" type="text" maxlength="200">
   <!-- #846: solo aparece cuando el servidor dice que este retiro necesita aprobacion (nunca dice el tope). Sin <form>: el Enter del lector no envia nada. -->
   <div id="retiro-aprobacion" hidden>
-    <label for="retiro-aprobador">Aprueba (supervisor o dueño)</label>
+    <label for="retiro-aprobador">Aprueba (supervisor o gerencia)</label>
     <select id="retiro-aprobador"></select>
     <label for="retiro-pin">PIN de quien aprueba</label>
     <input id="retiro-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="6 dígitos">
@@ -720,7 +720,7 @@ async function contarAvisos() {
     if (por_llegar.length) partes.push(`📥 ${pieza(por_llegar.length)} por llegar: marca «Ya llegó»`);
     if (por_regresar.length) partes.push(`↩ ${pieza(por_regresar.length)} por regresar al piso`);
     if (ml.length) partes.push(`📦 ${ml.length} venta${ml.length === 1 ? '' : 's'} de Mercado Libre por atender`);
-    if (transferencias.length) partes.push(`⚠ ${transferencias.length} transferencia${transferencias.length === 1 ? '' : 's'} por validar con el dueño`);
+    if (transferencias.length) partes.push(`⚠ ${transferencias.length} transferencia${transferencias.length === 1 ? '' : 's'} por validar con gerencia`);
     $('avisos-ml').hidden = partes.length === 0;
     $('avisos-ml').textContent = partes.join(' · ');
   } catch { /* sin red */ }
@@ -781,7 +781,7 @@ fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero, cajas, tienda })
     try { localStorage.setItem('imprimir-en', $('imprimir-en').value); } catch { /* idem */ }
   }
   if (tienda === '') {
-    $('aviso').textContent = 'Esta computadora no tiene tienda asignada. Pídele al dueño que se la asigne en Cuentas.';
+    $('aviso').textContent = 'Esta computadora no tiene tienda asignada. Pídele a gerencia que se la asigne en Cuentas.';
     $('aviso').style.color = '#D72B32';
   }
   // El dueño con su PIN en la computadora: /api/yo trae `es_dueno` del cajero en turno (no sus roles).
@@ -791,7 +791,7 @@ fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero, cajas, tienda })
   if (!caja) { pintarImpresora(); return; }
   $('caja-nombre').value = caja;
   $('caja-nombre').disabled = true;
-  $('caja-nombre').title = 'Tu caja, asignada por el dueño';
+  $('caja-nombre').title = 'Tu caja, asignada por gerencia';
   $('caja-nombre').closest('label').firstChild.textContent = 'Tu caja ';
   pintarImpresora();
 }).catch(() => { /* sin red: la de la computadora */ });
@@ -813,7 +813,7 @@ fetch('/api/yo').then((r) => r.json()).then(async ({ usuario, cajero }) => {
   let elegida = turno;
   try { const g = JSON.parse(sessionStorage.getItem('vendedora')); if (g?.turno === turno) elegida = g.correo; } catch { /* idem */ }
   $('vendedora').value = elegida;
-  if ($('vendedora').value !== elegida) $('vendedora').value = '';   // la cajera en turno puede no ser de la lista (p. ej. solo dueño)
+  if ($('vendedora').value !== elegida) $('vendedora').value = '';   // la cajera en turno puede no ser de la lista (p. ej. solo gerencia)
   $('vendedora').addEventListener('change', () => {
     try { sessionStorage.setItem('vendedora', JSON.stringify({ turno, correo: $('vendedora').value })); } catch { /* idem */ }
   });
@@ -960,7 +960,7 @@ function pintar() {
     </div>`).join('') + (descuento && !descuentoCerrado() ? `
     <div class="renglon">
       <div></div>
-      <div><div class="nombre">Descuento</div><div class="codigo">${descuento.estado === 'aprobada' ? 'aprobado' : 'esperando al dueño'}</div></div>
+      <div><div class="nombre">Descuento</div><div class="codigo">${descuento.estado === 'aprobada' ? 'aprobado' : 'esperando a gerencia'}</div></div>
       <div></div>
       <div class="importe">−${pesos(descuento.monto)}</div>
       <button type="button" data-quitar-descuento aria-label="Quitar descuento" ${cobrando ? 'disabled' : ''}>✕</button>
@@ -1180,7 +1180,7 @@ function agregarEnMano(codigo, motivo) {
   lineas = agregar(lineas, { codigo: pieza.codigo, nombre: pieza.nombre, precio: precioHoy(pieza), precio_lista: pieza.precio, producto_id: pieza.id,
     en_mano: { motivo, esperado: Math.max(0, pieza.stock) } }, 1);
   idVenta = null;
-  aviso(`${pieza.nombre}: se vende sin existencia en el sistema; el dueño lo revisa después.`, '#5b6478');
+  aviso(`${pieza.nombre}: se vende sin existencia en el sistema; gerencia lo revisa después.`, '#5b6478');
   sonar(TONO_PIEZA);
   pintar();
 }
@@ -1306,7 +1306,7 @@ function pintarDescuento(aviso = '') {
   el.style.color = '';
   if (!descuento) { el.textContent = aviso; el.style.color = aviso ? '#D72B32' : ''; return; }
   if (descuento.estado === 'pendiente') {
-    el.textContent = `Descuento de ${pesos(descuento.monto)} esperando al dueño…`;
+    el.textContent = `Descuento de ${pesos(descuento.monto)} esperando a gerencia…`;
     sondeoDescuento = setInterval(consultarDescuento, 3000);
   } else if (descuento.estado === 'aprobada') {
     el.textContent = `Descuento aprobado: −${pesos(descuento.monto)}${descuento.vence_en ? ` · vence ${horaDe(descuento.vence_en)}` : ''}`;
@@ -1314,7 +1314,7 @@ function pintarDescuento(aviso = '') {
     // Al llegar la hora, la caja lo suelta sola (pintar() lo revisa) en vez de enterarse al cobrar.
     if (descuento.vence_en) vencimientoDescuento = setTimeout(pintar, Math.max(0, Date.parse(descuento.vence_en) - Date.now()) + 500);
   } else {
-    el.textContent = descuento.estado === 'vencida' ? 'El descuento venció: pide otro.' : 'El dueño rechazó el descuento.';
+    el.textContent = descuento.estado === 'vencida' ? 'El descuento venció: pide otro.' : 'Gerencia rechazó el descuento.';
     el.style.color = '#D72B32';
   }
 }
@@ -1397,7 +1397,7 @@ $('aprobar-descuento-pin').addEventListener('click', () => enviarDescuento({
 }));
 // Tope que aplica a quien está en la caja (#845): el cajero pide hasta 10 %; el dueño en su sesión, hasta 50 %. Más de 10 % solo lo aprueba el dueño con su PIN.
 let esDuenoEnCaja = false;
-const AVISO_TOPE = 'Más de 10 %: lo aprueba el dueño con su PIN';   // el 10 es TOPE_DESCUENTO_CAJERO (venta.js)
+const AVISO_TOPE = 'Más de 10 %: lo aprueba gerencia con su PIN';   // el 10 es TOPE_DESCUENTO_CAJERO (venta.js)
 const pasaDelTopeSinDueno = (pedido, subtotal) => !esDuenoEnCaja && 'error' in descuentoDe(pedido, subtotal, TOPE_DESCUENTO_CAJERO) && !('error' in descuentoDe(pedido, subtotal));
 function pintarTopeDescuento() {
   $('descuento-valor').placeholder = `Máximo ${esDuenoEnCaja ? TOPE_DESCUENTO : TOPE_DESCUENTO_CAJERO}% del ticket`;
@@ -1867,7 +1867,7 @@ async function cobrar(forma) {
   if (sinDinero) forma = imprimirEn ? 'tarjeta' : 'efectivo';
   const usados = dolaronesPedidos();
   if (descuento?.estado === 'pendiente') {
-    $('aviso').textContent = 'El descuento sigue esperando al dueño. Espera su respuesta o aprieta «Quitar descuento».';
+    $('aviso').textContent = 'El descuento sigue esperando a gerencia. Espera su respuesta o aprieta «Quitar descuento».';
     $('aviso').style.color = '#D72B32';
     $('codigo').focus();
     return;
@@ -2064,7 +2064,7 @@ async function cobrar(forma) {
         + (venta.saldo_pedido > 0 ? `; le quedan ${pesos(venta.saldo_pedido)} a favor.` : '.');
       cargarCatalogo();   // las piezas apartadas que no se llevó vuelven a la venta
     }
-    if (excedente > 0) $('aviso').textContent += ` · Sobraron ${pesos(excedente)} en la transferencia: se registró solo lo cobrado. El excedente se resuelve a mano con el dueño.`;
+    if (excedente > 0) $('aviso').textContent += ` · Sobraron ${pesos(excedente)} en la transferencia: se registró solo lo cobrado. El excedente se resuelve a mano con gerencia.`;
     if (venta.imprimir_en) $('aviso').textContent += ` Ticket enviado a ${venta.imprimir_en}.`;
     if (venta.imprimir_en && (venta.vale_pendiente || venta.recompensa_pendiente)) $('aviso').textContent += ' Sin red: se enviará al sincronizar.';
     if (venta.vale_pendiente) $('aviso').textContent += venta.imprimir_en
@@ -2219,7 +2219,7 @@ async function pintarRechazadas() {
     <div class="ticket">
       <div><b>${pesos(totales(v.lineas).total)}</b> rechazada — ${escapar(v.motivo)}</div>
       <div class="nota">${new Date(v.creado_en).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })} · ${escapar(v.forma_pago)} · ${totales(v.lineas).piezas} ${totales(v.lineas).piezas === 1 ? 'pieza' : 'piezas'} ·
-        ${v.reportada === 'fallo' ? 'No se pudo avisar al dueño: avísale en persona antes de descartar.' : v.reportada ? 'Ya se le avisó al dueño.' : 'Avisando al dueño… (necesita red)'}</div>
+        ${v.reportada === 'fallo' ? 'No se pudo avisar a gerencia: avísale en persona antes de descartar.' : v.reportada ? 'Ya se le avisó a gerencia.' : 'Avisando a gerencia… (necesita red)'}</div>
       <div>
         <button type="button" data-reintentar="${v.id}">Reintentar</button>
         <button type="button" data-descartar="${v.id}" ${v.reportada ? '' : 'disabled'}>${descartarListo === v.id ? '¿Seguro? Descartar' : 'Descartar'}</button>
@@ -2573,7 +2573,7 @@ $('ticket-contenido').addEventListener('click', async (e) => {
       return;
     }
     if (r.status === 202) {
-      panel.innerHTML = `<p class="esperando">Esperando aprobación del dueño…</p>
+      panel.innerHTML = `<p class="esperando">Esperando aprobación de gerencia…</p>
         <p class="nota">Puedes cerrar esta ventana: avisaremos aquí cuando responda.</p>`;
       if (pieza) revisarDevoluciones();   // la solicitud de una pieza se vigila con lo que dice el servidor (sobrevive a recargar y a varias a la vez)
       else esperarAprobacion(cuerpo.solicitud_id, ticketAbierto.id);
@@ -2737,14 +2737,14 @@ async function terminarCancelacion(r, cuerpo, { linea, cantidad }) {
 function panelAprobacion({ error, duenos = [] }, conVolver = false) {
   return `<div class="aprobacion form-cancelar">
     <p class="nota" style="color:#D72B32;margin:0">${escapar(error)}</p>
-    <h3>Aprobar aquí con PIN del supervisor o del dueño</h3>
+    <h3>Aprobar aquí con PIN del supervisor o de gerencia</h3>
     ${duenos.length === 0
-      ? '<p class="nota">Nadie con permiso tiene PIN. Usa «Enviar al dueño».</p>'
+      ? '<p class="nota">Nadie con permiso tiene PIN. Usa «Enviar a gerencia».</p>'
       : `<select class="aprobador">${duenos.map((u) => `<option value="${escapar(u.correo)}">${escapar(u.nombre || u.correo)}</option>`).join('')}</select>
          <input type="password" class="pin-dueno" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN de quien aprueba (6 dígitos)">
          <div class="botones"><button type="button" class="quitar" data-aprobar-pin>Aprobar con PIN</button></div>`}
     <h3>O que lo apruebe a distancia</h3>
-    <div class="botones"><button type="button" class="secundario" data-enviar-dueno>Enviar al dueño</button></div>
+    <div class="botones"><button type="button" class="secundario" data-enviar-dueno>Enviar a gerencia</button></div>
     ${conVolver ? '<div class="botones"><button type="button" class="secundario" data-volver>Volver y ofrecer cupón</button></div>' : ''}
     <div class="aviso-dialogo aviso-aprobacion"></div>
   </div>`;
@@ -2773,8 +2773,8 @@ async function consultarAprobacion() {
   clearInterval(esperando.timer);
   esperando = null;
   const aprobada = estado === 'aprobada';
-  const texto = aprobada ? 'El dueño aprobó la cancelación del ticket.'
-    : estado === 'rechazada' ? 'El dueño rechazó la cancelación: el ticket sigue vigente.'
+  const texto = aprobada ? 'Gerencia aprobó la cancelación del ticket.'
+    : estado === 'rechazada' ? 'Gerencia rechazó la cancelación: el ticket sigue vigente.'
     : 'No se encontró la solicitud de cancelación.';
   const abierto = $('dialogo-ticket').open && ticketAbierto?.id === ticketId;
   if (abierto) {
@@ -2817,7 +2817,7 @@ async function mostrarSolicitudResuelta(s) {
     try { const r = await fetch(`/api/ventas/${s.venta_id}`); if (r.ok) ticket = await r.json(); } catch { return false; }   // sin red: se intenta de nuevo
     const i = ticket ? ticket.devoluciones.findIndex((x) => x.id === s.id) : -1;
     if (i < 0) return true;   // aprobada sin devolución: no está hecha, no se imprime nada
-    texto = `El dueño aprobó devolver el dinero: devuelve ${pesos(ticket.devoluciones[i].importe)} (${s.resumen ?? 'la pieza'}) y regresa la pieza al anaquel.`;
+    texto = `Gerencia aprobó devolver el dinero: devuelve ${pesos(ticket.devoluciones[i].importe)} (${s.resumen ?? 'la pieza'}) y regresa la pieza al anaquel.`;
     color = '#1f7a4d';
     if (reciente && impresoraLista()) {
       const ok = await imprimirDevolucion(comprobanteDevolucion(ticket, i));
@@ -2828,7 +2828,7 @@ async function mostrarSolicitudResuelta(s) {
     }
     await cargarTickets(); await actualizarCorte(); await cargarCatalogo();
   } else {
-    texto = s.rechazo ? `No se devolvió nada (${s.resumen ?? 'la pieza'}): ${s.rechazo}` : `El dueño rechazó devolver el dinero (${s.resumen ?? 'la pieza'}): no se devolvió nada. Ofrece el cupón.`;
+    texto = s.rechazo ? `No se devolvió nada (${s.resumen ?? 'la pieza'}): ${s.rechazo}` : `Gerencia rechazó devolver el dinero (${s.resumen ?? 'la pieza'}): no se devolvió nada. Ofrece el cupón.`;
   }
   if (abierto) {
     await abrirTicket(s.venta_id);
@@ -3018,7 +3018,7 @@ function pintarTipoSalida() {
   $('retiro-nota').textContent = gasto
     ? 'Algo que se pagó con dinero del cajón (agua, limpieza, papelería). Hasta $100 no necesita aprobación; guarda el ticket de la compra.'
     : tipo === 'terminal'
-      ? 'Efectivo que entrega el dueño de la terminal por las ventas con tarjeta. Cuéntalo frente a él; se imprime un comprobante para que lo firme.'
+      ? 'Efectivo que entrega el titular de la terminal por las ventas con tarjeta. Cuéntalo frente a él; se imprime un comprobante para que lo firme.'
       : 'Dinero que se saca del cajón para guardarlo (caja fuerte, banco). Se imprime un comprobante para firmar.';
   $('retiro-etiqueta-motivo').textContent = gasto ? 'En qué se gastó' : tipo === 'terminal' ? 'Nota (opcional)' : 'Motivo';
   $('retiro-motivo').placeholder = gasto ? 'Garrafón de agua, jabón…' : tipo === 'terminal' ? 'Pago de la terminal' : 'Caja fuerte, depósito al banco…';
@@ -3063,7 +3063,7 @@ $('retiro-salir').addEventListener('click', () => { $('dialogo-retiro').close();
 // Gasto de más de $100 (#817): se avisa al escribir el importe, sin esperar al servidor. Quien decide sigue siendo el servidor.
 function avisarGastoGrande() {
   const grande = gastoRequiereDueno(tipoSalida(), Math.round(Number($('retiro-importe').value || 0) * 100));
-  $('retiro-aviso').textContent = grande ? 'Más de $100: lo registra el dueño.' : '';
+  $('retiro-aviso').textContent = grande ? 'Más de $100: lo registra gerencia.' : '';
 }
 $('retiro-importe').addEventListener('input', () => { ocultarAprobacionRetiro(); avisarGastoGrande(); });
 $('dialogo-retiro').addEventListener('change', (e) => { if (e.target.name === 'tipo-salida') avisarGastoGrande(); });
@@ -3091,7 +3091,7 @@ $('retiro-registrar').addEventListener('click', async () => {
       const duenos = retiro.duenos ?? [];
       $('retiro-aprobador').innerHTML = duenos.map((u) => `<option value="${escapar(u.correo)}">${escapar(u.nombre || u.correo)}</option>`).join('');
       $('retiro-aprobacion').hidden = false;
-      $('retiro-aviso').textContent = duenos.length ? retiro.error : 'Este retiro necesita aprobación, pero nadie con permiso tiene PIN. Avisa al dueño.';
+      $('retiro-aviso').textContent = duenos.length ? retiro.error : 'Este retiro necesita aprobación, pero nadie con permiso tiene PIN. Avisa a gerencia.';
       if (duenos.length) $('retiro-pin').focus();
       return;
     }
@@ -3239,9 +3239,9 @@ $('abrir-corte').addEventListener('click', async () => {
     $('corte-aviso').textContent = sinEnviar;
   } else if (rechazadas) {
     const sinAvisar = cola.some((v) => v.estado === 'rechazada' && !v.reportada);
-    $('corte-aviso').textContent = cola.some((v) => v.reportada === 'fallo') ? `Hay ${rechazadas} ventas rechazadas y no se pudo avisar al dueño. Avísale en persona antes de descartar.`
-      : sinAvisar ? `Hay ${rechazadas} ventas rechazadas y aún no se le avisa al dueño: necesita red. Avísale en persona.`
-      : `Hay ${rechazadas} ventas rechazadas. Ya se le avisó al dueño; descártalas cuando te lo indique.`;
+    $('corte-aviso').textContent = cola.some((v) => v.reportada === 'fallo') ? `Hay ${rechazadas} ventas rechazadas y no se pudo avisar a gerencia. Avísale en persona antes de descartar.`
+      : sinAvisar ? `Hay ${rechazadas} ventas rechazadas y aún no se le avisa a gerencia: necesita red. Avísale en persona.`
+      : `Hay ${rechazadas} ventas rechazadas. Ya se le avisó a gerencia; descártalas cuando te lo indique.`;
   } else {
     $('corte-registrar').disabled = false;
   }
@@ -3492,7 +3492,7 @@ $('conectar-impresora').addEventListener('click', async () => {
 pintarRed();
 await cargarCatalogo();
 if (ticketRecuperado) {
-  pintarDescuento();   // si seguía esperando al dueño, vuelve a preguntar
+  pintarDescuento();   // si seguía esperando a gerencia, vuelve a preguntar
   $('aviso').textContent = 'Se recuperó el ticket que estaba en curso. Para borrarlo: «Cancelar venta» o Esc dos veces.';
   $('aviso').style.color = '#5b6478';
 }

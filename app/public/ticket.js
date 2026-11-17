@@ -45,7 +45,7 @@ export function pintarDetalle(t, { editable = false, resaltar = [], fechas = { f
   asegurarEstilos();
   const { fecha, hora } = fechas;   // reportes pasa los formatos compartidos (graficas.js); la caja, los de siempre
   const quedan = t.lineas.reduce((n, l) => n + l.cantidad - l.cancelada_cantidad, 0);
-  const pendiente = t.devolucion_pendiente;   // #837: una devolución de dinero espera al dueño; mientras tanto el ticket no se toca
+  const pendiente = t.devolucion_pendiente;   // #837: una devolución de dinero espera a gerencia; mientras tanto el ticket no se toca
   const puedeCancelar = editable && !t.cancelada && quedan > 0 && !pendiente;
   const socio = t.socio ? ` · Socio #${t.socio.numero} ${escapar(t.socio.nombre)}` : '';
 
@@ -93,7 +93,7 @@ export function pintarDetalle(t, { editable = false, resaltar = [], fechas = { f
     </ul>`;
   const puedeCorregir = editable && !t.cancelada && (t.corregible ?? []).length > 0;
 
-  const esperando = !pendiente ? '' : `<p class="ticket-cancelado" role="status">Hay una devolución esperando al dueño en este ticket${pendiente.resumen ? `: ${escapar(pendiente.resumen)}` : ''}.
+  const esperando = !pendiente ? '' : `<p class="ticket-cancelado" role="status">Hay una devolución esperando a gerencia en este ticket${pendiente.resumen ? `: ${escapar(pendiente.resumen)}` : ''}.
       ${editable ? `<button type="button" class="secundario" data-retirar-solicitud="${escapar(pendiente.id)}">Retirar la solicitud</button>` : ''}</p>`;
 
   return `
@@ -159,7 +159,7 @@ export function formularioPieza(lineaId, quedan, cupon = null, forma = 'efectivo
       <input type="text" class="motivo-cancelar" maxlength="200" placeholder="Motivo de la cancelación">
       ${botonCupon(cupon, `data-cupon-linea="${lineaId}"`)}
       <div class="dinero">
-        <small>${cupon ? 'Si el cliente prefiere su dinero' : 'Para devolver dinero'}: lo aprueba tu supervisor o el dueño (con su PIN aquí, o enviando la solicitud al dueño).</small>
+        <small>${cupon ? 'Si el cliente prefiere su dinero' : 'Para devolver dinero'}: lo aprueba tu supervisor o gerencia (con su PIN aquí, o enviando la solicitud a gerencia).</small>
         ${forma !== 'efectivo' ? `<select class="devolver-en" aria-label="Cómo se devuelve el dinero">
           <option value="">¿Cómo se devuelve el dinero?</option>
           <option value="${forma}">${forma === 'tarjeta' ? 'A la tarjeta, en la terminal' : 'Por transferencia'}</option>

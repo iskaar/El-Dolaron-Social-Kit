@@ -116,7 +116,7 @@ export const PROGRAMAS: Programa[] = [
 export const SIN_VENTA: { tiposD?: string[]; origenes?: string[]; razon: string }[] = [
   { tiposD: ['alta_referido'], razon: 'Los 50 D al unirse al portal con un código (referidos.ts); no hay venta.' },
   { tiposD: ['regalo', 'reemplazo'], origenes: ['regalo'], razon: 'Premio de apertura del portal (portal.ts); no depende de una compra.' },
-  { origenes: ['devolucion', 'manual'], razon: 'Cupón que nace de una devolución o lo emite la caja con un dueño; al gastarse es un canje de vale (programa vales-usados).' },
+  { origenes: ['devolucion', 'manual'], razon: 'Cupón que nace de una devolución o lo emite la caja con gerencia; al gastarse es un canje de vale (programa vales-usados).' },
 ];
 
 /**

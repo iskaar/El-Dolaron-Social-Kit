@@ -40,7 +40,7 @@ function pantalla(memoria: Map<string, string>, enviar: (ruta: string, cuerpo: a
   };
   const bloque = fuente.slice(fuente.indexOf('const CLAVE_MOVIMIENTO ='), fuente.indexOf('\npintar();\nawait cargarCatalogo();'));
   // Las ayudas de clave de rastreo (#593) viven antes del bloque: centavos, leerTransferencia, errorTransferencia, avisoExcedente.
-  const ayudas = fuente.slice(fuente.indexOf('const centavos ='), fuente.indexOf("dueño.` : '';") + "dueño.` : '';".length);
+  const ayudas = fuente.slice(fuente.indexOf('const centavos ='), fuente.indexOf("gerencia.` : '';") + "gerencia.` : '';".length);
   const abrir = runInNewContext(`${ayudas}\n${bloque}\nabrirMovimiento`, contexto);
   return { $, abrir, guardar: () => $('form-mover').submit({ preventDefault() {} }) };
 }

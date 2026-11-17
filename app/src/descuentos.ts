@@ -72,7 +72,7 @@ export async function pedirDescuento(request: Request, env: Env, correo: string,
   }
   // Quien pide sin el dueno (ni su PIN) llega a 10 %; hasta 50 % solo con el dueno. Lo decide el servidor, no la caja.
   if (!aprobo && 'error' in descuentoDe(pedido, subtotal, TOPE_DESCUENTO_CAJERO))
-    return json({ error: `Más de ${TOPE_DESCUENTO_CAJERO} %: lo aprueba el dueño con su PIN.` }, 403);
+    return json({ error: `Más de ${TOPE_DESCUENTO_CAJERO} %: lo aprueba gerencia con su PIN.` }, 403);
 
   const id = crypto.randomUUID();
   const ahora = new Date().toISOString();
@@ -123,7 +123,7 @@ export async function resolverDescuento(env: Env, id: string, aprobar: boolean, 
   if (!gano.meta.changes) {
     const fila = await env.DB.prepare('select estado, resuelto_por from solicitudes where id = ?').bind(id).first<{ estado: string; resuelto_por: string | null }>();
     return json({ error: fila?.estado === 'pendiente' ? 'Esa solicitud venció (pasaron 30 minutos): que la pidan otra vez.'
-      : fila?.resuelto_por === 'quitada' ? AVISO_QUITADA : 'Otro dueño ya la resolvió.' }, 409);
+      : fila?.resuelto_por === 'quitada' ? AVISO_QUITADA : 'Otra persona ya la resolvió.' }, 409);
   }
   return json({ id, estado: aprobar ? 'aprobada' : 'rechazada' });
 }

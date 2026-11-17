@@ -312,7 +312,7 @@ async function cambiarExistencia(request: Request, env: Env, id: string, usuario
   // #795: `tienda` (solo el dueño) ajusta la existencia de una sucursal; sin ella, Soledad como siempre.
   if (cuerpo.tienda !== undefined && cuerpo.tienda !== TIENDA_CENTRAL) {
     if (!esTienda(cuerpo.tienda)) return json({ error: 'Tienda inválida.' }, 400);
-    if (!usuario?.roles.includes('dueno')) return json({ error: 'Solo el dueño ajusta la existencia de una sucursal.' }, 403);
+    if (!usuario?.roles.includes('dueno')) return json({ error: 'Solo gerencia ajusta la existencia de una sucursal.' }, 403);
     if (motivo === 'entrada') return json({ error: 'En una sucursal la existencia llega por bulto: ajusta con corrección.' }, 400);
     return ajustarSucursal(env, id, cuerpo.tienda, cuerpo, usuario, delta, motivo, fijar ? cuerpo.esperado as number : undefined);
   }

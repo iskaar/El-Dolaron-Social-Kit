@@ -287,7 +287,7 @@ test('referidos: cuenta pendientes y liberados y dice cuando no hay', async () =
   t.db.close();
 });
 
-test('parametros invalidos y permiso: solo el dueno', async () => {
+test('parametros invalidos y permiso: solo gerencia', async () => {
   const t = tienda();
   assert.equal((await llamar(t, 'dias=7&comparar=ayer')).status, 400);
   assert.equal((await llamar(t, 'dias=7&grano=hora')).status, 400);

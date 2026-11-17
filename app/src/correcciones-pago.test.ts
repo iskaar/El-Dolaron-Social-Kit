@@ -42,7 +42,7 @@ function montar() {
   return { ...t, como, vender, corregir, cortar, venta, rastros, entreLecturaYBatch };
 }
 
-const AVISO_CORTE = 'Este ticket ya entró a un corte de caja: su forma de pago ya no se puede corregir aquí. Avísale al dueño.';
+const AVISO_CORTE = 'Este ticket ya entró a un corte de caja: su forma de pago ya no se puede corregir aquí. Avísale a gerencia.';
 
 test('efectivo a tarjeta: el ticket cambia, deja su rastro y el corte espera menos efectivo y más tarjeta', async () => {
   const t = montar();
@@ -387,14 +387,14 @@ test('caja.html: la corrección manda el id de la caja, la caja y el motivo; ref
 
 // ---- Revisión de #833: día, caja propia, transferencia del dueño, aviso al dueño y cuenta del corte ----
 
-test('solo ventas de hoy: un ticket de otro día no se corrige, ni por el dueño, y no aparece como corregible', async () => {
+test('solo ventas de hoy: un ticket de otro día no se corrige, ni por gerencia, y no aparece como corregible', async () => {
   const t = montar();
   const id = await t.vender();
   t.db.prepare(`update ventas set creado_en = '2026-01-05T18:00:00.000Z' where id = ?`).run(id);
   for (const quien of [DUENO, CAJERO]) {
     t.como(quien);
     const r = await t.corregir(id, 'tarjeta');
-    assert.deepEqual([r.status, r.cuerpo.error], [409, 'Solo se corrigen ventas de hoy. Avísale al dueño.'], quien);
+    assert.deepEqual([r.status, r.cuerpo.error], [409, 'Solo se corrigen ventas de hoy. Avísale a gerencia.'], quien);
     assert.deepEqual((await t.pedir(`/api/ventas/${id}?caja=Caja%201`)).cuerpo.corregible, [], quien);
   }
   assert.equal(t.venta(id).forma_pago, 'efectivo');
@@ -411,17 +411,17 @@ test('la condición del día va dentro de la sentencia: un ticket que deja de se
   assert.equal(t.rastros().length, 0);
 });
 
-test('un ticket sin caja no se corrige (nunca recibe un corte), ni por el dueño', async () => {
+test('un ticket sin caja no se corrige (nunca recibe un corte), ni por gerencia', async () => {
   const t = montar();
   const id = await t.vender({ caja: '' });
   assert.equal((t.db.prepare('select caja from ventas where id = ?').get(id) as { caja: string }).caja, '');
   const r = await t.corregir(id, 'tarjeta', { caja: '' });
-  assert.deepEqual([r.status, r.cuerpo.error], [409, 'Este ticket no tiene caja: su forma de pago no se puede corregir aquí. Avísale al dueño.']);
+  assert.deepEqual([r.status, r.cuerpo.error], [409, 'Este ticket no tiene caja: su forma de pago no se puede corregir aquí. Avísale a gerencia.']);
   assert.deepEqual((await t.pedir(`/api/ventas/${id}`)).cuerpo.corregible, []);
   assert.equal(t.rastros().length, 0);
 });
 
-test('cada cajero corrige desde su caja: otra caja es 403 con el nombre de la caja; el dueño no tiene esa regla', async () => {
+test('cada cajero corrige desde su caja: otra caja es 403 con el nombre de la caja; gerencia no tiene esa regla', async () => {
   const t = montar();
   const id = await t.vender({ caja: 'Caja 2' });
   t.como(CAJERO);
@@ -438,12 +438,12 @@ test('cada cajero corrige desde su caja: otra caja es 403 con el nombre de la ca
   assert.equal(t.rastros(otro)[0].caja, 'Caja 1');
 });
 
-test('de o hacia transferencia solo lo hace el dueño; el cajero entre efectivo y tarjeta', async () => {
+test('de o hacia transferencia solo lo hace gerencia; el cajero entre efectivo y tarjeta', async () => {
   const t = montar();
   const efectivo = await t.vender();
   const transferencia = await t.vender({ forma_pago: 'transferencia', efectivo: 0 });   // menos de $300: sin clave
   t.como(CAJERO);
-  const mensaje = 'Cambiar a o desde transferencia lo hace el dueño.';
+  const mensaje = 'Cambiar a o desde transferencia lo hace gerencia.';
   let r = await t.corregir(efectivo, 'transferencia');
   assert.deepEqual([r.status, r.cuerpo.error], [403, mensaje]);
   r = await t.corregir(transferencia, 'tarjeta');
@@ -460,7 +460,7 @@ test('de o hacia transferencia solo lo hace el dueño; el cajero entre efectivo 
   assert.equal((await t.corregir(efectivo, 'transferencia')).status, 201);
 });
 
-test('cada corrección le avisa al dueño una sola vez, con caja, tienda, ticket, importe, formas y motivo; un reenvío o un rechazo no avisan', async () => {
+test('cada corrección le avisa a gerencia una sola vez, con caja, tienda, ticket, importe, formas y motivo; un reenvío o un rechazo no avisan', async () => {
   const t = montar();
   const correos: { to: string; subject: string; text: string }[] = [];
   t.env.CORREO = { async send(m: { to: string; subject: string; text: string }) { correos.push(m); return { messageId: 'x' }; } } as never;

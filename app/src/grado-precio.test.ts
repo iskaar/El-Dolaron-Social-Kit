@@ -47,18 +47,18 @@ test('celular: corregir el grado de una pieza confirmada recalcula el precio; si
   assert.deepEqual([t.fila(id).estado_fisico, t.fila(id).precio], ['liquidacion', precios.danado], 'sin precio de lista no hay banda que aplicar');
 });
 
-test('celular: capturista sin permiso de precio con etiqueta → el grado se guarda y el precio nuevo se pide al dueño', async (t0) => {
+test('celular: capturista sin permiso de precio con etiqueta → el grado se guarda y el precio nuevo se pide a gerencia', async (t0) => {
   const t = montar('cap@prueba.mx'); t0.after(async () => { await t.esperar(); t.db.close(); });
   const { id, precios } = await t.confirmada();
   t.db.prepare("update productos set codigo = 'ED-000777' where id = ?").run(id);
   const r = await t.pedir(`/api/borradores/${id}/revision`, { estado_fisico: 'danado' }, 'PATCH');
   assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
-  assert.ok(r.cuerpo.aviso, 'avisa que se pidió al dueño');
+  assert.ok(r.cuerpo.aviso, 'avisa que se pidió a gerencia');
   assert.deepEqual([t.fila(id).estado_fisico, t.fila(id).precio], ['danado', precios.nuevo], 'grado nuevo, precio de la etiqueta intacto');
   assert.deepEqual(t.solicitudes(id).map((s) => [s.sentido, s.precio_actual, s.precio_sugerido]), [['bajar', precios.nuevo, precios.danado]]);
 });
 
-test('Revisar/admin: PATCH con solo el grado recalcula, un precio escrito manda y sin permiso se pide al dueño', async (t0) => {
+test('Revisar/admin: PATCH con solo el grado recalcula, un precio escrito manda y sin permiso se pide a gerencia', async (t0) => {
   const t = montar(); t0.after(async () => { await t.esperar(); t.db.close(); });
   const { id, precios } = await t.confirmada();
   const p = () => ({ ...t.fila(id), nombre: 'Lámpara', marca: '', talla: '', categoria: 'otros', stock: 2 });

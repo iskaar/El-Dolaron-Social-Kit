@@ -77,7 +77,7 @@
 
 <script type="module">
 const escapar = (texto) => String(texto ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
-const NOMBRES = { dueno: 'Dueño', cajero: 'Cajero', capturista: 'Capturista', computadora: 'Computadora de caja (pide PIN)', supervisor: 'Supervisor (aprueba devoluciones de dinero)' };
+const NOMBRES = { dueno: 'Gerencia', cajero: 'Cajero', capturista: 'Capturista', computadora: 'Computadora de caja (pide PIN)', supervisor: 'Supervisor (aprueba devoluciones de dinero)' };
 let ROLES = [];
 let CAJAS = [];
 let TIENDAS = [];   // [{ clave, nombre, cajas }] (#793)
@@ -206,7 +206,7 @@ async function cargar() {
           <div class="correo">${escapar(u.correo)}</div></div>
         <div><div class="roles">${casillas(u.roles)}</div>
           <label><input type="checkbox" data-campo="editar_inventario" ${u.editar_inventario ? 'checked' : ''}> Editar inventario</label>
-          <small>Capturista o FEP; el dueño siempre puede.</small></div>
+          <small>Capturista o FEP; gerencia siempre puede.</small></div>
         ${selectorTienda(u.tienda)}
         ${selectorCaja(u.caja, u.tienda)}
         <input type="password" data-campo="pin" inputmode="numeric" maxlength="6" autocomplete="new-password"

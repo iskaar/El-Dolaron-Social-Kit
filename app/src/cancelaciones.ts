@@ -18,7 +18,7 @@ import { avisarDueno } from './avisos.ts';
 export const VENTANA_CANCELACION_MS = 5 * 60_000;
 
 /** Mientras una devolución de dinero espera al dueño, el ticket no cambia por otro camino (#837): la solicitud quedó atada a cómo estaba. */
-export const HAY_DEVOLUCION = 'Hay una devolución esperando al dueño en este ticket.';
+export const HAY_DEVOLUCION = 'Hay una devolución esperando a gerencia en este ticket.';
 export const devolucionPendiente = async (env: Env, ventaId: string): Promise<{ id: string; correo: string; resumen: string | null } | null> =>
   env.DB.prepare(`select id, correo, json_extract(datos, '$.resumen') as resumen from solicitudes
     where tipo = 'devolucion' and estado = 'pendiente' and json_extract(datos, '$.venta_id') = ? limit 1`)
@@ -220,8 +220,8 @@ export async function cancelarVenta(id: string, request: Request, env: Env, corr
 
   return json({
     requiere_aprobacion: true,
-    error: `Pasaron más de ${VENTANA_CANCELACION_MS / 60_000} minutos: necesita aprobación del supervisor o del dueño.`,
-    duenos: await aprobadoresDeDinero(env, tienda),   // dueño y supervisores de esta tienda con PIN; la solicitud a distancia sigue yendo al dueño
+    error: `Pasaron más de ${VENTANA_CANCELACION_MS / 60_000} minutos: necesita aprobación del supervisor o de gerencia.`,
+    duenos: await aprobadoresDeDinero(env, tienda),   // dueño y supervisores de esta tienda con PIN; la solicitud a distancia sigue yendo a gerencia
   }, 403);
 }
 
@@ -235,7 +235,7 @@ export async function resolverCancelacion(env: Env, id: string, aprobar: boolean
     `update solicitudes set estado = ?, resuelto_en = ?, resuelto_por = ? where id = ? and estado = 'pendiente'`,
   ).bind(estado, ahora, dueno, id);
 
-  const yaResuelta = () => json({ error: 'Otro dueño ya la resolvió.' }, 409);
+  const yaResuelta = () => json({ error: 'Otra persona ya la resolvió.' }, 409);
   if (!aprobar) {
     if (!(await marcar('rechazada').run()).meta.changes) return yaResuelta();
     return json({ id, estado: 'rechazada' });

@@ -306,7 +306,7 @@ test('prendas de calzado y accesorios en el rodillo y Unitalla como chip de tall
   assert.equal(chips.children.find(n=>n.dataset.valor==='Niño')!.getAttribute('aria-pressed'),'false');
 });
 
-test('«Otro precio» (#714): solo aparece para el dueño, acepta pesos y no se mueve al desplazar el rodillo',()=>{
+test('«Otro precio» (#714): solo aparece para gerencia, acepta pesos y no se mueve al desplazar el rodillo',()=>{
   const sin=ropaUI(),normal=sin.ropa({pc:()=>false,mensaje:()=>{}});normal.sincronizar();
   const botones=(n:any):any[]=>[n,...n.children.flatMap(botones)];
   assert.equal(botones(normal.raiz).some(n=>n.textContent==='Otro precio'),false,'quien no fija precios no lo ve');

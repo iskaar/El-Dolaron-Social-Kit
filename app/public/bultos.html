@@ -154,7 +154,7 @@ document.querySelector('nav').addEventListener('click', (e) => { const b = e.tar
 const nombresDeTiendas = Object.entries(TIENDAS);
 $('destino').innerHTML = nombresDeTiendas.filter(([c]) => dueno || c !== 'soledad').map(([c, n]) => `<option value="${c}">${n}</option>`).join('');
 $('origen').innerHTML = nombresDeTiendas.map(([c, n]) => `<option value="${c}">${n}</option>`).join('');
-$('fila-origen').hidden = !dueno;   // solo el dueño arma desde una sucursal (regresar mercancía a Soledad)
+$('fila-origen').hidden = !dueno;   // solo gerencia arma desde una sucursal (regresar mercancía a Soledad)
 
 const lineas = (b) => b.lineas.length === 0 ? '<p class="vacio">Sin piezas todavía.</p>' : b.lineas.map((l) => `
   <div class="fila"><span class="grande"><b>${escapar(l.codigo)}</b> ${escapar(l.nombre)} <small>×${l.cantidad} · ${pesos(l.precio)}</small></span>

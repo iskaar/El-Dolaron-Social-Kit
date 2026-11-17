@@ -104,7 +104,7 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
   if (tipo === 'gasto' && importe > LIMITE_GASTO_CAJERO) {
     const usuario = await leerUsuario(env, correo);
     if (!usuario?.roles.includes('dueno')) {
-      return json({ error: `Los gastos de mas de $${LIMITE_GASTO_CAJERO / 100} los registra el dueno.` }, 403);
+      return json({ error: `Los gastos de mas de $${LIMITE_GASTO_CAJERO / 100} los registra gerencia.` }, 403);
     }
   }
   // La columna `aprobo_por` llega con la migracion 084. Si el codigo se despliega antes, todo sigue como antes de #846 salvo lo que exige aprobacion.
@@ -122,7 +122,7 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
   // Sin aprobacion no se registra nada y la caja no abre el cajon. Lo decide el servidor: la caja solo se entera de que hace falta, no del tope.
   let aprobo: string | null = null;
   if (tipo === 'retiro' && await retiroNecesitaAprobacion(env, importe)) {
-    if (!tieneAprobo) return json({ error: 'Falta actualizar el sistema: avisa al dueño.' }, 503);   // antes de pedir PIN: no gasta intentos
+    if (!tieneAprobo) return json({ error: 'Falta actualizar el sistema: avisa a gerencia.' }, 503);   // antes de pedir PIN: no gasta intentos
     const usuario = await leerUsuario(env, correo);
     if (usuario && apruebaDinero(usuario.roles)) aprobo = correo;
     else if (cuerpo.aprobador) {
@@ -132,7 +132,7 @@ export async function registrarRetiro(request: Request, env: Env, correo: string
     } else {
       return json({
         requiere_aprobacion: true,
-        error: 'Este retiro necesita la aprobación del supervisor o del dueño: teclea su PIN en esta ventana.',
+        error: 'Este retiro necesita la aprobación del supervisor o de gerencia: teclea su PIN en esta ventana.',
         duenos: await aprobadoresDeDinero(env, tienda),
       }, 403);
     }
@@ -153,7 +153,7 @@ export interface Corte {
   tarjeta_sistema: number; tarjeta_terminal: number; transferencias: number; dolarones: number;
   fondo_siguiente: number; entregado: number; conteo: string; notas: string; creado_en: string;
   fep_por_pagar: number;   // lo cobrado de piezas de FEP en esta caja, a pagarle a FEP (Issue #298)
-  entrada_terminal: number;   // efectivo que entrego el dueno de la terminal a este cajon (Issue #515)
+  entrada_terminal: number;   // efectivo que entrego el titular de la terminal a este cajon (Issue #515)
   formas_corregidas: number;   // tickets de este corte cuya forma de pago se corrigio (Issue #831)
 }
 
@@ -249,7 +249,7 @@ export async function registrarCorte(request: Request, env: Env, correo: string,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'retiro') as re,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'gasto') as ga,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'nomina') as no,
-           -- Entra: el dueno de la terminal paga en efectivo lo cobrado con tarjeta (Issue #515).
+           -- Entra: el titular de la terminal paga en efectivo lo cobrado con tarjeta (Issue #515).
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'terminal') as te,
            (select ${dinero('tarjeta', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('tarjeta')} + ${enEfectivo('tarjeta')} as tv,
            (select ${dinero('tarjeta', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('tarjeta')} as td,
@@ -305,7 +305,7 @@ export async function rutaTerminal(request: Request, env: Env, correo: string): 
     await env.DB.prepare(
       `insert into retiros (id, tipo, caja, cajero, importe, motivo, creado_en, categoria) values (?, 'terminal', '', ?, ?, ?, ?, '')
        on conflict (id) do nothing`,
-    ).bind(id, correo, importe, texto(cuerpo.motivo, 200) || 'Pago de la terminal al dueño', new Date().toISOString()).run();
+    ).bind(id, correo, importe, texto(cuerpo.motivo, 200) || 'Pago de la terminal a gerencia', new Date().toISOString()).run();
   } else if (request.method !== 'GET') return json({ error: 'Metodo no permitido.' }, 405);
 
   const { results: cortes } = await env.DB.prepare(
