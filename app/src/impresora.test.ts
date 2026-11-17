@@ -49,6 +49,7 @@ test('explicarErrorUsb siempre trae el error real; Access denied y NetworkError 
 function impresoraFalsa() {
   const pedazos: Uint8Array[] = [];
   const dev = {
+    vendorId: 0x04b8,
     opened: false,
     configuration: { configurationValue: 1 },
     configurations: [{ interfaces: [{ interfaceNumber: 0, alternates: [{ endpoints: [{ direction: 'out', endpointNumber: 1 }] }] }] }],
@@ -67,6 +68,32 @@ function impresoraFalsa() {
   Object.defineProperty(globalThis.navigator, 'usb', { value: { getDevices: async () => [dev] }, configurable: true });
   return { dev, pedazos };
 }
+
+test('Conectar impresora ofrece la Epson y la Kinwodon POS80', async () => {
+  let filtros: unknown;
+  const kinwodon = { ...impresoraFalsa().dev, vendorId: 0x0416, opened: false };
+  Object.defineProperty(globalThis.navigator, 'usb', {
+    value: { requestDevice: async (opciones: { filters: unknown }) => { filtros = opciones.filters; return kinwodon; } },
+    configurable: true,
+  });
+  const { conectarImpresora, impresoraLista } = await import('../public/impresora.js');
+  await conectarImpresora();
+  assert.deepEqual(filtros, [{ vendorId: 0x04b8 }, { vendorId: 0x0416 }]);
+  assert.equal(impresoraLista(), true);
+});
+
+test('al cargar reabre la impresora de tickets, no otro USB que la sonda haya autorizado', async () => {
+  const { dev } = impresoraFalsa();
+  const kinwodon = { ...dev, vendorId: 0x0416, opened: false, async open() { kinwodon.opened = true; } };
+  const otro = { ...dev, vendorId: 0x1234, opened: false, async open() { otro.opened = true; } };
+  const { reconectarImpresora } = await import('../public/impresora.js');
+  Object.defineProperty(globalThis.navigator, 'usb', { value: { getDevices: async () => [otro, kinwodon] }, configurable: true });
+  assert.equal(await reconectarImpresora(), true);
+  assert.equal(otro.opened, false);
+  assert.equal(kinwodon.opened, true);
+  Object.defineProperty(globalThis.navigator, 'usb', { value: { getDevices: async () => [otro] }, configurable: true });
+  assert.equal(await reconectarImpresora(), false);
+});
 
 const ticketLargo = () => ({
   venta: { total: 99900, forma_pago: 'efectivo', efectivo: 100000, cambio: 100, creado_en: '2026-10-02T17:00:00Z' },
