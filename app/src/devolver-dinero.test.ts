@@ -377,7 +377,7 @@ test('la caja ofrece como aprobadores al dueño y a los supervisores con PIN, no
 
 test('el PIN de un supervisor no vale para descuentos ni cupones (siguen siendo del dueño)', async () => {
   const { pedir, ana } = await montar();
-  const descuento = await pedir('/api/descuentos', { tipo: 'porcentaje', valor: 10, motivo: 'cliente frecuente', subtotal: 25000, aprobador: SUP, pin: PIN_SUP }, 'POST', ana);
+  const descuento = await pedir('/api/descuentos', { tipo: 'porcentaje', valor: 10, motivo: 'cliente frecuente', subtotal: 25000, lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], aprobador: SUP, pin: PIN_SUP }, 'POST', ana);
   assert.equal(descuento.status, 404, JSON.stringify(descuento.cuerpo));
   const cupon = await pedir('/api/cupones', { id: crypto.randomUUID(), importe: 10000, motivo: 'cortesía', aprobador: SUP, pin: PIN_SUP }, 'POST', ana);
   assert.equal(cupon.status, 404, JSON.stringify(cupon.cuerpo));

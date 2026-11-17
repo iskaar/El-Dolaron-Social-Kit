@@ -239,7 +239,7 @@ test('celular sin red guarda imprimir_en; no imprime localmente ni abre el cajó
     socio:null, catalogo:new Map(), pedidoCargado:null,
     impresionRemota:() => true, exigirCaja:() => true, cajaActual:() => 'Caja 1', dolaronesPedidos:() => 0,
     totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados,
-    descuento:null, descuentoAplicado:() => 0, promoActual:() => 0, pintarDescuento() {},
+    descuento:null, descuentoAplicado:() => 0, promoActual:() => 0, pintarDescuento() {}, revisarVencimientoDescuento: () => false,
     pesos:String, dolares:String, pintar() {}, quitarSocio() {}, sincronizar() {},
     fetch:async () => { throw new Error('sin red'); },
     store:async (almacen: string, _modo: string, fn: any) => fn({ put(v: any) { if (almacen === 'ventas') guardadas.push(v); } }),

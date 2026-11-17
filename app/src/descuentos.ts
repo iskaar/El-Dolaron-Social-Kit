@@ -5,27 +5,47 @@
  * (cancelaciones.ts): a distancia desde /cuentas (via 'remoto'), con su PIN en la
  * misma caja (via 'pin') o directo, si quien cobra es el dueno (via 'dueno').
  * Al cobrar, el servidor lo valida otra vez y lo resta: la aprobacion vale para
- * una sola venta y hasta 50%. Uno en % vale para ese ticket exacto (mismo
- * subtotal); uno en pesos se queda en el ticket aunque cambie (Isaac, 17/10).
+ * una sola venta y hasta 50%.
+ *
+ * Issue #845 (16/11): un cajero solo puede pedir hasta 10 %; mas, hasta el tope, lo
+ * aprueba solo el dueno (su sesion o su PIN; un supervisor no). El descuento vale 30
+ * minutos (aprobado: desde que se aprobo; pendiente: desde que se pidio), para el ticket
+ * exacto que se pidio (huella de piezas, cantidades y subtotal; sustituye la regla del
+ * 17/10 en que uno en pesos sobrevivia a los cambios) y solo para la caja que lo pidio.
  */
-import { descuentoDe } from '../public/venta.js';
+import { descuentoDe, huellaTicket, TOPE_DESCUENTO_CAJERO, VIGENCIA_DESCUENTO_MS, TICKET_VIGENTE_MS } from '../public/venta.js';
 import { leerUsuario, leerRoles } from './cuentas.ts';
 import { verificarPin } from './cajeros.ts';
 import { avisarDueno } from './avisos.ts';
+import { cajaDe, CajaAjena } from './corte.ts';
 
 const json = (cuerpo: unknown, status = 200) =>
   new Response(JSON.stringify(cuerpo), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
 
 const pesos = (centavos: number) => `$${(centavos / 100).toFixed(2)}`;
+/** Lo que ve el dueño al resolver una solicitud que el cajero ya retiro con «Quitar descuento». */
+export const AVISO_QUITADA = 'El cajero ya quitó esta solicitud.';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-interface Datos { tipo: string; valor: number; subtotal: number; monto: number; via?: string }
+interface Datos { tipo: string; valor: number; subtotal: number; monto: number; via?: string; huella?: string; caja?: string }
+
+/** Cuando vence un descuento pedido o aprobado en `desde` (ISO). */
+export const venceEn = (desde: string) => new Date(Date.parse(desde) + VIGENCIA_DESCUENTO_MS).toISOString();
+/** Lo mas viejo que puede ser el inicio (creado_en o resuelto_en) de un descuento que aun vale. */
+export const limiteVigencia = (ahoraMs = Date.now()) => new Date(ahoraMs - VIGENCIA_DESCUENTO_MS).toISOString();
+/** El estado que ve la caja: un pendiente o aprobado pasado de 30 minutos es `vencida`. */
+export function estadoVigente(fila: { estado: string; creado_en: string; resuelto_en: string | null }, ahoraMs = Date.now()) {
+  const inicio = fila.estado === 'pendiente' ? fila.creado_en : fila.estado === 'aprobada' ? fila.resuelto_en : null;
+  if (!inicio) return { estado: fila.estado, vence_en: null };
+  return { estado: inicio < limiteVigencia(ahoraMs) ? 'vencida' : fila.estado, vence_en: venceEn(inicio) };
+}
 
 /**
  * El cajero pide un descuento. Una sola pendiente por persona: pedir otra
  * reemplaza la anterior. Con `aprobador` + `pin` (dueno) o siendo dueno quien
  * pide, nace aprobado; si no, queda pendiente para /cuentas.
  */
-export async function pedirDescuento(request: Request, env: Env, correo: string, ctx?: ExecutionContext): Promise<Response> {
+export async function pedirDescuento(request: Request, env: Env, correo: string, ctx: ExecutionContext | undefined, tienda: string): Promise<Response> {
   const cuerpo = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const motivo = String(cuerpo.motivo ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
   if (!motivo) return json({ error: 'Escribe el motivo del descuento.' }, 400);
@@ -33,6 +53,12 @@ export async function pedirDescuento(request: Request, env: Env, correo: string,
   const subtotal = Number(cuerpo.subtotal);
   const calculo = descuentoDe(pedido, subtotal);
   if ('error' in calculo) return json({ error: calculo.error }, 400);
+  // El ticket para el que se pide: sin sus piezas no hay a que atar el descuento (una caja sin recargar no las manda).
+  const lineas = cuerpo.lineas;
+  if (!Array.isArray(lineas) || !lineas.length || lineas.some((l) => !l || !UUID.test(String(l.producto_id)) || !Number.isInteger(Number(l.cantidad)) || Number(l.cantidad) < 1))
+    return json({ error: 'Falta el detalle del ticket. Recarga la caja y vuelve a pedir el descuento.' }, 400);
+  let caja: string;
+  try { caja = await cajaDe(env, correo, cuerpo.caja, tienda); } catch (e) { if (e instanceof CajaAjena) return json({ error: e.message }, 400); throw e; }
 
   const usuario = await leerUsuario(env, correo);
   let aprobo: { por: string; via: 'dueno' | 'pin' } | null = null;
@@ -44,10 +70,13 @@ export async function pedirDescuento(request: Request, env: Env, correo: string,
     if ('error' in verificado) return json({ error: verificado.error }, verificado.status);
     aprobo = { por: dueno, via: 'pin' };
   }
+  // Quien pide sin el dueno (ni su PIN) llega a 10 %; hasta 50 % solo con el dueno. Lo decide el servidor, no la caja.
+  if (!aprobo && 'error' in descuentoDe(pedido, subtotal, TOPE_DESCUENTO_CAJERO))
+    return json({ error: `Más de ${TOPE_DESCUENTO_CAJERO} %: lo aprueba el dueño con su PIN.` }, 403);
 
   const id = crypto.randomUUID();
   const ahora = new Date().toISOString();
-  const datos: Datos = { ...pedido, subtotal, monto: calculo.monto, via: aprobo?.via ?? 'remoto' };
+  const datos: Datos = { ...pedido, subtotal, monto: calculo.monto, via: aprobo?.via ?? 'remoto', huella: huellaTicket(lineas, subtotal), caja };
   await env.DB.batch([
     env.DB.prepare(
       `update solicitudes set estado = 'rechazada', resuelto_en = ?, resuelto_por = 'reemplazada'
@@ -63,7 +92,18 @@ export async function pedirDescuento(request: Request, env: Env, correo: string,
     avisarDueno(env, ctx, request, `Descuento por aprobar: ${pesos(calculo.monto)}`,
       `${usuario?.nombre || correo} pide ${pesos(calculo.monto)} de descuento sobre un ticket de ${pesos(subtotal)}.\nMotivo: ${motivo}`);
   }
-  return json({ id, estado: aprobo ? 'aprobada' : 'pendiente', monto: calculo.monto }, 201);
+  return json({ id, estado: aprobo ? 'aprobada' : 'pendiente', monto: calculo.monto, vence_en: venceEn(ahora) }, 201);
+}
+
+/** «Quitar descuento» en la caja: cierra la solicitud propia (pendiente o aprobada) si aun no se uso en una venta. */
+export async function quitarDescuento(env: Env, id: string, correo: string): Promise<Response> {
+  const propia = await env.DB.prepare(`select 1 as x from solicitudes where id = ? and tipo = 'descuento' and correo = ?`).bind(id, correo).first();
+  if (!propia) return json({ error: 'La solicitud no existe.' }, 404);
+  await env.DB.prepare(
+    `update solicitudes set estado = 'rechazada', resuelto_en = ?, resuelto_por = 'quitada'
+     where id = ? and estado in ('pendiente', 'aprobada') and not exists (select 1 from ventas where descuento_id = solicitudes.id)`,
+  ).bind(new Date().toISOString(), id).run();
+  return json({ id, estado: 'rechazada' });
 }
 
 /** Los duenos que pueden aprobar con PIN en la caja (activos y con PIN). */
@@ -76,48 +116,78 @@ export async function listarDuenos(env: Env): Promise<Response> {
 
 /** El dueno aprueba o rechaza un descuento pendiente (la llama resolverSolicitud). */
 export async function resolverDescuento(env: Env, id: string, aprobar: boolean, dueno: string): Promise<Response> {
-  // Un solo UPDATE condicionado: si dos duenos la resuelven a la vez, gana uno.
+  // Un solo UPDATE condicionado: si dos duenos la resuelven a la vez, gana uno. Una pendiente de mas de 30 minutos ya no se aprueba.
   const gano = await env.DB.prepare(
-    `update solicitudes set estado = ?, resuelto_en = ?, resuelto_por = ? where id = ? and estado = 'pendiente'`,
-  ).bind(aprobar ? 'aprobada' : 'rechazada', new Date().toISOString(), dueno, id).run();
-  if (!gano.meta.changes) return json({ error: 'Otro dueño ya la resolvió.' }, 409);
+    `update solicitudes set estado = ?, resuelto_en = ?, resuelto_por = ? where id = ? and estado = 'pendiente' and creado_en >= ?`,
+  ).bind(aprobar ? 'aprobada' : 'rechazada', new Date().toISOString(), dueno, id, limiteVigencia()).run();
+  if (!gano.meta.changes) {
+    const fila = await env.DB.prepare('select estado, resuelto_por from solicitudes where id = ?').bind(id).first<{ estado: string; resuelto_por: string | null }>();
+    return json({ error: fila?.estado === 'pendiente' ? 'Esa solicitud venció (pasaron 30 minutos): que la pidan otra vez.'
+      : fila?.resuelto_por === 'quitada' ? AVISO_QUITADA : 'Otro dueño ya la resolvió.' }, 409);
+  }
   return json({ id, estado: aprobar ? 'aprobada' : 'rechazada' });
 }
 
-/** Para /cuentas: los descuentos esperando al dueno, con lo que hace falta para decidir. */
+/** Para /cuentas y /avisos: los descuentos esperando al dueno (los de mas de 30 minutos ya no), con lo que hace falta para decidir. */
 export async function listarDescuentos(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `select id, correo, nombre, justificacion as motivo, creado_en,
        json_extract(datos, '$.tipo') as tipo, json_extract(datos, '$.valor') as valor,
        json_extract(datos, '$.subtotal') as subtotal, json_extract(datos, '$.monto') as monto
-     from solicitudes where tipo = 'descuento' and estado = 'pendiente' order by creado_en`,
-  ).all();
+     from solicitudes where tipo = 'descuento' and estado = 'pendiente' and creado_en >= ? order by creado_en`,
+  ).bind(limiteVigencia()).all();
   return json(results);
 }
 
+/** El ticket que cobra y quien lo cobra: contra esto se compara el descuento (Issue #845). */
 /**
- * Al cobrar: la solicitud tiene que estar aprobada, ser de este mismo ticket
- * (si es en %) y no haberse usado. El monto se recalcula aqui, no se le cree a la caja.
+ * `horaMs`: la hora de la venta que mando la caja (la del primer intento de un folio, o la de una venta cobrada sin red). Con ella
+ * se mide la vigencia mientras no sea anterior a la solicitud ni a 4 h atras; si no, se mide a `ahoraMs`. `sinRed`: una venta
+ * cobrada sin red puede sincronizarse con la sesion de otro cajero: no se compara quien ni desde que caja, pero si el ticket.
+ */
+export interface TicketDeCobro { subtotal: number; huella: string; correo: string; caja: string; ahoraMs: number; horaMs: number; sinRed: boolean }
+
+/**
+ * Al cobrar: la solicitud tiene que estar aprobada, vigente (30 minutos), ser de este mismo ticket
+ * y de esta caja y no haberse usado. El monto se recalcula aqui, no se le cree a la caja. Devuelve
+ * ademas la sentencia que lo vuelve a comprobar DENTRO del batch de la venta (una lectura previa no
+ * ve lo que pase hasta que se escribe): si ya no vale, aborta toda la venta.
  */
 export async function validarDescuento(
-  env: Env, id: string, subtotal: number,
-): Promise<{ ok: true; monto: number } | { ok: false; error: string; status: number }> {
-  const fila = await env.DB.prepare(`select estado, datos from solicitudes where id = ? and tipo = 'descuento'`)
+  env: Env, id: string, ticket: TicketDeCobro,
+): Promise<{ ok: true; monto: number; guarda: D1PreparedStatement } | { ok: false; error: string; status: number }> {
+  const fila = await env.DB.prepare(`select estado, datos, correo, creado_en, resuelto_en from solicitudes where id = ? and tipo = 'descuento'`)
     .bind(id)
-    .first<{ estado: string; datos: string }>();
-  if (!fila) return { ok: false, error: 'El descuento no existe.', status: 400 };
+    .first<{ estado: string; datos: string; correo: string; creado_en: string; resuelto_en: string | null }>();
+  const falla = (error: string, status = 409) => ({ ok: false as const, error, status });
+  if (!fila) return falla('El descuento no existe.', 400);
   if (fila.estado !== 'aprobada') {
-    return { ok: false, error: `El descuento esta ${fila.estado}: pide otro.`, status: 409 };
+    return falla(`El descuento esta ${fila.estado}: pide otro.`);
   }
+  // La hora de la venta de la caja vale si no es anterior a la solicitud ni a 4 h atras ni futura; si no, se mide a la hora del servidor.
+  const hora = Math.min(ticket.horaMs, ticket.ahoraMs);
+  const medidoMs = hora >= Date.parse(fila.creado_en) && hora >= ticket.ahoraMs - TICKET_VIGENTE_MS ? hora : ticket.ahoraMs;
+  const limite = limiteVigencia(medidoMs);
+  if (!fila.resuelto_en || fila.resuelto_en < limite) return falla('El descuento venció (pasaron 30 minutos de aprobado): pide otro.');
   const datos = JSON.parse(fila.datos) as Datos;
-  if (datos.tipo !== 'monto' && datos.subtotal !== subtotal) {
-    return { ok: false, error: 'El ticket cambio despues de aprobar el descuento: pide otro.', status: 409 };
+  // Primero el ticket: uno aprobado antes de este cambio no trae huella y se contesta «ticket cambio», no «otra caja».
+  if (datos.huella !== ticket.huella) {
+    return falla('El ticket cambio despues de aprobar el descuento: pide otro.');
   }
-  const calculo = descuentoDe(datos, subtotal);
-  if ('error' in calculo) return { ok: false, error: String(calculo.error), status: 400 };
+  if (!ticket.sinRed && (fila.correo !== ticket.correo || datos.caja !== ticket.caja)) {
+    return falla('Ese descuento lo pidió otra caja u otro cajero: pide otro.');
+  }
+  const calculo = descuentoDe(datos, ticket.subtotal);
+  if ('error' in calculo) return falla(String(calculo.error), 400);
   const usado = await env.DB.prepare('select id from ventas where descuento_id = ?').bind(id).first();
-  if (usado) return { ok: false, error: 'Ese descuento ya se uso en otra venta.', status: 409 };
-  return { ok: true, monto: calculo.monto };
+  if (usado) return falla('Ese descuento ya se uso en otra venta.');
+  // Cero filas no aborta un batch; un NOT NULL violado si: `datos` queda en null (y la venta entera revierte) si el estado de la solicitud
+  // (quitada, rechazada, otra huella) cambio despues de la lectura. La hora no se vuelve a medir aqui: `limite` ya va calculado.
+  const guarda = env.DB.prepare(
+    `update solicitudes set datos = case when tipo = 'descuento' and estado = 'aprobada' and resuelto_en >= ? and creado_en <= ?
+       and json_extract(datos, '$.huella') = ? and (? = 1 or (correo = ? and json_extract(datos, '$.caja') = ?)) then datos else null end where id = ?`,
+  ).bind(limite, new Date(medidoMs).toISOString(), ticket.huella, ticket.sinRed ? 1 : 0, ticket.correo, ticket.caja, id);
+  return { ok: true, monto: calculo.monto, guarda };
 }
 
 /** Ventana de la promo de inauguracion; null si no esta configurada. La usan la caja y el asistente (#499). */

@@ -4,7 +4,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
-import { descuentoDe, totales } from '../public/venta.js';
+import { readFileSync } from 'node:fs';
+import { descuentoDe, totales, TOPE_DESCUENTO_CAJERO, huellaTicket } from '../public/venta.js';
 import { resolverDescuento } from './descuentos.ts';
 import { verificarCuadre } from '../public/graficas.js';
 
@@ -28,8 +29,12 @@ async function montar() {
     (await t.pedir('/api/cajeros/entrar', { correo, pin })).cuerpo.token as string;
   const ana = { 'x-cajero': await token(ANA, PIN_ANA) };
 
-  const pedirDescuento = (cuerpo: object = {}, encabezados: Record<string, string> = ana) =>
-    t.pedir('/api/descuentos', { tipo: 'porcentaje', valor: 10, motivo: 'cliente frecuente', subtotal: 25000, ...cuerpo }, 'POST', encabezados);
+  // El ticket del pedido: por omision, tantas piezas del PRODUCTO (25000 c/u) como alcance el subtotal; y la caja de la venta().
+  const pedirDescuento = (cuerpo: { subtotal?: number } & Record<string, unknown> = {}, encabezados: Record<string, string> = ana) => {
+    const subtotal = cuerpo.subtotal ?? 25000;
+    return t.pedir('/api/descuentos', { tipo: 'porcentaje', valor: 10, motivo: 'cliente frecuente', subtotal,
+      lineas: [{ producto_id: PRODUCTO, cantidad: Math.max(1, Math.round(subtotal / 25000)) }], caja: 'Caja 1', ...cuerpo }, 'POST', encabezados);
+  };
   const venta = (extra: object = {}, cantidad = 1, encabezados: Record<string, string> = ana) => t.pedir('/api/ventas', {
     id: crypto.randomUUID(), lineas: [{ producto_id: PRODUCTO, cantidad }], forma_pago: 'efectivo', efectivo: 50000, caja: 'Caja 1', ...extra,
   }, 'POST', encabezados);
@@ -70,7 +75,7 @@ test('a distancia: pide Ana, el dueno ve el pedido en /cuentas y lo aprueba, la 
   assert.equal(pedido.cuerpo.monto, 2500);
   const id = pedido.cuerpo.id as string;
   assert.equal(await estado(id), 'pendiente');
-  assert.deepEqual(JSON.parse(solicitudes()[0].datos), { tipo: 'porcentaje', valor: 10, subtotal: 25000, monto: 2500, via: 'remoto' });
+  assert.deepEqual(JSON.parse(solicitudes()[0].datos), { tipo: 'porcentaje', valor: 10, subtotal: 25000, monto: 2500, via: 'remoto', huella: `${PRODUCTO}:1|25000`, caja: 'Caja 2' });
 
   // Cobrar con el descuento todavia pendiente no pasa.
   assert.equal((await venta({ descuento_id: id })).status, 409);
@@ -133,7 +138,7 @@ test('dos duenos a la vez: gana uno, el otro recibe 409 y la solicitud queda con
 
   // Si el otro dueno la gano justo entre la lectura y el UPDATE, el nuestro lo dice.
   como(TIENDA);
-  const nuevo = (await pedirDescuento({ valor: 20 })).cuerpo.id as string;
+  const nuevo = (await pedirDescuento({ valor: 8 })).cuerpo.id as string;
   db.prepare(`update solicitudes set estado = 'rechazada' where id = ?`).run(nuevo);
   const perdio = await resolverDescuento(env, nuevo, true, DUENO);
   assert.equal(perdio.status, 409);
@@ -155,7 +160,7 @@ test('PIN del dueno en la caja: aprueba al momento, queda registrado via pin y l
   assert.equal(s.justificacion, 'cliente frecuente');
   assert.equal(s.resuelto_por, DUENO);
   assert.ok(s.resuelto_en);
-  assert.deepEqual(JSON.parse(s.datos), { tipo: 'porcentaje', valor: 10, subtotal: 25000, monto: 2500, via: 'pin' });
+  assert.deepEqual(JSON.parse(s.datos), { tipo: 'porcentaje', valor: 10, subtotal: 25000, monto: 2500, via: 'pin', huella: `${PRODUCTO}:1|25000`, caja: 'Caja 2' });
   assert.equal(await estado(s.id), 'aprobada');
 
   const r = await venta({ descuento_id: s.id });
@@ -194,7 +199,8 @@ test('si quien cobra es el dueno, aplica el descuento directo (sin aprobacion ni
   const { como, pedir, db, token, solicitudes, venta } = await montar();
   // En su propia cuenta de Access...
   como(DUENO);
-  const propio = await pedir('/api/descuentos', { tipo: 'monto', valor: 3000, motivo: 'pieza con detalle', subtotal: 25000 });
+  const ticket = { subtotal: 25000, caja: 'Caja 1', lineas: [{ producto_id: PRODUCTO, cantidad: 1 }] };
+  const propio = await pedir('/api/descuentos', { tipo: 'monto', valor: 3000, motivo: 'pieza con detalle', ...ticket });
   assert.equal(propio.status, 201, JSON.stringify(propio.cuerpo));
   assert.equal(propio.cuerpo.estado, 'aprobada');
   assert.equal(propio.cuerpo.monto, 3000);
@@ -202,7 +208,7 @@ test('si quien cobra es el dueno, aplica el descuento directo (sin aprobacion ni
 
   // ...o entrando con su PIN en la computadora de la tienda.
   como(TIENDA);
-  const enCaja = await pedir('/api/descuentos', { tipo: 'porcentaje', valor: 20, motivo: 'liquidacion', subtotal: 25000 },
+  const enCaja = await pedir('/api/descuentos', { tipo: 'porcentaje', valor: 20, motivo: 'liquidacion', ...ticket },
     'POST', { 'x-cajero': await token(DUENO, PIN_DUENO) });
   assert.equal(enCaja.cuerpo.estado, 'aprobada');
 
@@ -213,12 +219,12 @@ test('si quien cobra es el dueno, aplica el descuento directo (sin aprobacion ni
   assert.equal(db.prepare('select count(*) as n from solicitudes where estado = ?').get('pendiente')!.n, 0);
   // Tambien al dueno lo frena el tope.
   como(DUENO);
-  assert.equal((await pedir('/api/descuentos', { tipo: 'porcentaje', valor: 51, motivo: 'x', subtotal: 25000 })).status, 400);
+  assert.equal((await pedir('/api/descuentos', { tipo: 'porcentaje', valor: 51, motivo: 'x', ...ticket })).status, 400);
 });
 
 test('una aprobacion sirve para una sola venta', async () => {
   const { db, pedidoResuelto, venta } = await montar();
-  const id = await pedidoResuelto({ valor: 20 }, true);
+  const id = await pedidoResuelto({ valor: 10 }, true);
   assert.equal((await venta({ descuento_id: id })).status, 201);
   const otra = await venta({ descuento_id: id });
   assert.equal(otra.status, 409);
@@ -228,7 +234,7 @@ test('una aprobacion sirve para una sola venta', async () => {
 
 test('si el ticket cambia despues de aprobar, la aprobacion ya no vale (aprobada a distancia o con PIN)', async () => {
   const { pedidoResuelto, pedirDescuento, venta } = await montar();
-  const remoto = await pedidoResuelto({ valor: 50 }, true);
+  const remoto = await pedidoResuelto({ valor: 10 }, true);
   const conPin = (await pedirDescuento({ valor: 50, aprobador: DUENO, pin: PIN_DUENO })).cuerpo.id as string;
   for (const id of [remoto, conPin]) {
     const dosPiezas = await venta({ descuento_id: id }, 2);
@@ -239,23 +245,25 @@ test('si el ticket cambia despues de aprobar, la aprobacion ya no vale (aprobada
   assert.equal((await venta({ descuento_id: conPin })).status, 201);
 });
 
-test('uno en pesos sigue valiendo si el ticket cambia, mientras no pase del tope', async () => {
+test('uno en pesos tambien queda atado al ticket (#845, sustituye la regla del 17/10): otras piezas o otro precio, 409', async () => {
   const { db, pedidoResuelto, venta } = await montar();
-  const id = await pedidoResuelto({ tipo: 'monto', valor: 7000 }, true);   // aprobado sobre $250
-  const r = await venta({ descuento_id: id, efectivo: 100000 }, 3);       // cobrado sobre $750
-  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
-  assert.deepEqual({ ...db.prepare('select total, descuento from ventas').get() }, { total: 68000, descuento: 7000 });
-
-  const tope = await pedidoResuelto({ tipo: 'monto', valor: 12500 }, true); // 50% de $250
+  const id = await pedidoResuelto({ tipo: 'monto', valor: 2500 }, true);    // aprobado sobre $250
+  const masPiezas = await venta({ descuento_id: id, efectivo: 100000 }, 3);  // cobrado sobre $750
+  assert.equal(masPiezas.status, 409);
+  assert.match(masPiezas.cuerpo.error, /cambio/);
   db.prepare(`update productos set precio = 20000 where id = ?`).run(PRODUCTO);
-  assert.equal((await venta({ descuento_id: tope })).status, 400);          // ya seria 62.5% del ticket
+  assert.equal((await venta({ descuento_id: id })).status, 409);             // mismo ticket, otro subtotal
+  db.prepare(`update productos set precio = 25000 where id = ?`).run(PRODUCTO);
+  const r = await venta({ descuento_id: id });                               // el ticket original si
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  assert.deepEqual({ ...db.prepare('select total, descuento from ventas').get() }, { total: 22500, descuento: 2500 });
 });
 
 test('el servidor recalcula: una aprobacion manipulada por encima del tope no se cobra', async () => {
   const { db, pedidoResuelto, venta } = await montar();
   const id = await pedidoResuelto({ valor: 10 }, true);
   db.prepare(`update solicitudes set datos = ? where id = ?`)
-    .run(JSON.stringify({ tipo: 'porcentaje', valor: 90, subtotal: 25000, monto: 22500 }), id);
+    .run(JSON.stringify({ tipo: 'porcentaje', valor: 90, subtotal: 25000, monto: 22500, huella: `${PRODUCTO}:1|25000`, caja: 'Caja 2' }), id);
   const r = await venta({ descuento_id: id });
   assert.equal(r.status, 400);
   assert.equal(db.prepare('select count(*) as n from ventas').get()!.n, 0);
@@ -294,7 +302,7 @@ test('la computadora de la tienda sin PIN de cajero no pide descuentos; el cajer
 test('pedir otro reemplaza el pendiente anterior', async () => {
   const { pedirDescuento, estado, solicitudes } = await montar();
   const primero = (await pedirDescuento()).cuerpo.id as string;
-  const segundo = (await pedirDescuento({ tipo: 'monto', valor: 3000 })).cuerpo.id as string;
+  const segundo = (await pedirDescuento({ tipo: 'monto', valor: 2500 })).cuerpo.id as string;
   assert.equal(await estado(primero), 'rechazada');
   assert.equal(await estado(segundo), 'pendiente');
   assert.equal(solicitudes().filter((s) => s.estado === 'pendiente').length, 1);
@@ -429,20 +437,20 @@ test('/reportes: con promo, descuento aprobado, pieza devuelta y ticket cancelad
               values (?, 'ED-000002', 'Mesa', 'hogar', 33333, 50, 'S40', '', '')`).run(Q);
   db.prepare(`update productos set categoria = 'ropa' where id = ?`).run(PRODUCTO);
   const lineas = (p: number, q: number) => [{ producto_id: PRODUCTO, cantidad: p }, ...(q ? [{ producto_id: Q, cantidad: q }] : [])];
-  const aprobar = async (subtotal: number) =>
-    (await pedirDescuento({ subtotal, valor: 7, aprobador: DUENO, pin: PIN_DUENO })).cuerpo.id as string;
+  const aprobar = async (subtotal: number, p: number, q: number) =>
+    (await pedirDescuento({ subtotal, valor: 7, lineas: lineas(p, q), aprobador: DUENO, pin: PIN_DUENO })).cuerpo.id as string;
 
   // A: solo promo ($100, desde una hora antes hasta manana)
   Object.assign(env, { PROMO_DESDE: new Date(Date.now() - 3_600_000).toISOString(), PROMO_HASTA: new Date(Date.now() + 86_400_000).toISOString() });
   const a = await venta({ lineas: lineas(1, 1), efectivo: 100000 });
   assert.equal(a.cuerpo.descuento, 10000);
   // B: promo + descuento aprobado
-  const b = await venta({ lineas: lineas(2, 1), efectivo: 100000, descuento_id: await aprobar(83333) });
+  const b = await venta({ lineas: lineas(2, 1), efectivo: 100000, descuento_id: await aprobar(83333, 2, 1) });
   assert.equal(b.status, 201, JSON.stringify(b.cuerpo));
   // C: sin promo, descuento aprobado y una pieza devuelta
   delete (env as any).PROMO_DESDE;
   const folioC = crypto.randomUUID();
-  assert.equal((await venta({ id: folioC, lineas: lineas(2, 1), efectivo: 100000, descuento_id: await aprobar(83333) })).status, 201);
+  assert.equal((await venta({ id: folioC, lineas: lineas(2, 1), efectivo: 100000, descuento_id: await aprobar(83333, 2, 1) })).status, 201);
   const lineaC = (db.prepare('select id from venta_lineas where venta_id = ? and producto_id = ?').get(folioC, PRODUCTO) as any).id;
   assert.equal((await pedir(`/api/ventas/${folioC}/lineas/${lineaC}/cancelar`,
     { id: crypto.randomUUID(), cantidad: 1, motivo: 'defecto', caja: 'Caja 1', aprobador: DUENO, pin: PIN_DUENO }, 'POST', ana)).status, 201);   // devolver dinero lo aprueba el dueño (#837)
@@ -476,4 +484,271 @@ test('el descuento que queda pendiente avisa al dueno por correo (#75)', async (
   assert.equal(enviados.length, 1);
   assert.equal(enviados[0].subject, 'Descuento por aprobar: $25.00');
   assert.match(enviados[0].text, /Ana pide \$25\.00 de descuento sobre un ticket de \$250\.00\.\nMotivo: cliente frecuente/);
+});
+
+// ---------- Issue #845: tope de 10 % para el cajero; vigencia de 30 minutos; atado al ticket y a la caja ----------
+
+const hace = (minutos: number) => new Date(Date.now() - minutos * 60_000).toISOString();
+
+test('#845 tope del cajero: 10 % sí, 10.01 % no (en % y en pesos); más de 10 % solo con el dueño', async () => {
+  const { pedirDescuento, solicitudes } = await montar();
+  assert.equal((await pedirDescuento({ valor: 10 })).status, 201);
+  const once = await pedirDescuento({ valor: 11 });
+  assert.equal(once.status, 403);
+  assert.match(once.cuerpo.error, /Más de 10 %.*dueño con su PIN/);
+  assert.equal((await pedirDescuento({ tipo: 'monto', valor: 2500 })).status, 201);   // 10 % exacto de $250
+  assert.equal((await pedirDescuento({ tipo: 'monto', valor: 2501 })).status, 403);    // 10.004 %
+  assert.equal(solicitudes().filter((s) => s.estado === 'pendiente').length, 1);       // lo rechazado no deja solicitud
+  assert.equal((await pedirDescuento({ valor: 50 })).status, 403);                     // el servidor decide, no el navegador
+});
+
+test('#845 el dueño llega a 50 %: con su sesión en la caja y con su PIN; a 51 % ni él', async () => {
+  const { como, pedir, pedirDescuento, token } = await montar();
+  assert.equal((await pedirDescuento({ valor: 50, aprobador: DUENO, pin: PIN_DUENO })).cuerpo.estado, 'aprobada');
+  assert.equal((await pedirDescuento({ tipo: 'monto', valor: 12500, aprobador: DUENO, pin: PIN_DUENO })).status, 201);
+  assert.equal((await pedirDescuento({ valor: 51, aprobador: DUENO, pin: PIN_DUENO })).status, 400);
+  como(DUENO);
+  const ticket = { subtotal: 25000, caja: 'Caja 1', lineas: [{ producto_id: PRODUCTO, cantidad: 1 }] };
+  assert.equal((await pedir('/api/descuentos', { tipo: 'porcentaje', valor: 50, motivo: 'liquidación', ...ticket })).cuerpo.estado, 'aprobada');
+  como(TIENDA);
+  const conPin = await pedir('/api/descuentos', { tipo: 'porcentaje', valor: 50, motivo: 'liquidación', ...ticket }, 'POST', { 'x-cajero': await token(DUENO, PIN_DUENO) });
+  assert.equal(conPin.cuerpo.estado, 'aprobada');
+});
+
+test('#845 un supervisor no aprueba descuentos: ni con su PIN como aprobador ni pidiendo en su sesión', async () => {
+  const { como, db, pedir, pedirDescuento, token, solicitudes } = await montar();
+  const SUP = 'sup@prueba.mx', PIN_SUP = '735190';
+  // El rol «supervisor» llega con #837; aquí basta que la cuenta no sea dueña, y con el rol vigente tampoco cuenta como dueño.
+  db.prepare(`insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en) values (?, 'Sofi', 'cajero,supervisor', 1, 'Caja 3', '', '')`).run(SUP);
+  como(DUENO);
+  await pedir('/api/cuentas/pin', { correo: SUP, pin: PIN_SUP }, 'PUT');
+  como(TIENDA);
+  const conSuPin = await pedirDescuento({ valor: 30, aprobador: SUP, pin: PIN_SUP });
+  assert.equal(conSuPin.status, 404);
+  assert.equal(solicitudes().length, 0);
+  const suyo = { 'x-cajero': await token(SUP, PIN_SUP) };
+  assert.equal((await pedirDescuento({ valor: 30 }, suyo)).status, 403);
+  assert.equal((await pedirDescuento({ valor: 10 }, suyo)).cuerpo.estado, 'pendiente');
+});
+
+test('#845 un descuento aprobado vence a los 30 minutos de aprobarse; el pendiente, a los 30 de pedirse', async () => {
+  const { como, db, pedir, pedirDescuento, venta, estado, pedidoResuelto, solicitudes } = await montar();
+  const aprobado = await pedidoResuelto({ valor: 10 }, true);
+  db.prepare('update solicitudes set resuelto_en = ? where id = ?').run(hace(29), aprobado);
+  assert.equal(await estado(aprobado), 'aprobada');
+  db.prepare('update solicitudes set resuelto_en = ? where id = ?').run(hace(31), aprobado);
+  assert.equal(await estado(aprobado), 'vencida');
+  const tarde = await venta({ descuento_id: aprobado });
+  assert.equal(tarde.status, 409);
+  assert.match(tarde.cuerpo.error, /venció/);
+  assert.equal(db.prepare('select count(*) as n from ventas').get()!.n, 0);
+
+  // Pendiente: a los 29 minutos todavía se ve y se aprueba; a los 31 desaparece de /avisos y /cuentas y no se aprueba.
+  const pedido = (await pedirDescuento()).cuerpo.id as string;
+  como(DUENO);
+  db.prepare('update solicitudes set creado_en = ? where id = ?').run(hace(29), pedido);
+  assert.equal((await pedir('/api/solicitudes/descuentos', undefined, 'GET')).cuerpo.length, 1);
+  assert.equal((await pedir('/api/cuentas', undefined, 'GET')).cuerpo.solicitudes.filter((s: any) => s.tipo === 'descuento').length, 1);
+  db.prepare('update solicitudes set creado_en = ? where id = ?').run(hace(31), pedido);
+  assert.equal((await pedir('/api/solicitudes/descuentos', undefined, 'GET')).cuerpo.length, 0);
+  assert.equal((await pedir('/api/cuentas', undefined, 'GET')).cuerpo.solicitudes.filter((s: any) => s.tipo === 'descuento').length, 0);
+  const aprobarTarde = await pedir(`/api/solicitudes/${pedido}/resolver`, { aprobar: true });
+  assert.equal(aprobarTarde.status, 409);
+  assert.match(aprobarTarde.cuerpo.error, /venció/);
+  assert.equal(solicitudes().find((s) => s.id === pedido)!.estado, 'pendiente');   // sin tocar: no quedó aprobada
+  como(TIENDA);
+  assert.equal(await estado(pedido), 'vencida');
+  assert.equal((await venta({ descuento_id: pedido })).status, 409);
+});
+
+test('#845 el estado de la solicitud se comprueba dentro de la venta, no solo antes: si cambia entre la lectura y la escritura (aquí, vence en la base), la venta no se escribe', async () => {
+  const { db, env, pedidoResuelto, venta } = await montar();
+  const id = await pedidoResuelto({ valor: 10 }, true);
+  db.prepare('update solicitudes set resuelto_en = ? where id = ?').run(hace(29.99), id);
+  const batch = env.DB.batch.bind(env.DB);
+  env.DB.batch = (async (s: never) => { db.prepare('update solicitudes set resuelto_en = ? where id = ?').run(hace(31), id); return batch(s); }) as never;
+  const r = await venta({ descuento_id: id });
+  assert.equal(r.status, 409, JSON.stringify(r.cuerpo));
+  assert.match(r.cuerpo.error, /venció|ya no es de este ticket/);
+  assert.equal(db.prepare('select count(*) as n from ventas').get()!.n, 0);
+  assert.equal(db.prepare('select stock from productos where id = ?').get(PRODUCTO)!.stock, 50);   // y no bajó la existencia
+});
+
+test('#845 el descuento es de su ticket: otras piezas, otras cantidades u otro subtotal se rechazan', async () => {
+  const { db, pedidoResuelto, venta } = await montar();
+  const id = await pedidoResuelto({ valor: 10 }, true);
+  const Q = crypto.randomUUID();
+  db.prepare(`insert into productos (id, codigo, nombre, categoria, precio, stock, semana_ingreso, creado_en, actualizado_en)
+              values (?, 'ED-000002', 'Mesa', 'hogar', 25000, 50, 'S40', '', '')`).run(Q);
+  // Otra pieza con el mismo subtotal: mismo precio, distinto ticket.
+  const otraPieza = await venta({ descuento_id: id, lineas: [{ producto_id: Q, cantidad: 1 }] });
+  assert.equal(otraPieza.status, 409);
+  assert.match(otraPieza.cuerpo.error, /El ticket cambio/);
+  assert.equal((await venta({ descuento_id: id }, 2)).status, 409);                       // otra cantidad
+  assert.equal((await venta({ descuento_id: id, lineas: [{ producto_id: PRODUCTO, cantidad: 1 }, { producto_id: Q, cantidad: 1 }] })).status, 409);
+  assert.equal(db.prepare('select count(*) as n from ventas').get()!.n, 0);
+  assert.equal((await venta({ descuento_id: id })).status, 201);                          // el suyo sí
+});
+
+test('#845 el descuento solo lo usa la caja (y la sesión) que lo pidió', async () => {
+  const { como, db, pedir, pedirDescuento, venta, token } = await montar();
+  // Bea cobra en otra caja de la misma computadora: no usa lo que pidió Ana.
+  const BEA = 'bea@prueba.mx', PIN_BEA = '264810';
+  db.prepare(`insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en) values (?, 'Bea', 'cajero', 1, 'Caja 1', '', '')`).run(BEA);
+  como(DUENO);
+  await pedir('/api/cuentas/pin', { correo: BEA, pin: PIN_BEA }, 'PUT');
+  como(TIENDA);
+  const id = (await pedirDescuento({ aprobador: DUENO, pin: PIN_DUENO })).cuerpo.id as string;
+  const deBea = await venta({ descuento_id: id }, 1, { 'x-cajero': await token(BEA, PIN_BEA) });
+  assert.equal(deBea.status, 409);
+  assert.match(deBea.cuerpo.error, /otra caja u otro cajero/);
+
+  // El dueño en su sesión elige la caja a mano: lo pedido desde «Caja 1» no sirve desde «Caja 2».
+  como(DUENO);
+  const ticket = { tipo: 'monto', valor: 3000, motivo: 'detalle', subtotal: 25000, lineas: [{ producto_id: PRODUCTO, cantidad: 1 }] };
+  const propio = (await pedir('/api/descuentos', { ...ticket, caja: 'Caja 1' })).cuerpo.id as string;
+  assert.equal((await venta({ descuento_id: propio, caja: 'Caja 2' }, 1, {})).status, 409);
+  assert.equal((await venta({ descuento_id: propio, caja: 'Caja 1' }, 1, {})).status, 201);
+  assert.equal(db.prepare('select count(*) as n from ventas').get()!.n, 1);
+});
+
+test('#845 «Quitar descuento» cierra la solicitud en el servidor: ya no se aprueba ni se cobra, y solo la quita quien la pidió', async () => {
+  const { como, db, pedir, pedirDescuento, venta, estado, solicitudes, ana } = await montar();
+  const aprobado = (await pedirDescuento({ aprobador: DUENO, pin: PIN_DUENO })).cuerpo.id as string;
+  const pendiente = (await pedirDescuento({ valor: 5 })).cuerpo.id as string;
+  assert.equal((await pedir(`/api/descuentos/${pendiente}/quitar`, {}, 'POST', ana)).status, 200);
+  assert.equal(await estado(pendiente), 'rechazada');
+  assert.equal(solicitudes().find((s) => s.id === pendiente)!.resuelto_por, 'quitada');
+  como(DUENO);
+  assert.equal((await pedir(`/api/solicitudes/${pendiente}/resolver`, { aprobar: true })).status, 409);   // ya no se aprueba
+  assert.equal((await pedir(`/api/descuentos/${aprobado}/quitar`, {}, 'POST')).status, 404);       // no es suyo
+  como(TIENDA);
+  assert.equal((await pedir(`/api/descuentos/${aprobado}/quitar`, {}, 'POST', ana)).status, 200);
+  assert.equal((await venta({ descuento_id: aprobado })).status, 409);                                      // el aprobado quitado no se cobra
+  assert.equal(db.prepare('select count(*) as n from ventas').get()!.n, 0);
+  // Quitar uno ya usado no lo reabre ni lo borra.
+  const usado = (await pedirDescuento({ aprobador: DUENO, pin: PIN_DUENO })).cuerpo.id as string;
+  assert.equal((await venta({ descuento_id: usado })).status, 201);
+  await pedir(`/api/descuentos/${usado}/quitar`, {}, 'POST', ana);
+  assert.equal(await estado(usado), 'aprobada');
+});
+
+test('#845 reintentar la venta con el mismo descuento sigue idempotente aunque ya haya vencido; una venta sin red se mide a la hora de la caja', async () => {
+  const { db, pedidoResuelto, venta } = await montar();
+  const id = await pedidoResuelto({ valor: 10 }, true);
+  const folio = crypto.randomUUID();
+  const primera = await venta({ id: folio, descuento_id: id });
+  assert.equal(primera.status, 201, JSON.stringify(primera.cuerpo));
+  db.prepare('update solicitudes set resuelto_en = ? where id = ?').run(hace(120), id);
+  const reintento = await venta({ id: folio, descuento_id: id });
+  assert.equal(reintento.status, 200);
+  assert.equal(reintento.cuerpo.duplicada, true);
+  assert.equal(db.prepare('select count(*) as n from ventas').get()!.n, 1);
+  const sinRed = await pedidoResuelto({ valor: 10 }, true);
+  db.prepare('update solicitudes set creado_en = ?, resuelto_en = ? where id = ?').run(hace(61), hace(60), sinRed);
+  assert.equal((await venta({ descuento_id: sinRed })).status, 409);
+  assert.equal((await venta({ descuento_id: sinRed, sin_red: true, creado_en: hace(45) })).status, 201);
+});
+
+test('#845 sin el detalle del ticket no se pide el descuento', async () => {
+  const { pedirDescuento, solicitudes } = await montar();
+  assert.equal((await pedirDescuento({ lineas: undefined })).status, 400);
+  assert.equal((await pedirDescuento({ lineas: [] })).status, 400);
+  assert.equal((await pedirDescuento({ lineas: [{ producto_id: 'x', cantidad: 1 }] })).status, 400);
+  assert.equal(solicitudes().length, 0);
+});
+
+test('#845 la aritmética del tope del cajero y la huella del ticket (la misma en la caja y en el servidor)', () => {
+  assert.equal(TOPE_DESCUENTO_CAJERO, 10);
+  assert.deepEqual(descuentoDe({ tipo: 'porcentaje', valor: 10 }, 25000, TOPE_DESCUENTO_CAJERO), { monto: 2500 });
+  assert.ok('error' in descuentoDe({ tipo: 'porcentaje', valor: 11 }, 25000, TOPE_DESCUENTO_CAJERO));
+  assert.deepEqual(descuentoDe({ tipo: 'monto', valor: 2500 }, 25000, TOPE_DESCUENTO_CAJERO), { monto: 2500 });
+  assert.match(String((descuentoDe({ tipo: 'monto', valor: 2501 }, 25000, TOPE_DESCUENTO_CAJERO) as { error: string }).error), /10%/);
+  assert.deepEqual(descuentoDe({ tipo: 'porcentaje', valor: 50 }, 25000), { monto: 12500 });   // sin tope propio, el de siempre
+  const A = 'a1111111-1111-4111-8111-111111111111', B = 'b2222222-2222-4222-8222-222222222222';
+  assert.equal(huellaTicket([{ producto_id: A, cantidad: 1 }, { producto_id: B, cantidad: 2 }], 75000),
+    huellaTicket([{ producto_id: B, cantidad: 1 }, { producto_id: A, cantidad: 1 }, { producto_id: B, cantidad: 1 }], 75000));   // el orden y el renglón partido no cambian el ticket
+  assert.notEqual(huellaTicket([{ producto_id: A, cantidad: 2 }], 50000), huellaTicket([{ producto_id: A, cantidad: 1 }], 50000));
+  assert.notEqual(huellaTicket([{ producto_id: A, cantidad: 1 }], 25000), huellaTicket([{ producto_id: B, cantidad: 1 }], 25000));
+  assert.notEqual(huellaTicket([{ producto_id: A, cantidad: 1 }], 25000), huellaTicket([{ producto_id: A, cantidad: 1 }], 20000));
+});
+
+test('#845 la caja manda el ticket y la caja al pedir, cierra en el servidor al quitar y el Enter no envía el descuento', () => {
+  const html = readFileSync('public/caja.html', 'utf8');
+  assert.match(html, /caja: cajaActual\(\),\s+lineas: lineas\.map\(\(\{ producto_id, cantidad \}\)/);
+  assert.match(html, /\/api\/descuentos\/\$\{encodeURIComponent\(d\.id\)\}\/quitar`, \{ method: 'POST' \}/);
+  assert.match(html, /quitar-descuento'\)\.addEventListener\('click', \(\) => \{ if \(ticketEnDuda\(\)\) return; quitarDescuentoEnServidor\(descuento\);/);
+  assert.match(html, /Más de 10 %: lo aprueba el dueño con su PIN/);
+  // Los botones de pedir son type=button y los campos no escuchan teclas: el Enter con el que el lector termina un escaneo no pide nada.
+  assert.doesNotMatch(html, /\$\('descuento-(?:valor|motivo|tipo|pin-dueno|aprobador)'\)\.addEventListener\('(?:keydown|keypress|keyup)'/);
+  assert.doesNotMatch(html, /<form[^>]*>[^]*?id="descuento-form"/);
+});
+
+// ---------- Issue #845, revisión de #848: ventas sin red, folio en duda, dueño con PIN, avisos ----------
+
+/** Fija cuándo se pidió y cuándo se aprobó (hace N minutos) el descuento `id`. */
+const fechar = (db: any, id: string, pidio: number, aprobo: number) =>
+  db.prepare('update solicitudes set creado_en = ?, resuelto_en = ? where id = ?').run(hace(pidio), hace(aprobo), id);
+
+test('#845 una venta cobrada sin red y sincronizada con la sesión de otro cajero se registra; con el ticket cambiado, no', async () => {
+  const { como, db, pedir, pedirDescuento, venta, token } = await montar();
+  const BEA = 'bea@prueba.mx', PIN_BEA = '264810';
+  db.prepare(`insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en) values (?, 'Bea', 'cajero', 1, 'Caja 1', '', '')`).run(BEA);
+  como(DUENO);
+  await pedir('/api/cuentas/pin', { correo: BEA, pin: PIN_BEA }, 'PUT');
+  como(TIENDA);
+  const deBea = { 'x-cajero': await token(BEA, PIN_BEA) };
+  const id = (await pedirDescuento({ aprobador: DUENO, pin: PIN_DUENO })).cuerpo.id as string;   // lo pidió Ana, en la Caja 2
+  assert.equal((await venta({ descuento_id: id }, 1, deBea)).status, 409);                       // en línea, otra sesión no lo usa
+  assert.equal((await venta({ descuento_id: id, sin_red: true }, 2, deBea)).status, 409);        // sin red, pero otro ticket
+  assert.equal((await venta({ descuento_id: id, sin_red: true }, 1, deBea)).status, 201);        // el suyo, ya pagado: se registra
+  assert.equal(db.prepare('select cajero from ventas').get()!.cajero, BEA);
+});
+
+test('#845 una venta sin red se mide a su hora solo dentro de los límites: ni anterior a la solicitud, ni de hace más de 4 h', async () => {
+  const { db, pedidoResuelto, venta } = await montar();
+  // Aprobado hace 60 min: en línea ya venció; una venta sin red de hace 20 minutos (40 min después de aprobarse, no: 40 antes de ahora)...
+  const id = await pedidoResuelto({ valor: 10 }, true);
+  fechar(db, id, 61, 60);
+  assert.equal((await venta({ descuento_id: id, sin_red: true })).status, 409);                       // sin hora: se mide a ahora
+  assert.equal((await venta({ descuento_id: id, sin_red: true, creado_en: hace(5 * 60) })).status, 409);   // hace 5 h: fuera de la ventana de 4 h
+  assert.equal((await venta({ descuento_id: id, sin_red: true, creado_en: hace(70) })).status, 409);       // antes de la solicitud
+  assert.equal((await venta({ descuento_id: id, sin_red: true, creado_en: hace(45) })).status, 201);       // 15 min después de pedirse: vigente a esa hora
+});
+
+test('#845 el reintento de un folio se mide a la hora de su primer intento: perdido al minuto 29, reintentado al 31 se registra', async () => {
+  const { db, pedidoResuelto, venta } = await montar();
+  const id = await pedidoResuelto({ valor: 10 }, true);
+  fechar(db, id, 32, 31);
+  const folio = crypto.randomUUID();
+  assert.equal((await venta({ id: folio, descuento_id: id })).status, 409);                          // un cobro nuevo a las 31: vencido
+  const reintento = await venta({ id: folio, descuento_id: id, creado_en: hace(2) });                 // su primer intento fue al minuto 29
+  assert.equal(reintento.status, 201, JSON.stringify(reintento.cuerpo));
+  assert.equal(db.prepare('select count(*) as n from ventas').get()!.n, 1);
+  // Lo que el servidor no acepta: una hora anterior a la solicitud.
+  const otro = await pedidoResuelto({ valor: 10 }, true);
+  fechar(db, otro, 32, 31);
+  assert.equal((await venta({ id: crypto.randomUUID(), descuento_id: otro, creado_en: hace(40) })).status, 409);
+});
+
+test('#845 /api/yo dice si quien entró con su PIN es el dueño, para que la caja no le ponga el tope de 10 %', async () => {
+  const { pedir, token, ana } = await montar();
+  assert.equal((await pedir('/api/yo', undefined, 'GET', ana)).cuerpo.cajero.es_dueno, false);
+  assert.equal((await pedir('/api/yo', undefined, 'GET', { 'x-cajero': await token(DUENO, PIN_DUENO) })).cuerpo.cajero.es_dueno, true);
+});
+
+test('#845 si el cajero quitó la solicitud, el dueño lo lee así; un descuento aprobado antes de la huella contesta «ticket cambió», no «otra caja»', async () => {
+  const { como, db, pedir, pedirDescuento, venta, ana } = await montar();
+  const id = (await pedirDescuento()).cuerpo.id as string;
+  await pedir(`/api/descuentos/${id}/quitar`, {}, 'POST', ana);
+  como(DUENO);
+  const r = await pedir(`/api/solicitudes/${id}/resolver`, { aprobar: true });
+  assert.equal(r.status, 409);
+  assert.equal(r.cuerpo.error, 'El cajero ya quitó esta solicitud.');
+  como(TIENDA);
+  const viejo = (await pedirDescuento({ aprobador: DUENO, pin: PIN_DUENO })).cuerpo.id as string;
+  db.prepare(`update solicitudes set datos = json_remove(json_remove(datos, '$.huella'), '$.caja') where id = ?`).run(viejo);
+  const v = await venta({ descuento_id: viejo });
+  assert.equal(v.status, 409);
+  assert.match(v.cuerpo.error, /El ticket cambio/);
 });
