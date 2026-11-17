@@ -542,6 +542,8 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
   const ahora = new Date().toISOString();
   // Sin cuenta activa o sin rol de caja, su sesion de PIN muere con el cambio: reactivarla despues no la revive.
   const cobra = activo && (roles.includes('cajero') || roles.includes('dueno'));
+  // #850: cambiarle la tienda a una cuenta cierra sus sesiones de PIN (su token dejaria de valer en la caja de antes de todos modos).
+  const cambioTienda = !!previa && tiendaDe(previa) !== tiendaDe(queda);
   const fallo = await env.DB.batch([
     env.DB.prepare(
       `insert into usuarios (correo, nombre, roles, activo, caja, tienda, editar_inventario, creado_en, actualizado_en)
@@ -550,7 +552,7 @@ export async function guardarCuenta(request: Request, env: Env): Promise<Respons
          activo = excluded.activo, caja = coalesce(?, usuarios.caja), tienda = coalesce(?, usuarios.tienda),
          editar_inventario = coalesce(?, usuarios.editar_inventario), actualizado_en = excluded.actualizado_en`,
     ).bind(correo, nombre, roles.join(','), activo ? 1 : 0, caja, tienda, editar, ahora, ahora, caja, tienda, editar),
-    ...(cobra ? [] : [env.DB.prepare('delete from sesiones_cajero where correo = ?').bind(correo)]),
+    ...(cobra && !cambioTienda ? [] : [env.DB.prepare('delete from sesiones_cajero where correo = ?').bind(correo)]),
   ]).then(() => null, sinDueno);
   if (fallo) return fallo;
   const guardado = await leerUsuario(env, correo);

@@ -65,11 +65,11 @@ export const ESCENARIOS = [
       'Escribe tu PIN de 6 números: entra solo al sexto número.',
       'Espera un momento: la caja se recarga a tu nombre.',
     ],
-    ojo: 'Con 5 PIN incorrectos seguidos el PIN se bloquea 15 minutos («PIN bloqueado por intentos fallidos»). Si olvidaste tu PIN, el dueño te pone uno nuevo en Cuentas.',
+    ojo: 'Con 5 PIN incorrectos seguidos el PIN se bloquea 15 minutos («PIN bloqueado por intentos fallidos»). Si olvidaste tu PIN, el dueño te pone uno nuevo en Cuentas. Tu PIN solo sirve en la computadora de tu tienda: si no sales en la lista, o la caja dice «Pídele al dueño que te cambie de tienda», el dueño cambia tu tienda en Cuentas.',
     si_no: 'Si la lista dice «Nadie tiene PIN todavía. El dueño lo pone en Cuentas.», avisa al dueño: sin PIN no se puede cobrar.',
     ver: ['cambiar-de-cajero'],
     pantalla: 'cajero',
-    textos: ['¿Quién cobra?', 'Nadie tiene PIN todavía. El dueño lo pone en Cuentas.', ['srv-cajeros', 'PIN bloqueado por intentos fallidos']],
+    textos: ['¿Quién cobra?', 'Nadie tiene PIN todavía. El dueño lo pone en Cuentas.', ['srv-cajeros', 'PIN bloqueado por intentos fallidos'], ['srv-cajeros', 'Pídele al dueño que te cambie de tienda']],
   },
   {
     id: 'cambiar-de-cajero', categoria: 'dia', titulo: 'Entra otra persona a cobrar o la caja se bloqueó sola',

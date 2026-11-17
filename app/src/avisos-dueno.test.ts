@@ -15,7 +15,7 @@ const OTRA = 'b2222222-2222-4222-8222-222222222222';
 function montar(tiendaPc = 'soledad') {
   const t = tienda();
   t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, caja, tienda, creado_en, actualizado_en) values
-    (?, 'Computadora', 'computadora', 1, '', ?, '', ''), (?, 'Ana', 'cajero', 1, '', '', '', '')`).run(PC, tiendaPc, ANA);
+    (?, 'Computadora', 'computadora', 1, '', ?, '', ''), (?, 'Ana', 'cajero', 1, '', ?, '', '')`).run(PC, tiendaPc, ANA, tiendaPc);   // #850: Ana es de la tienda de la terminal
   t.db.prepare(`insert into productos (id, codigo, nombre, precio, stock, semana_ingreso, creado_en, actualizado_en)
     values (?, 'ED-000002', 'Lámpara', 10000, 1, 'S40', '', '')`).run(OTRA);
   const correos: { to: string; text: string }[] = [];

@@ -1971,7 +1971,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   if (yaExiste) return yaExiste;
   // Quien atendio en piso (#750): opcional ('' = sin atribuir). Va despues del reintento: una venta ya registrada
   // sigue valiendo aunque esa cuenta se desactive despues.
-  if (venta.vendedora != null && venta.vendedora !== '' && !(vendedora && await esVendedora(env, vendedora))) {
+  if (venta.vendedora != null && venta.vendedora !== '' && !(vendedora && await esVendedora(env, vendedora, tienda))) {
     return json({ error: 'Quien atendió debe ser una cuenta activa de cajero o capturista.' }, 400);
   }
 
@@ -2691,7 +2691,7 @@ export default {
         // nombre del cajero que entro con su PIN; sin el, la API no responde.
         if (esDeCaja(regla) && soloComputadora(usuario) && !pathname.startsWith('/api/cajeros')
             && pathname !== '/api/nomina/entrada' && pathname !== '/api/nomina/checador') {
-          const cajero = await cajeroEnTurno(request, env);
+          const cajero = await cajeroEnTurno(request, env, tienda);
           if (cajero) correo = cajero.correo;
           else if (pathname.startsWith('/api/')) return json({ error: 'Escribe tu PIN de cajero.', pin: true }, 401);
           // R2: una computadora de caja sin tienda no cobra.
@@ -2708,7 +2708,8 @@ export default {
       }
 
       if (pathname === '/api/yo') {
-        return await yo(env, correo, soloComputadora(await leerUsuario(env, correo)) ? await cajeroEnTurno(request, env) : null, !!env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR);
+        const cuentaYo = await leerUsuario(env, correo);
+        return await yo(env, correo, soloComputadora(cuentaYo) ? await cajeroEnTurno(request, env, tiendaDe(cuentaYo)) : null, !!env.HOST_VENDEDOR && url.hostname === env.HOST_VENDEDOR);
       }
       if (pathname === '/api/captura/espejo') return await rutaEspejoCaptura(request, env, usuario!);
       if (pathname === '/api/camara/solicitud' || pathname.startsWith('/api/camara/solicitud/')) {
@@ -2740,9 +2741,9 @@ export default {
       if (respuestaRecortes) return respuestaRecortes;
       const respuestaImagen = await rutaImagenUpc(request, env, pathname, correo, ctx);
       if (respuestaImagen) return respuestaImagen;
-      if (pathname === '/api/cajeros' && request.method === 'GET') return await listarCajeros(env);
-      if (pathname === '/api/vendedoras' && request.method === 'GET') return await listarVendedoras(env);
-      if (pathname === '/api/cajeros/entrar' && request.method === 'POST') return await entrar(request, env);
+      if (pathname === '/api/cajeros' && request.method === 'GET') return await listarCajeros(env, tienda);
+      if (pathname === '/api/vendedoras' && request.method === 'GET') return await listarVendedoras(env, tienda);
+      if (pathname === '/api/cajeros/entrar' && request.method === 'POST') return await entrar(request, env, tienda);
       if (pathname === '/api/cajeros/salir' && request.method === 'POST') return await salir(request, env);
       if (pathname === '/api/cuentas/pin' && request.method === 'PUT') return await ponerPin(request, env);
       if (pathname === '/api/solicitudes/acceso' && request.method === 'POST') {
