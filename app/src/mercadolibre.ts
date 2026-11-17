@@ -1291,12 +1291,12 @@ export async function conciliarPublicaciones(env: Env, filtro: Filtro = {}): Pro
           await poner_ml({ status: 'active', available_quantity: f.stock });
           await poner(f.producto_id, 'activa');
         } else if (f.estado === 'activa') {
-          if (ml.status === 'paused') await poner(f.producto_id, 'pausada');   // la pauso el dueno en ML
+          if (ml.status === 'paused') await poner(f.producto_id, 'pausada');   // la pauso gerencia en ML
           // Solo baja: ML descuenta al crear la orden y D1 hasta que se paga, subirla ofreceria otra vez la pieza vendida.
           // Subir la cantidad tras un resurtido de varias piezas se hace a mano en ML.
           else if (ml.available_quantity > f.stock) await poner_ml({ available_quantity: f.stock });
         } else if ((f.estado === 'pausada' || f.estado === 'error') && ml.status === 'active') {
-          await poner(f.producto_id, 'activa');                                // la reactivo el dueno en ML
+          await poner(f.producto_id, 'activa');                                // la reactivo gerencia en ML
         }
       } catch (error) {
         await env.DB.prepare('update ml_publicaciones set ultimo_error = ? where producto_id = ?')

@@ -43,7 +43,7 @@ async function montar() {
 
 const VIEJA = VENTANA_CANCELACION_MS + 60_000;
 
-test('el dueno cancela directo aunque hayan pasado mas de 5 minutos', async () => {
+test('gerencia cancela directo aunque hayan pasado mas de 5 minutos', async () => {
   const { como, vender, cancelar, venta, solicitudes } = await montar();
   const id = await vender(VIEJA);
   como(DUENO);
@@ -78,7 +78,7 @@ test('pasados 5 minutos el cajero no cancela: pide aprobacion y no se crea solic
   assert.equal(solicitudes().length, 0);
 });
 
-test('PIN del dueno equivocado: no cancela y cuenta el fallo; el de Ana o de otro no dueno tampoco sirve', async () => {
+test('PIN dgerencia equivocado: no cancela y cuenta el fallo; el de Ana o de otro no dueno tampoco sirve', async () => {
   const { db, vender, cancelar, venta, solicitudes } = await montar();
   const id = await vender(VIEJA);
 
@@ -96,7 +96,7 @@ test('PIN del dueno equivocado: no cancela y cuenta el fallo; el de Ana o de otr
   assert.equal(solicitudes().length, 0);
 });
 
-test('5 PIN malos del dueno lo bloquean tambien aqui, aun con el correcto', async () => {
+test('5 PIN malos dgerencia lo bloquean tambien aqui, aun con el correcto', async () => {
   const { vender, cancelar, venta } = await montar();
   const id = await vender(VIEJA);
   for (let i = 0; i < 5; i++) await cancelar(id, { aprobador: DUENO, pin: '000000' });
@@ -105,7 +105,7 @@ test('5 PIN malos del dueno lo bloquean tambien aqui, aun con el correcto', asyn
   assert.equal(venta(id).cancelada, 0);
 });
 
-test('PIN correcto del dueno: cancela a nombre de Ana y deja la solicitud aprobada por pin', async () => {
+test('PIN correcto dgerencia: cancela a nombre de Ana y deja la solicitud aprobada por pin', async () => {
   const { vender, cancelar, venta, stock, solicitudes } = await montar();
   const id = await vender(VIEJA);
   const antes = stock();
@@ -149,7 +149,7 @@ test('solicitar: 202 pendiente, una segunda peticion devuelve la misma y nada se
   assert.equal(estado.cuerpo.estado, 'pendiente');
 });
 
-test('el dueno aprueba desde cuentas: se cancela a nombre de Ana con la caja pedida y la solicitud queda aprobada', async () => {
+test('gerencia aprueba desde cuentas: se cancela a nombre de Ana con la caja pedida y la solicitud queda aprobada', async () => {
   const { como, vender, cancelar, venta, stock, solicitudes, pedir, ana } = await montar();
   const id = await vender(VIEJA);
   const antes = stock();
@@ -192,7 +192,7 @@ test('si la venta ya se cancelo mientras tanto, aprobar cierra la solicitud con 
   const id = await vender(VIEJA);
   const { cuerpo: { solicitud_id } } = await cancelar(id, { solicitar: true });
   como(DUENO);
-  assert.equal((await cancelar(id, {}, {})).status, 200);   // el dueno la cancela directo
+  assert.equal((await cancelar(id, {}, {})).status, 200);   // gerencia la cancela directo
   const r = await pedir(`/api/solicitudes/${solicitud_id}/resolver`, { aprobar: true });
   assert.equal(r.status, 200);
   assert.equal(r.cuerpo.ya_estaba, true);
@@ -214,7 +214,7 @@ test('si el vale de la compra ya se uso, aprobar da 409 y la solicitud sigue pen
   assert.equal(solicitudes()[0].estado, 'pendiente');
 });
 
-test('el dueno rechaza: la venta sigue activa y la solicitud queda rechazada', async () => {
+test('gerencia rechaza: la venta sigue activa y la solicitud queda rechazada', async () => {
   const { como, vender, cancelar, venta, solicitudes, pedir, ana } = await montar();
   const id = await vender(VIEJA);
   const { cuerpo: { solicitud_id } } = await cancelar(id, { solicitar: true });
@@ -228,7 +228,7 @@ test('el dueno rechaza: la venta sigue activa y la solicitud queda rechazada', a
   assert.equal((await pedir(`/api/solicitudes/${solicitud_id}`, undefined, 'GET', ana)).cuerpo.estado, 'rechazada');
 });
 
-test('cancelar una pieza suelta ya no es libre para el cajero: devolver dinero pide al dueño (#837, devolver-dinero.test.ts)', async () => {
+test('cancelar una pieza suelta ya no es libre para el cajero: devolver dinero pide a gerencia (#837, devolver-dinero.test.ts)', async () => {
   const { vender, pedir, ana, stock } = await montar();
   const id = await vender(VIEJA);
   const antes = stock();
@@ -240,7 +240,7 @@ test('cancelar una pieza suelta ya no es libre para el cajero: devolver dinero p
   assert.equal(stock(), antes);
 });
 
-test('solo la cajera que pidio (o el dueno) lee su solicitud', async () => {
+test('solo la cajera que pidio (o gerencia) lee su solicitud', async () => {
   const { como, db, vender, cancelar, pedir } = await montar();
   const id = await vender(VIEJA);
   const { cuerpo: { solicitud_id } } = await cancelar(id, { solicitar: true });

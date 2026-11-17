@@ -273,7 +273,7 @@ function errorTransferencia(avisoId, claveId, montoId, r, bancoId) {
 const adjunto = (id) => ($(id).dataset?.key ? { comprobante_key: $(id).dataset.key, fecha_comprobante: $(id).dataset.fecha || undefined } : {});
 const limpiarAdjunto = (id) => { $(id).value = ''; if ($(id).dataset) { $(id).dataset.key = ''; $(id).dataset.fecha = ''; } };
 const avisoExcedente = (excedente) => excedente > 0
-  ? `Sobraron ${pesos(excedente)} en la transferencia: solo se registró lo debido. El excedente se resuelve a mano con el dueño.` : '';
+  ? `Sobraron ${pesos(excedente)} en la transferencia: solo se registró lo debido. El excedente se resuelve a mano con gerencia.` : '';
 // Banxico pide el banco emisor para verificar la transferencia despues (#603); «Otro banco» no se verifica sola.
 for (const id of ['banco', 'mover-banco']) $(id).append(...[...BANCOS, ['otro', 'Otro banco (no se verifica sola)']].map(([codigo, nombre]) => new Option(nombre, codigo)));
 // Foto del comprobante (#603): se llena sola la clave, el monto y el banco; quien cobra confirma. Sin red o si falla, a mano como siempre.
@@ -294,7 +294,7 @@ $('caja-nombre').addEventListener('change', () => {
   validar();
 });
 // La caja asignada por el dueño (o la del cajero que entró con PIN) manda sobre la elegida aquí.
-let esDueno = false;   // solo el dueño ve la foto del comprobante que manda una revendedora (#609)
+let esDueno = false;   // solo gerencia ve la foto del comprobante que manda una revendedora (#609)
 // Las cajas son las de la tienda de esta computadora (#793, #800): las manda /api/yo y se recuerda la última lista (la misma que usa /caja).
 function pintarCajas(lista) {
   let guardada = '';
@@ -566,7 +566,7 @@ function reporteHtml(p) {
   const r = p.reporte;
   if (!r) return '';
   const datos = [r.clave && `clave ${escapar(r.clave)}`, r.monto && pesos(r.monto), bancoNombre(r.banco_emisor)].filter(Boolean).join(' · ');
-  const foto = !r.comprobante_key ? '' : esDueno ? ` · <a href="/api/pagos-reportados/${r.id}/comprobante" target="_blank" rel="noopener noreferrer">Ver foto ↗</a>` : ' · con foto (solo la ve el dueño)';
+  const foto = !r.comprobante_key ? '' : esDueno ? ` · <a href="/api/pagos-reportados/${r.id}/comprobante" target="_blank" rel="noopener noreferrer">Ver foto ↗</a>` : ' · con foto (solo la ve gerencia)';
   return `<div class="reporte"><b>${escapar(r.revendedora)} ${r.desde_portal ? 'dice que ya pagó (desde el portal)' : 'dice que su cliente ya pagó'}.</b> ${datos || 'Sin clave'}${foto}. Revisa que el dinero haya llegado, luego regístralo o recházalo.</div>`;
 }
 const botonesReporte = (p) => p.reporte

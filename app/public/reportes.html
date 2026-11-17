@@ -514,7 +514,7 @@
           <div class="tarjetas" id="descuentos-resumen" style="margin-bottom: 14px"></div>
           <div class="vista-grafica"><div class="graf-v" data-grafica="descuentos"></div></div>
           <div class="vista-tabla"><div id="v-tabla-descuentos"></div><div id="descuentos-detalle" style="overflow-x:auto"></div></div>
-          <p class="nota">Lo que se dejó de cobrar: la promo de inauguración ($100 en compras de $300 o más) y los descuentos aprobados por el dueño.
+          <p class="nota">Lo que se dejó de cobrar: la promo de inauguración ($100 en compras de $300 o más) y los descuentos aprobados por gerencia.
             Los tickets cancelados no cuentan.</p>
         </article>
       </section>
@@ -711,7 +711,7 @@
         </div>
         <div id="terminal-pagos" style="overflow-x:auto"></div>
         <details><summary>Lo que se le cuenta por corte</summary><div id="terminal-cortes" style="overflow-x:auto"></div></details>
-        <p class="nota">El dueño de la terminal paga en efectivo el 100 % de lo cobrado con tarjeta. Por corte se cuenta el cierre
+        <p class="nota">El titular de la terminal paga en efectivo el 100 % de lo cobrado con tarjeta. Por corte se cuenta el cierre
           de la terminal; si no se capturó, lo de tarjeta en el sistema. Lo que entra al cajón lo registra la caja en «Gasto / retiro»;
           lo que te da a ti, aquí. Las ventas con tarjeta cuentan desde su corte.</p>
       </article>
@@ -1381,7 +1381,7 @@ function pintarCaja(r) {
   $('retiros').innerHTML = r.retiros.length === 0 ? '<div class="vacio">Sin gastos ni retiros en este periodo.</div>'
     : `<table class="tabla"><thead><tr><th>Fecha</th><th>Tipo</th><th>Caja</th><th>Quién</th><th>Concepto / motivo</th><th class="num">Importe</th></tr></thead>
        <tbody>${r.retiros.map((x) => `
-         <tr><td>${fechaHora(x.creado_en)}</td><td>${({ gasto: 'Gasto', terminal: 'Entra: terminal', nomina: 'Nómina' })[x.tipo] ?? 'Retiro'}</td><td>${escapar(x.caja || 'Al dueño')}</td>
+         <tr><td>${fechaHora(x.creado_en)}</td><td>${({ gasto: 'Gasto', terminal: 'Entra: terminal', nomina: 'Nómina' })[x.tipo] ?? 'Retiro'}</td><td>${escapar(x.caja || 'A gerencia')}</td>
            <td>${escapar(x.cajero)}</td><td>${escapar(x.motivo)}</td><td class="num">${pesos(x.importe)}</td></tr>`).join('')}</tbody></table>`;
 }
 
@@ -1846,7 +1846,7 @@ function pintarTerminal(t) {
   $('terminal-pagos').innerHTML = t.pagos.length === 0 ? '<div class="vacio">Sin pagos registrados.</div>'
     : `<table class="tabla"><thead><tr><th>Fecha</th><th>Dónde</th><th>Registró</th><th>Nota</th><th class="num">Importe</th></tr></thead>
        <tbody>${t.pagos.map((p) => `
-         <tr><td>${fechaHora(p.creado_en)}</td><td>${escapar(p.caja || 'Al dueño')}</td><td>${escapar(p.cajero)}</td>
+         <tr><td>${fechaHora(p.creado_en)}</td><td>${escapar(p.caja || 'A gerencia')}</td><td>${escapar(p.cajero)}</td>
            <td>${escapar(p.motivo)}</td><td class="num">${pesos(p.importe)}</td></tr>`).join('')}</tbody></table>`;
   $('terminal-cortes').innerHTML = `<table class="tabla"><thead><tr><th>Corte</th><th>Caja</th><th class="num">Sistema</th>
        <th class="num">Terminal</th><th class="num">Se cuenta</th></tr></thead>

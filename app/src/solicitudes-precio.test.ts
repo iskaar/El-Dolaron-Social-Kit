@@ -19,7 +19,7 @@ const pedir = (t: Tienda, cuerpo: Record<string, unknown> = {}, id = PRODUCTO) =
 const producto = (t: Tienda, id = PRODUCTO) => t.db.prepare('select precio, actualizado_en, precio_anterior from productos where id = ?').get(id) as any;
 const solicitudes = (t: Tienda) => t.db.prepare('select * from solicitudes_precio order by pedido_en').all() as any[];
 
-test('el capturista pide, el cajero y FEP no, y el dueño también puede', async (t0) => {
+test('el capturista pide, el cajero y FEP no, y gerencia también puede', async (t0) => {
   const t = tienda(); t0.after(() => t.db.close()); equipo(t);
   como(t, CAJERO); assert.equal((await pedir(t)).status, 403);
   como(t, FEP); assert.equal((await pedir(t)).status, 403);
@@ -29,7 +29,7 @@ test('el capturista pide, el cajero y FEP no, y el dueño también puede', async
   assert.deepEqual({ ...r.cuerpo.solicitud }, { ...r.cuerpo.solicitud, producto_id: PRODUCTO, sentido: 'bajar', precio_actual: 25000,
     precio_sugerido: 20000, nota: 'Se ve muy caro', pedido_por: CAP, estado: 'pendiente', propietario: 'dolaron' });
   como(t, DUENO);
-  assert.equal((await t.pedir(ruta(), { id: crypto.randomUUID(), sentido: 'subir' })).status, 409, 'ya hay una pendiente, también para el dueño');
+  assert.equal((await t.pedir(ruta(), { id: crypto.randomUUID(), sentido: 'subir' })).status, 409, 'ya hay una pendiente, también para gerencia');
 });
 
 test('la ficha trae la pendiente y null cuando no hay', async (t0) => {
@@ -71,7 +71,7 @@ test('el mismo folio devuelve la misma solicitud; una segunda pendiente da 409 c
   assert.equal(solicitudes(t).length, 1);
 });
 
-test('solo el dueño lista y resuelve; el capturista recibe 403', async (t0) => {
+test('solo gerencia lista y resuelve; el capturista recibe 403', async (t0) => {
   const t = tienda(); t0.after(() => t.db.close()); equipo(t); como(t, CAP);
   const { cuerpo } = await pedir(t, { precio_sugerido: 20000 });
   assert.equal((await t.pedir('/api/solicitudes-precio?estado=pendiente')).status, 403);
@@ -83,7 +83,7 @@ test('solo el dueño lista y resuelve; el capturista recibe 403', async (t0) => 
   assert.equal(solicitudes(t)[0].estado, 'pendiente');
 });
 
-test('el dueño lista con los datos de la pieza y el conteo', async (t0) => {
+test('gerencia lista con los datos de la pieza y el conteo', async (t0) => {
   const t = tienda(); t0.after(() => t.db.close()); equipo(t); como(t, CAP);
   await pedir(t, { precio_sugerido: 20000, nota: 'Caro' });
   como(t, DUENO);
@@ -129,7 +129,7 @@ test('aplicar respeta las reglas del PATCH: no pasa del precio de lista y exige 
 test('si el precio ya no es el esperado, 409 y no cambia nada', async (t0) => {
   const t = tienda(); t0.after(() => t.db.close()); equipo(t); como(t, CAP);
   const { cuerpo } = await pedir(t, { precio_sugerido: 20000 }); const id = cuerpo.solicitud.id; como(t, DUENO);
-  t.db.prepare('update productos set precio = 30000 where id = ?').run(PRODUCTO);   // el dueño lo cambió desde «Editar»
+  t.db.prepare('update productos set precio = 30000 where id = ?').run(PRODUCTO);   // gerencia lo cambió desde «Editar»
   const r = await t.pedir(`/api/solicitudes-precio/${id}`, { accion: 'aplicar', precio: 20000, precio_esperado: 25000 });
   assert.equal(r.status, 409); assert.equal(r.cuerpo.precio, 30000);
   assert.equal(producto(t).precio, 30000); assert.equal(solicitudes(t)[0].estado, 'pendiente');
@@ -167,7 +167,7 @@ test('rechazar deja el precio igual y libera la pieza', async (t0) => {
   como(t, CAP); assert.equal((await pedir(t)).status, 201);
 });
 
-test('el propietario acota: la solicitud de FEP no la ve ni la resuelve el dueño de El Dolarón', async (t0) => {
+test('el propietario acota: la solicitud de FEP no la ve ni la resuelve gerencia de El Dolarón', async (t0) => {
   const t = tienda(); t0.after(() => t.db.close()); equipo(t);
   const fep = crypto.randomUUID();
   t.db.prepare("insert into productos (id, codigo, nombre, precio, stock, destino, estado_analisis, propietario, semana_ingreso, creado_en, actualizado_en) values (?, 'FEP-000001', 'Pieza FEP', 9000, 1, 'etiqueta', 'listo', 'fep', 'S40', '', '')").run(fep);
@@ -181,7 +181,7 @@ test('el propietario acota: la solicitud de FEP no la ve ni la resuelve el dueñ
   assert.equal((t.db.prepare('select precio from productos where id = ?').get(fep) as any).precio, 9000);
 });
 
-test('el host del capturista deja pedir y consultar; resolver sigue siendo del dueño', async (t0) => {
+test('el host del capturista deja pedir y consultar; resolver sigue siendo de gerencia', async (t0) => {
   assert.equal(permitidaParaVendedor(ruta(), 'POST'), true);
   assert.equal(permitidaParaVendedor(ruta(), 'GET'), false);
   assert.equal(permitidaParaVendedor('/inventario-precio.js', 'GET'), true);
@@ -237,7 +237,7 @@ test('cero filas en el UPDATE no cierra la solicitud si la pieza cambia de banda
   assert.equal(solicitudes(t)[0].estado, 'pendiente');
 });
 
-test('el dueño cambia el precio por el PATCH (Editar o Revisar): la solicitud pendiente se cierra sola, solo si el precio cambió', async (t0) => {
+test('gerencia cambia el precio por el PATCH (Editar o Revisar): la solicitud pendiente se cierra sola, solo si el precio cambió', async (t0) => {
   const t = tienda(); t0.after(() => t.db.close()); equipo(t); como(t, CAP);
   await pedir(t, { precio_sugerido: 20000 }); como(t, DUENO);
   const patch = (cuerpo: Record<string, unknown>) => t.pedir(`/api/borradores/${PRODUCTO}`, { destino: 'etiqueta', ...cuerpo }, 'PATCH');

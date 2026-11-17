@@ -338,7 +338,7 @@ test('P3-b: un precio mayor al de lista se rechaza antes de encolar o guardar',(
   assert.deepEqual(cambiosTarjeta({ficha:{precio_lista:0},precio:'900'}),{precio:90000},'Sin precio de lista no hay tope');
 });
 
-test('P3-c: UPC solo en catálogo y sin foto: la foto con edición del dueño sí llega a capturarPorUpc',async t0=>{
+test('P3-c: UPC solo en catálogo y sin foto: la foto con edición de gerencia sí llega a capturarPorUpc',async t0=>{
   const t=manifiesto();t0.after(async()=>{await t.esperar();t.db.close();});
   t.db.prepare("delete from manifiesto").run();
   t.db.prepare(`insert into productos(id,upc,nombre,categoria,precio_lista,precio,estado_fisico,stock,estado_analisis,propietario,destino,semana_ingreso,creado_en,actualizado_en)

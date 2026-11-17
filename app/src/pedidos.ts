@@ -39,7 +39,7 @@ export const TIENDA_ENVIO = 'soledad';   // literal: cuentas.ts y este módulo s
 
 /** Lo que dice el 409 de cancelar un ticket que uso saldo de pedido (devoluciones.ts y cancelaciones.ts). */
 export const TICKET_CON_ANTICIPO =
-  'Este ticket usó saldo de un pedido; por ahora no se cancela en la caja. Avisa al dueño.';
+  'Este ticket usó saldo de un pedido; por ahora no se cancela en la caja. Avisa a gerencia.';
 // ponytail: cancelar un ticket con anticipo pide devolver el saldo al pedido (o dinero) y ajustar el corte
 // de dos cajas; hasta que se necesite lo resuelve el dueno a mano. Mejora: reponer `saldo` en el mismo batch.
 

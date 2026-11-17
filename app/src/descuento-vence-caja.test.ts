@@ -111,7 +111,7 @@ test('#845 pintar() no suelta el descuento ni el folio mientras un cobro está e
   assert.equal(sinDuda.idVenta, null);
 });
 
-test('#845 el dueño con su PIN en la computadora de la caja no tiene el tope del cajero', () => {
+test('#845 gerencia con su PIN en la computadora de la caja no tiene el tope del cajero', () => {
   const tope = entre('  // El dueño con su PIN en la computadora', '  pintarTopeDescuento();');
   const correr = (yo: { usuario?: unknown; cajero?: unknown }) => {
     const c: { esDuenoEnCaja: boolean } = { esDuenoEnCaja: false };

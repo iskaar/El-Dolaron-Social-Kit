@@ -121,7 +121,7 @@ test('Venta rechazada: se reporta una sola vez por folio; tienda y cajero salen 
   assert.equal(fila.total, 35000);
   assert.equal(fila.piezas, 2);
   assert.equal(fila.creado_en, '2026-11-16T15:30:00.000Z');
-  assert.equal(t.correos.length, 1, 'el dueño recibe un solo aviso');
+  assert.equal(t.correos.length, 1, 'gerencia recibe un solo aviso');
   assert.match(t.correos[0].text, /\$350\.00/);
 
   // Reintento del reporte (la caja no supo que llegó): sigue una fila y no vuelve a avisar.
@@ -158,7 +158,7 @@ test('Venta rechazada: reporte inválido se rechaza; sin PIN de cajero no se ace
   assert.equal((t.db.prepare('select count(*) n from ventas_rechazadas').get() as { n: number }).n, 0);
 });
 
-test('Venta rechazada: solo el dueño la lista y la resuelve (con nota); resolver no toca existencias ni ventas', async () => {
+test('Venta rechazada: solo gerencia la lista y la resuelve (con nota); resolver no toca existencias ni ventas', async () => {
   const t = montar('salk');
   const token = await t.entrar();
   const id = crypto.randomUUID();
@@ -194,7 +194,7 @@ test('Venta rechazada: solo el dueño la lista y la resuelve (con nota); resolve
   assert.equal(((await t.pedir('/api/ventas-rechazadas', undefined, 'GET')).cuerpo as unknown as unknown[]).length, 0);
 });
 
-test('Venta rechazada: si el reintento después sí entra, el dueño la ve marcada como registrada', async () => {
+test('Venta rechazada: si el reintento después sí entra, gerencia la ve marcada como registrada', async () => {
   const t = montar('salk');
   const token = await t.entrar();
   const id = crypto.randomUUID();
@@ -273,6 +273,6 @@ test('caja: un 400 o 404 al reportar es definitivo (no se reintenta y se puede d
     assert.equal(intentos, definitivo ? 1 : 2, `${respuesta}: ${definitivo ? 'no se reintenta' : 'se reintenta'}`);
     const html: string = el.rechazadas.innerHTML;
     assert.equal(/data-descartar="[^"]+"\s+disabled/.test(html), !definitivo, `${respuesta}: Descartar ${definitivo ? 'habilitado' : 'deshabilitado'}`);
-    assert.equal(html.includes('No se pudo avisar al dueño: avísale en persona antes de descartar.'), definitivo);
+    assert.equal(html.includes('No se pudo avisar a gerencia: avísale en persona antes de descartar.'), definitivo);
   }
 });

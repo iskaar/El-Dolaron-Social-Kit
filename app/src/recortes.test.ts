@@ -68,7 +68,7 @@ test('recortes: cuota 9422 no marca; otro error marca error', async () => {
   }
 });
 
-test('recortes: admin limita al dueño, original borra R2 y reintentar devuelve a pendiente', async () => {
+test('recortes: admin limita a gerencia, original borra R2 y reintentar devuelve a pendiente', async () => {
   const t = preparar();
   try {
     t.db.prepare(`update productos set recorte_estado='listo',recorte_fecha='2026-10-16' where id='${ID0}'`).run();

@@ -147,7 +147,7 @@ export async function rutaSolicitudesPrecio(request: Request, env: Env, url: URL
     if (metodo !== 'POST') return json({ error: 'Método no permitido.' }, 405);
     return puedePedir(usuario) ? pedir(request, env, nueva[1], usuario) : json({ error: 'Tu cuenta no puede pedir cambios de precio.' }, 403);
   }
-  if (!esDueno(usuario)) return json({ error: 'Solo el dueño revisa las solicitudes de precio.' }, 403);
+  if (!esDueno(usuario)) return json({ error: 'Solo gerencia revisa las solicitudes de precio.' }, 403);
   if (url.pathname === '/api/solicitudes-precio') return metodo === 'GET' ? listar(env, url, usuario) : json({ error: 'Método no permitido.' }, 405);
   const una = /^\/api\/solicitudes-precio\/([^/]+)$/.exec(url.pathname);
   if (una) return metodo === 'POST' ? resolver(request, env, una[1], usuario, aplicarPrecio) : json({ error: 'Método no permitido.' }, 405);

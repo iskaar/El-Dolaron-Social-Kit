@@ -118,7 +118,7 @@ test('apartar desde el portal una pieza que solo está en Salk: baja Salk, no So
   const deSalk = await m.avisos(salk);
   assert.deepEqual(deSalk.por_separar.map((x) => [x.folio, x.codigo, x.canal, x.recoge_en]), [[1, a.codigo, 'Portal', 'soledad']]);
   assert.deepEqual([(await m.avisos(romero)).por_separar, (await m.avisos(soledad)).por_separar], [[], []]);
-  assert.equal((await m.avisos(m.dueno)).por_separar.length, 1, 'el dueño ve las de todas las tiendas');
+  assert.equal((await m.avisos(m.dueno)).por_separar.length, 1, 'gerencia ve las de todas las tiendas');
   // Un reintento del mismo apartado no baja otra unidad.
   assert.equal((await m.portal(a.codigo, { id: r.id })).status, 200);
   assert.equal(m.total(a.id), antes);
@@ -366,7 +366,7 @@ test('/vender y el catálogo dicen en qué tienda está la pieza, nunca cuántas
   assert.equal(JSON.stringify([pa, pb]).includes('"stock"'), false);
 });
 
-test('quien no es dueño no marca avisos de otra tienda; el dueño sí; una pieza inexistente es 404', async () => {
+test('quien no es dueño no marca avisos de otra tienda; gerencia sí; una pieza inexistente es 404', async () => {
   const m = montar();
   const a = m.pieza(25000, 0, 1);
   const romero = await m.terminal(PC_ROMERO);

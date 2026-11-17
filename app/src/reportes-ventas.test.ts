@@ -284,7 +284,7 @@ test('con tienda todo se acota a ventas.tienda, tambien lo cobrado por caja', as
   t.db.close();
 });
 
-test('parametros invalidos y permiso: solo el dueno', async () => {
+test('parametros invalidos y permiso: solo gerencia', async () => {
   const t = tienda();
   assert.equal((await llamar(t, 'ventas', 'dias=7&comparar=ayer')).status, 400);
   assert.equal((await llamar(t, 'ventas', 'dias=7&grano=hora')).status, 400);

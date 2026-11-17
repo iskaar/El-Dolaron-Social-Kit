@@ -564,7 +564,7 @@ test('pantalla: corregir desde la ficha confirma, manda precio y destino sin sto
   permisos = { puede_editar:true, puede_precio:false };
   const cap = pantalla((url, cuerpo) => cuerpo ? (enviados.push({ url, cuerpo }), { ...p, ...cuerpo }) : { pieza:{ ...p }, ...permisos, historial:[] });
   await cap.api.abrir(p.id); cap.$('editar').eventos.click();
-  assert.equal(cap.$('campos-precio').hidden, true); assert.match(cap.$('nota-precio').textContent, /solo el dueño/);
+  assert.equal(cap.$('campos-precio').hidden, true); assert.match(cap.$('nota-precio').textContent, /solo gerencia/);
   cap.$('e-talla').value = 'L'; await cap.$('corregir').eventos.submit({ preventDefault() {} }); await new Promise(setImmediate);
   assert.equal(enviados.at(-1).cuerpo.precio, 45000); assert.equal(enviados.at(-1).cuerpo.talla, 'L');
   assert.equal(cap.$('reimprimir').hidden, false); assert.match(cap.$('reimprimir-texto').textContent, /dice «Chamarra · M»/);

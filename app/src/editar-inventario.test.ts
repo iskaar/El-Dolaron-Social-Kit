@@ -55,7 +55,7 @@ test('capturista sin casilla: 403 en PATCH, DELETE, fusionar, analizar e imagen,
   await t.esperar();
 });
 
-test('capturista con casilla: las mismas rutas llegan al handler; el dueño pasa sin casilla propia', async (t0) => {
+test('capturista con casilla: las mismas rutas llegan al handler; gerencia pasa sin casilla propia', async (t0) => {
   for (const quien of ['capturista', 'dueno'] as const) {
     const t = tienda(); t0.after(() => t.db.close());
     // El dueño de prueba tiene editar_inventario = 0: pasa por su rol, no por la casilla.
@@ -193,7 +193,7 @@ test('las correcciones de 24 h del carrusel (existencia, talla, revisión) no pi
   await t.esperar();
 });
 
-test('precio de una pieza con código: solo el dueño, con o sin casilla (#75), y la ficha manda el actual', async (t0) => {
+test('precio de una pieza con código: solo gerencia, con o sin casilla (#75), y la ficha manda el actual', async (t0) => {
   const t = tienda(); t0.after(() => t.db.close());
   usuario(t, CAP, 'capturista', 1);
   const id = pieza(t, { codigo: 'ED-002400' });
@@ -210,7 +210,7 @@ test('precio de una pieza con código: solo el dueño, con o sin casilla (#75), 
   assert.equal(fila(t, id)!.precio, 40000);
 });
 
-test('/api/yo y la ficha dicen si hay casilla; puede_precio solo es del dueño', async (t0) => {
+test('/api/yo y la ficha dicen si hay casilla; puede_precio solo es de gerencia', async (t0) => {
   const t = tienda(); t0.after(() => t.db.close());
   usuario(t, CAP, 'capturista', 1);
   const id = pieza(t);

@@ -43,7 +43,7 @@ test('GET /api/plano: forma, quién soy y solo empleados activos', async () => {
   } finally { t.db.close(); }
 });
 
-test('el dueño asigna y se conserva; otro rol recibe 403 y no cambia nada', async () => {
+test('gerencia asigna y se conserva; otro rol recibe 403 y no cambia nada', async () => {
   const { t, empleado, como } = escenario();
   try {
     const ana = await empleado('Ana', 'ana@prueba.mx');
@@ -73,7 +73,7 @@ test('letrero fuera de 1-36 o empleado inexistente/inactivo: 400 y no guarda', a
   } finally { t.db.close(); }
 });
 
-test('el dueño renombra letreros: se conserva, se mezcla, vacío lo quita; otro rol recibe 403', async () => {
+test('gerencia renombra letreros: se conserva, se mezcla, vacío lo quita; otro rol recibe 403', async () => {
   const { t, empleado, como } = escenario();
   try {
     await empleado('Ana', 'ana@prueba.mx');

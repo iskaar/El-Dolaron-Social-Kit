@@ -287,8 +287,8 @@ export async function cancelarPieza(
 
   return json({
     requiere_aprobacion: true,
-    error: 'Devolver dinero necesita la aprobación del supervisor o del dueño. Ofrece primero «Devolver en cupón» (lo haces tú). '
-      + 'Si el cliente insiste en dinero: aprueba con el PIN del supervisor o del dueño, o envía la solicitud al dueño (si esta pantalla no lo ofrece, recarga la caja).',
+    error: 'Devolver dinero necesita la aprobación del supervisor o de gerencia. Ofrece primero «Devolver en cupón» (lo haces tú). '
+      + 'Si el cliente insiste en dinero: aprueba con el PIN del supervisor o de gerencia, o envía la solicitud a gerencia (si esta pantalla no lo ofrece, recarga la caja).',
     duenos: await aprobadoresDeDinero(env, tienda),   // dueño y supervisores de esta tienda con PIN
   }, 403);
 }
@@ -308,7 +308,7 @@ export async function resolverDevolucion(env: Env, id: string, aprobar: boolean,
   const marcar = (estado: string) => env.DB.prepare(
     `update solicitudes set estado = ?, resuelto_en = ?, resuelto_por = ? where id = ? and estado = 'pendiente'`,
   ).bind(estado, new Date().toISOString(), dueno, id);
-  const yaResuelta = () => json({ error: 'Otro dueño ya la resolvió.' }, 409);
+  const yaResuelta = () => json({ error: 'Otra persona ya la resolvió.' }, 409);
   if (!aprobar) {
     if (!(await marcar('rechazada').run()).meta.changes) return yaResuelta();
     return json({ id, estado: 'rechazada' });

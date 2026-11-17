@@ -41,12 +41,12 @@ const enDinero = (v: Pick<VentaCorregible, 'total' | 'dolarones' | 'anticipo'>) 
 export function motivoDeRechazo(v: VentaCorregible, nueva: string, quien: Quien, desde = inicioDelDia()): { status: number; error: string } | null {
   const no = (error: string, status = 409) => ({ status, error });
   if (v.cancelada) return no('Este ticket está cancelado: no hay forma de pago que corregir.');
-  if (v.corte_id) return no('Este ticket ya entró a un corte de caja: su forma de pago ya no se puede corregir aquí. Avísale al dueño.');
+  if (v.corte_id) return no('Este ticket ya entró a un corte de caja: su forma de pago ya no se puede corregir aquí. Avísale a gerencia.');
   if (v.devuelta) return no('Este ticket tiene piezas devueltas: su forma de pago ya no se puede corregir.');
-  if (v.pendiente_devolucion) return no('Hay una devolución esperando al dueño en este ticket.');
+  if (v.pendiente_devolucion) return no('Hay una devolución esperando a gerencia en este ticket.');
   // Un ticket de otro día, o sin caja, nunca recibe un corte que lo ampare: ni el dueño lo cambia aquí.
-  if (v.creado_en < desde) return no('Solo se corrigen ventas de hoy. Avísale al dueño.');
-  if (!v.caja) return no('Este ticket no tiene caja: su forma de pago no se puede corregir aquí. Avísale al dueño.');
+  if (v.creado_en < desde) return no('Solo se corrigen ventas de hoy. Avísale a gerencia.');
+  if (!v.caja) return no('Este ticket no tiene caja: su forma de pago no se puede corregir aquí. Avísale a gerencia.');
   if (enDinero(v) <= 0) return no('Este ticket se pagó completo con Dolarones o con el saldo de un pedido: no tiene forma de pago que corregir.');
   if (v.con_clave) return no('Esta transferencia tiene clave de rastreo registrada: no se corrige aquí. Cancela la venta y vuelve a cobrarla.');
   if (nueva === v.forma_pago) return no('Este ticket ya está cobrado con esa forma de pago.');
@@ -54,7 +54,7 @@ export function motivoDeRechazo(v: VentaCorregible, nueva: string, quien: Quien,
     return no(`Desde ${pesos(CLAVE_DESDE)} la transferencia necesita clave de rastreo: cancela la venta y vuelve a cobrarla por transferencia.`);
   if (nueva === 'efectivo' && v.imprimir_en) return no('Esta venta se cobró en el celular: solo puede ser tarjeta o transferencia.');
   if (!quien.dueno && v.caja !== quien.caja) return no(`Este ticket es de ${v.caja}: corrígelo desde esa caja.`, 403);
-  if (!quien.dueno && (nueva === 'transferencia' || v.forma_pago === 'transferencia')) return no('Cambiar a o desde transferencia lo hace el dueño.', 403);
+  if (!quien.dueno && (nueva === 'transferencia' || v.forma_pago === 'transferencia')) return no('Cambiar a o desde transferencia lo hace gerencia.', 403);
   return null;
 }
 

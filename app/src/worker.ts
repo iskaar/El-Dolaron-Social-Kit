@@ -287,7 +287,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
   const propietario = propietarioDe(usuario);
   // 400 y no 403: un 403 detiene la cola de fotos del celular como si hubiera vencido la sesión.
   if (precioRopa !== null && !PRECIOS_ROPA.includes(precioRopa) && !autorizarPrecio(usuario, { codigo: null, preciadaPorSistema: true })) {
-    return json({ error: 'Solo el dueño escribe un precio fuera de los escalones de ropa.' }, 400);
+    return json({ error: 'Solo gerencia escribe un precio fuera de los escalones de ropa.' }, 400);
   }
   const existente = await env.DB.prepare('select id, nombre, precio, estado_fisico, estado_analisis, stock, talla, propietario, foto_key from productos where id = ?')
     .bind(id).first<{ estado_analisis: string; propietario: string; foto_key: string }>();
@@ -599,7 +599,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     return json({ error: 'Una pieza con etiqueta necesita nombre y un precio mayor a cero para quedar lista.' }, 400);
   }
   if (precio !== fila.precio && !esCaducado && !autorizarPrecio(usuario, fila)) {
-    return json({ error: 'Esta pieza ya tiene etiqueta: solo el dueño cambia su precio.' }, 403);
+    return json({ error: 'Esta pieza ya tiene etiqueta: solo gerencia cambia su precio.' }, 403);
   }
 
   const ahora = new Date().toISOString();
@@ -667,7 +667,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   const pedida = await crearSolicitud(env, id, fila.propietario, por, { id: crypto.randomUUID(), sentido: precioPedido > fila.precio ? 'subir' : 'bajar', sugerido: precioPedido, nota: 'Por cambio de grado' });
   // 409 = ya había una pendiente de esta pieza: el dueño ya la tiene. Otro error: el grado quedó guardado, el precio no.
   const error = pedida.status === 409 || pedida.ok ? '' : (await pedida.json().catch(() => ({})) as { error?: string }).error ?? 'No se pudo pedir el cambio de precio.';
-  return json({ ...salida, solicitud_precio: !error, aviso: error || 'Grado guardado. El precio nuevo se pidió al dueño' });
+  return json({ ...salida, solicitud_precio: !error, aviso: error || 'Grado guardado. El precio nuevo se pidió a gerencia' });
 }
 
 /**
@@ -878,7 +878,7 @@ async function capturarPorUpc(request: Request, env: Env, correo: string, ctx?: 
   const validarEdicion = (nombre: string, precio: number): Response | null => {
     // El precio de un alta por UPC sale del manifiesto: solo el dueño lo cambia (#479).
     if (cuerpo.precio !== undefined && cuerpo.precio !== precio && !autorizarPrecio(usuario, { codigo: null, preciadaPorSistema: true })) {
-      return json({ error: 'Solo el dueño cambia el precio.' }, 403);
+      return json({ error: 'Solo gerencia cambia el precio.' }, 403);
     }
     if (nombreEditado !== undefined && nombreEditado !== nombre && !puedeEditarInventario(usuario)) {
       return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
@@ -1209,7 +1209,7 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
     return json({ error: conBanda && !libre ? 'Escoge $300, $200, $150, $120, $100, $80 o $50 MXN.' : 'Escribe un precio mayor a cero en pesos.' }, 400);
   }
   if (!conBanda && cambios.precio !== undefined && !fijo && cambios.precio !== fila.precio && !autorizarPrecio(usuario, { codigo: null, preciadaPorSistema: true })) {
-    return json({ error: 'Solo el dueño escribe un precio fuera de los escalones de ropa.' }, 403);
+    return json({ error: 'Solo gerencia escribe un precio fuera de los escalones de ropa.' }, 403);
   }
   const nombreEditado = cambios.nombre === undefined ? undefined : typeof cambios.nombre === 'string' ? decodificarNombre(cambios.nombre).trim().slice(0, 120) : '';
   if (nombreEditado !== undefined && !libre) return json({ error: 'El nombre solo se corrige al revisar una pieza nueva (en ropa sale de prenda y marca).' }, 400);
@@ -1235,7 +1235,7 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   // #479: quien no autoriza el precio de una pieza con etiqueta lo pide al dueño; lo demás se guarda como siempre.
   // Cambiar el grado sin tocar el precio lo recalcula con la banda del grado, como al guardar la tarjeta UPC; también en una pieza ya
   // confirmada (#708). Sin precio de lista se conserva el precio.
-  const aCaducado = grado === 'caducado';   // #733: la D queda en $0 y no pide precio al dueño
+  const aCaducado = grado === 'caducado';   // #733: la D queda en $0 y no pide precio a gerencia
   const porGrado = aCaducado ? 0 : cambios.precio === undefined && cambios.estado_fisico !== undefined && cambios.estado_fisico !== fila.estado_fisico
     && conBanda && fila.precio_lista > 0
     ? calcularPrecio({ precioLista: fila.precio_lista, categoria: fila.categoria || 'otros', estadoFisico: grado, config: await leerConfig(env) }).precio : null;
@@ -1259,7 +1259,7 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
     // 409 = ya había una pendiente de esta pieza: el dueño ya la tiene. Otro error: lo demás quedó guardado, el precio no.
     const error = pedida.status === 409 || pedida.ok ? '' : (await pedida.json().catch(() => ({})) as { error?: string }).error ?? 'No se pudo pedir el cambio de precio.';
     return json({ ...guardada, ...partesDeNombre(guardada.nombre, guardada.marca), solicitud_precio: !error,
-      aviso: error || 'Se pidió el cambio de precio al dueño' });
+      aviso: error || 'Se pidió el cambio de precio a gerencia' });
   }
   return json(guardada ? { ...guardada, ...partesDeNombre(guardada.nombre, guardada.marca) } : guardada);
 }
@@ -2695,7 +2695,7 @@ export default {
           if (cajero) correo = cajero.correo;
           else if (pathname.startsWith('/api/')) return json({ error: 'Escribe tu PIN de cajero.', pin: true }, 401);
           // R2: una computadora de caja sin tienda no cobra.
-          if (!tienda && pathname.startsWith('/api/')) return json({ error: 'Esta computadora no tiene tienda asignada. Pídele al dueño que se la asigne en Cuentas.' }, 403);
+          if (!tienda && pathname.startsWith('/api/')) return json({ error: 'Esta computadora no tiene tienda asignada. Pídele a gerencia que se la asigne en Cuentas.' }, 403);
         }
         if (tienda !== TIENDA_CENTRAL && request.method !== 'GET' && CAPTURA_SOLEDAD.test(pathname)) {
           return json({ error: 'Una cuenta de sucursal no captura ni ajusta la existencia de Soledad: la mercancía se captura y etiqueta allá.' }, 403);
@@ -2963,7 +2963,7 @@ export default {
       if (pathname === '/api/retiros' && request.method === 'POST') {
         return await registrarRetiro(request, env, correo, tienda);
       }
-      if (pathname === '/api/terminal') return await rutaTerminal(request, env, correo);   // solo el dueno (cuentas.ts)
+      if (pathname === '/api/terminal') return await rutaTerminal(request, env, correo);   // solo gerencia (cuentas.ts)
       if (pathname === '/api/gastos' || pathname.startsWith('/api/gastos/')) {
         return await rutaGastos(request, env, url, correo, tienda);
       }

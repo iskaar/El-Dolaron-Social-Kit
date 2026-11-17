@@ -586,7 +586,7 @@ $('orden').addEventListener('change', () => cargarPiezas(true));
 const dialogo = $('dialogo');
 let p = null;      // producto
 let prop = null;   // propuesta vigente (cambia al cambiar de categoria)
-let f = null;      // lo que el dueno va escribiendo; sobrevive al cambio de categoria
+let f = null;      // lo que gerencia va escribiendo; sobrevive al cambio de categoria
 let ref = {};      // nodos que se actualizan sin reconstruir el formulario
 
 dialogo.addEventListener('close', () => { p = prop = f = null; });

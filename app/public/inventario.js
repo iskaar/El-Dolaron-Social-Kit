@@ -190,7 +190,7 @@ const observador = globalThis.IntersectionObserver ? new IntersectionObserver((e
 }, { rootMargin:'160px' }) : null;
 observador?.observe($('mas'));
 $('volver').onclick = async () => { if(modo==='revisar') (await cargar('revisar')).cerrar(); ficha.cerrar(); piezaActual = null; document.body.classList.remove('con-ficha'); foco(); };
-$('solo-consulta').onclick = () => hoja('Solo consulta', nodo('p', 'Tu cuenta no puede editar. Pídelo al dueño.'));
+$('solo-consulta').onclick = () => hoja('Solo consulta', nodo('p', 'Tu cuenta no puede editar. Pídelo a gerencia.'));
 $('camara-etiqueta').onclick = async () => {
   try { await apagarCamaras(); $('visor').hidden = false; const { abrirCamara } = await import('./camara.js'); apagar = await abrirCamara('visor', (codigo) => recibir({ codigo, origen:'camara' })); }
   catch(e) { mensaje(e.message, 'error'); }

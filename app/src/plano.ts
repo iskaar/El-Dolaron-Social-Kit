@@ -23,7 +23,7 @@ async function leerNombres(env: Env): Promise<Record<string, string>> {
 export async function rutaPlano(request: Request, env: Env, usuario: Usuario | null, correo: string): Promise<Response> {
   const dueno = !!usuario?.activo && usuario.roles.includes('dueno');
   if (request.method === 'PUT') {
-    if (!dueno) return json({ error: 'Solo el dueño asigna áreas.' }, 403);
+    if (!dueno) return json({ error: 'Solo gerencia asigna áreas.' }, 403);
     const cuerpo = await request.json().catch(() => null) as { areas?: unknown; nombres?: unknown } | null;
     const { areas, nombres } = cuerpo ?? {};
     if (areas === undefined && nombres === undefined) return json({ error: 'Faltan las áreas o los nombres.' }, 400);

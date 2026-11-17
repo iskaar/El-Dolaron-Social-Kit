@@ -75,7 +75,7 @@ test('estructura: ids únicos y estables, de 2 a 6 pasos, ver apunta a escenario
     assert.ok(fuentes[e.pantalla], `${e.id}: pantalla desconocida ${e.pantalla}`);
     assert.ok(Array.isArray(e.textos), `${e.id}: falta textos`);
     for (const t of e.textos) assert.ok(typeof t === 'string' ? t : (fuentes[t[0]] && t[1]), `${e.id}: texto mal declarado ${JSON.stringify(t)}`);
-    if (e.pendiente !== undefined) assert.match(e.pendiente, /^(?:¿.{15,}\?|Falta en la caja: .{15,}\.)$/, `${e.id}: la pendiente es una pregunta para el dueño o «Falta en la caja: …»`);
+    if (e.pendiente !== undefined) assert.match(e.pendiente, /^(?:¿.{15,}\?|Falta en la caja: .{15,}\.)$/, `${e.id}: la pendiente es una pregunta para gerencia o «Falta en la caja: …»`);
   }
   for (const [, ruta] of Object.entries(fuentes)) assert.ok(existsSync(ruta), `${ruta} no existe`);
 });
@@ -224,7 +224,7 @@ test('sin red: la guía va en el service worker de la caja', () => {
 
 const cuenta = (...roles: Rol[]) => ({ correo: 'x@prueba.mx', nombre: '', caja: '', activo: true, editar_inventario: false, roles });
 
-test('/ayuda abre para la caja, la computadora de caja, el capturista y el dueño; cierra para el resto', () => {
+test('/ayuda abre para la caja, la computadora de caja, el capturista y gerencia; cierra para el resto', () => {
   for (const ruta of ['/ayuda', '/ayuda.html']) {
     const regla = permiso(ruta, 'GET');
     for (const rol of ['cajero', 'computadora', 'capturista', 'dueno'] as Rol[]) assert.equal(puede(cuenta(rol), regla), true, `${ruta} ${rol}`);

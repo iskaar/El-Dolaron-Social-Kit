@@ -209,7 +209,7 @@ test('conteo de una sucursal: cuenta SU existencia, ajusta sobre ella con rastro
   const demas = await salk('/api/conteo/ajustes', { id: crypto.randomUUID(), producto_id: PRODUCTO, cantidad: 9, esperado: 3, motivo: 'merma' });
   assert.equal(demas.status, 409);
   assert.equal(m.stock(), soledadAntes);
-  assert.equal((await m.yo(CAPTURISTA)('/api/conteo/ajustes', { id: crypto.randomUUID(), producto_id: PRODUCTO, cantidad: 1, esperado: 3, motivo: 'merma' })).status, 403, 'ajustar sigue siendo del dueño');
+  assert.equal((await m.yo(CAPTURISTA)('/api/conteo/ajustes', { id: crypto.randomUUID(), producto_id: PRODUCTO, cantidad: 1, esperado: 3, motivo: 'merma' })).status, 403, 'ajustar sigue siendo de gerencia');
 });
 
 test('conteo de Soledad sin cambio: ajusta productos.stock y el rastro queda como de Soledad', async () => {
@@ -247,7 +247,7 @@ test('ajuste de faltante en una sucursal sobre un bulto recibido: la pantalla tr
   assert.equal(ficha.tienda_de_ajustes[id], 'salk', 'la ficha dice en qué tienda fue el ajuste');
   assert.equal('tienda' in ficha.historial.find((h: { id: string }) => h.id === id), false, 'los renglones del historial conservan su forma');
   assert.deepEqual(ficha.existencia, { soledad: 45, sucursales: { salk: 3, romero: 0 }, en_camino: 0, total: 48 });
-  assert.equal((await m.yo(CAPTURISTA)(`/api/piezas/${PRODUCTO}/existencia`, { id: crypto.randomUUID(), tienda: 'salk', fijar_a: 0, esperado: 3, motivo: 'correccion' })).status, 403, 'solo el dueño ajusta una sucursal');
+  assert.equal((await m.yo(CAPTURISTA)(`/api/piezas/${PRODUCTO}/existencia`, { id: crypto.randomUUID(), tienda: 'salk', fijar_a: 0, esperado: 3, motivo: 'correccion' })).status, 403, 'solo gerencia ajusta una sucursal');
 });
 
 test('inventario.csv: con los datos de hoy `stock` es lo de siempre; con mercancía repartida `stock` es el total y las columnas nuevas dicen dónde está', async () => {

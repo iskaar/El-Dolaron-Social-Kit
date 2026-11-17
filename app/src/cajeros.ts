@@ -92,7 +92,7 @@ export async function verificarPin(
   )
     .bind(correo)
     .first<FilaPin>();
-  if (!fila || !admite(leerRoles(fila.roles))) return { error: 'Sin PIN. Pideselo al dueno.', status: 404 };
+  if (!fila || !admite(leerRoles(fila.roles))) return { error: 'Sin PIN. Pideselo a gerencia.', status: 404 };
 
   const ahora = new Date();
   const ahoraIso = ahora.toISOString();
@@ -146,10 +146,10 @@ export async function verificarPinAprobacion(
     `select correo, nombre, roles, tienda, caja, pin_hash, pin_sal, pin_bloqueo from usuarios
      where correo = ? and activo = 1 and pin_hash != ''`,
   ).bind(correo).first<FilaPin>();
-  if (!fila || !admite(leerRoles(fila.roles))) return { error: 'Sin PIN. Pideselo al dueno.', status: 404 };
+  if (!fila || !admite(leerRoles(fila.roles))) return { error: 'Sin PIN. Pideselo a gerencia.', status: 404 };
   // #850: un supervisor aprueba solo en su tienda (el dueño, en todas). Antes de contar el intento: no gasta los del aprobador.
   if (!valeEnTienda({ roles: leerRoles(fila.roles), tienda: fila.tienda }, tienda))
-    return { error: 'Esa persona es de otra tienda: pide el PIN a un supervisor de esta tienda o al dueño.', status: 403 };
+    return { error: 'Esa persona es de otra tienda: pide el PIN a un supervisor de esta tienda o a gerencia.', status: 403 };
 
   const ahora = new Date();
   const ahoraIso = ahora.toISOString();
@@ -188,8 +188,8 @@ export async function entrar(request: Request, env: Env, tienda: string): Promis
   if (cuenta?.activo && puedeCobrar(cuenta.roles) && !valeEnTienda(cuenta, tienda)) {
     const de = tiendaDe(cuenta);
     return json({ error: esTienda(tienda)
-      ? `Tu cuenta es de ${esTienda(de) ? TIENDAS[de].nombre : de}; esta caja es de ${TIENDAS[tienda].nombre}. Pídele al dueño que te cambie de tienda.`
-      : 'Esta computadora no tiene tienda asignada. Pídele al dueño que se la asigne en Cuentas.' }, 403);
+      ? `Tu cuenta es de ${esTienda(de) ? TIENDAS[de].nombre : de}; esta caja es de ${TIENDAS[tienda].nombre}. Pídele a gerencia que te cambie de tienda.`
+      : 'Esta computadora no tiene tienda asignada. Pídele a gerencia que se la asigne en Cuentas.' }, 403);
   }
   const verificado = await verificarPin(env, correo, String(cuerpo.pin ?? ''));
   if ('error' in verificado) return json({ error: verificado.error }, verificado.status);

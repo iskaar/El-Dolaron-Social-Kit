@@ -577,7 +577,7 @@ test('Mercado Libre va aparte y estimado; periodo y comparacion', async () => {
   t.db.close();
 });
 
-test('parametros invalidos y permiso: solo el dueno, y 400 en vez de 500', async () => {
+test('parametros invalidos y permiso: solo gerencia, y 400 en vez de 500', async () => {
   const t = tienda();
   assert.equal((await resumen(t, 'dias=7&comparar=ayer')).status, 400);
   assert.equal((await resumen(t, 'dias=7&grano=hora')).status, 400);

@@ -274,7 +274,7 @@ test('la respuesta no lleva nombres, telefonos ni correos: un socio es solo su n
   } finally { t.db.close(); }
 });
 
-test('solo el dueno ve la vista: la ruta nueva cae en el permiso por omision', () => {
+test('solo gerencia ve la vista: la ruta nueva cae en el permiso por omision', () => {
   assert.deepEqual(permiso('/api/reportes/dolarones', 'GET'), permiso('/api/reportes', 'GET'));
   assert.deepEqual(permiso('/api/reportes/dolarones', 'GET'), []);
 });

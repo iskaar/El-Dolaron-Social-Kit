@@ -76,7 +76,7 @@ test('finanzas crea una familia: ella y sus once productos nacen de FEP; las sem
   assert.notEqual(otra.cuerpo.prefijo, r.cuerpo.prefijo);
 });
 
-test('cada quien lista las familias de su propietario; ?todas=1 las junta salvo para FEP; solo dueño y finanzas crean', async () => {
+test('cada quien lista las familias de su propietario; ?todas=1 las junta salvo para FEP; solo gerencia y finanzas crean', async () => {
   const { pedir, como } = conFamiliaFep();
   como(FEP);
   const fep = (await pedir('/api/familias', { nombre: 'Termos FEP' })).cuerpo;

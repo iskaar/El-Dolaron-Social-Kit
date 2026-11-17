@@ -68,7 +68,7 @@ test('la migracion 063 queda completa en una base vacia: al menos clave o foto, 
   t.db.close();
 });
 
-test('reportar: queda pendiente, no marca el pedido pagado, la clave se normaliza y el dueno recibe un aviso sin clave ni cliente', async () => {
+test('reportar: queda pendiente, no marca el pedido pagado, la clave se normaliza y gerencia recibe un aviso sin clave ni cliente', async () => {
   const t = mundo();
   const enviados: { subject: string; text: string }[] = [];
   (t.env as any).CORREO = { send: async (m: any) => { enviados.push(m); } };
@@ -421,7 +421,7 @@ test('la foto: tope por venta, solo JPEG, y la lee el mismo servicio que la caja
   t.db.close();
 });
 
-test('la foto del reporte la ve solo el dueno: ni la revendedora, ni el cajero', async () => {
+test('la foto del reporte la ve solo gerencia: ni la revendedora, ni el cajero', async () => {
   const t = mundo();
   comoUsuario(t.env, ANA);
   const a = await apartado(t);

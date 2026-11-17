@@ -154,7 +154,7 @@ export async function rutaBultos(
     const origen = c.origen === undefined ? TIENDA_CENTRAL : String(c.origen);
     const destino = String(c.destino ?? '');
     if (!esTienda(origen) || !esTienda(destino) || origen === destino) return json({ error: 'Escoge un destino distinto del origen.' }, 400);
-    if (origen !== TIENDA_CENTRAL && !esDueno) return json({ error: 'Solo el dueño arma bultos desde una sucursal.' }, 403);
+    if (origen !== TIENDA_CENTRAL && !esDueno) return json({ error: 'Solo gerencia arma bultos desde una sucursal.' }, 403);
     const previo = await env.DB.prepare(`select ${COLUMNAS} from bultos where id = ?`).bind(id).first<Bulto>();
     if (previo) return previo.origen === origen && previo.destino === destino && previo.creado_por === correo
       ? json(await vista(env, previo, true)) : json({ error: 'Ese identificador ya es de otro bulto.' }, 409);

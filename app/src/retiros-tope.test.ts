@@ -15,7 +15,7 @@ const PIN_DUENO = '111222';
 const PIN_ANA = '482913';
 const PIN_SUP = '735190';
 const PIN_BETO = '264817';
-const TOPE = 123400;   // un valor cualquiera de prueba: no es, ni se parece a, la politica real del dueño
+const TOPE = 123400;   // un valor cualquiera de prueba: no es, ni se parece a, la politica real de gerencia
 
 async function montar(tope: number | null = TOPE) {
   const t = tienda();
@@ -60,7 +60,7 @@ test('arriba del tope sin PIN se rechaza sin registrar nada, y la respuesta no d
   assert.equal(filas().length, 0);
 });
 
-test('con el PIN de un supervisor o del dueño se registra y queda quién aprobó', async () => {
+test('con el PIN de un supervisor o de gerencia se registra y queda quién aprobó', async () => {
   const { retirar, filas } = await montar();
   const conSupervisor = await retirar(TOPE + 1, { aprobador: SUP, pin: PIN_SUP });
   assert.equal(conSupervisor.status, 201, JSON.stringify(conSupervisor.cuerpo));
@@ -82,7 +82,7 @@ test('PIN equivocado, PIN de un cajero o aprobarse a sí mismo: nada se registra
   assert.equal(filas().length, 0);
 });
 
-test('el dueño y el supervisor en su propia sesión no necesitan PIN y quedan como quien aprobó', async () => {
+test('gerencia y el supervisor en su propia sesión no necesitan PIN y quedan como quien aprobó', async () => {
   const { retirar, filas, sup, como } = await montar();
   const supervisor = await retirar(TOPE + 1, {}, sup);
   assert.equal(supervisor.status, 201, JSON.stringify(supervisor.cuerpo));
@@ -135,11 +135,11 @@ test('gastos y entradas de la terminal no cambian: ni tope ni PIN, aunque no hay
   const { retirar, filas } = await montar(null);
   assert.equal((await retirar(5000, { tipo: 'gasto', categoria: 'agua', motivo: 'garrafon' })).status, 201);
   assert.equal((await retirar(TOPE * 10, { tipo: 'terminal', motivo: '' })).status, 201);
-  assert.equal((await retirar(10001, { tipo: 'gasto', categoria: 'agua', motivo: 'garrafon' })).status, 403, 'el gasto de más de $100 lo sigue registrando el dueño');
+  assert.equal((await retirar(10001, { tipo: 'gasto', categoria: 'agua', motivo: 'garrafon' })).status, 403, 'el gasto de más de $100 lo sigue registrando gerencia');
   assert.deepEqual(filas().map((f) => f.aprobo_por), [null, null]);
 });
 
-test('el cajero no lee ni cambia el tope; el dueño sí; quien captura no lo ve', async () => {
+test('el cajero no lee ni cambia el tope; gerencia sí; quien captura no lo ve', async () => {
   const { pedir, como, ana } = await montar();
   assert.equal((await pedir('/api/config', undefined, 'GET', ana)).status, 403);
   assert.equal((await pedir('/api/config', { tope_retiro: 99999999 }, 'PUT', ana)).status, 403);
@@ -151,7 +151,7 @@ test('el cajero no lee ni cambia el tope; el dueño sí; quien captura no lo ve'
   assert.equal((await pedir('/api/config')).cuerpo.tope_retiro, String(TOPE));
 });
 
-test('el dueño solo guarda centavos enteros en el tope', async () => {
+test('gerencia solo guarda centavos enteros en el tope', async () => {
   const { pedir, como } = await montar();
   como(DUENO);
   for (const malo of [-1, 1.5, '', null, true, 1e9]) assert.equal((await pedir('/api/config', { tope_retiro: malo }, 'PUT')).status, 400, String(malo));
@@ -185,10 +185,10 @@ test('antes de la migración 084 el retiro chico, el gasto y la entrada de la te
   for (const extra of [{}, { aprobador: SUP, pin: PIN_SUP }]) {
     const grande = await retirar(TOPE + 1, extra);
     assert.equal(grande.status, 503);
-    assert.equal(grande.cuerpo.error, 'Falta actualizar el sistema: avisa al dueño.');
+    assert.equal(grande.cuerpo.error, 'Falta actualizar el sistema: avisa a gerencia.');
   }
   como(DUENO);
-  assert.equal((await retirar(TOPE + 1, {}, {})).status, 503, 'ni el dueño: no habría dónde guardar quién aprobó');
+  assert.equal((await retirar(TOPE + 1, {}, {})).status, 503, 'ni gerencia: no habría dónde guardar quién aprobó');
   assert.equal((db.prepare('select count(*) as n from retiros').get() as { n: number }).n, 3);
   assert.equal((db.prepare('select count(*) as n from intentos_aprobacion').get() as { n: number }).n, 0, 'no se gastaron intentos de PIN');
 });

@@ -67,7 +67,7 @@ test('la aritmetica: % o monto, tope de 50%, ticket vacio y valores raros', () =
   assert.equal(t.total, 22500);
 });
 
-test('a distancia: pide Ana, el dueno ve el pedido en /cuentas y lo aprueba, la venta sale con el descuento', async () => {
+test('a distancia: pide Ana, gerencia ve el pedido en /cuentas y lo aprueba, la venta sale con el descuento', async () => {
   const { como, db, pedirDescuento, venta, estado, pedir, ana, solicitudes } = await montar();
   const pedido = await pedirDescuento();
   assert.equal(pedido.status, 201, JSON.stringify(pedido.cuerpo));
@@ -116,7 +116,7 @@ test('a distancia: pide Ana, el dueno ve el pedido en /cuentas y lo aprueba, la 
   assert.equal(otro.status, 409);
 });
 
-test('a distancia: si el dueno rechaza, la venta con ese descuento no pasa', async () => {
+test('a distancia: si gerencia rechaza, la venta con ese descuento no pasa', async () => {
   const { venta, estado, pedidoResuelto } = await montar();
   const id = await pedidoResuelto({ tipo: 'monto', valor: 2000 }, false);
   assert.equal(await estado(id), 'rechazada');
@@ -142,10 +142,10 @@ test('dos duenos a la vez: gana uno, el otro recibe 409 y la solicitud queda con
   db.prepare(`update solicitudes set estado = 'rechazada' where id = ?`).run(nuevo);
   const perdio = await resolverDescuento(env, nuevo, true, DUENO);
   assert.equal(perdio.status, 409);
-  assert.match(((await perdio.json()) as { error: string }).error, /Otro dueño/);
+  assert.match(((await perdio.json()) as { error: string }).error, /Otra persona ya la resolvió/);
 });
 
-test('PIN del dueno en la caja: aprueba al momento, queda registrado via pin y la venta sale con el descuento', async () => {
+test('PIN dgerencia en la caja: aprueba al momento, queda registrado via pin y la venta sale con el descuento', async () => {
   const { db, pedirDescuento, venta, estado, solicitudes } = await montar();
   const pedido = await pedirDescuento({ aprobador: DUENO.toUpperCase(), pin: PIN_DUENO });
   assert.equal(pedido.status, 201, JSON.stringify(pedido.cuerpo));
@@ -195,7 +195,7 @@ test('con PIN o sin el, el tope de 50% y el motivo siguen mandando', async () =>
   assert.equal(solicitudes().length, 0);
 });
 
-test('si quien cobra es el dueno, aplica el descuento directo (sin aprobacion ni PIN)', async () => {
+test('si quien cobra es gerencia, aplica el descuento directo (sin aprobacion ni PIN)', async () => {
   const { como, pedir, db, token, solicitudes, venta } = await montar();
   // En su propia cuenta de Access...
   como(DUENO);
@@ -341,7 +341,7 @@ test('cancelar piezas sueltas de un ticket con descuento devuelve su parte de lo
   assert.equal(r.cuerpo.total, 45000);
   const linea = (db.prepare('select id from venta_lineas where venta_id = ?').get(folio) as any).id;
   const cancelarPieza = () => pedir(`/api/ventas/${folio}/lineas/${linea}/cancelar`,
-    { id: crypto.randomUUID(), cantidad: 1, motivo: 'defecto', caja: 'Caja 1', aprobador: DUENO, pin: PIN_DUENO }, 'POST', ana);   // devolver dinero lo aprueba el dueño (#837)
+    { id: crypto.randomUUID(), cantidad: 1, motivo: 'defecto', caja: 'Caja 1', aprobador: DUENO, pin: PIN_DUENO }, 'POST', ana);   // devolver dinero lo aprueba gerencia (#837)
 
   const primera = await cancelarPieza();
   assert.equal(primera.status, 201, JSON.stringify(primera.cuerpo));
@@ -453,7 +453,7 @@ test('/reportes: con promo, descuento aprobado, pieza devuelta y ticket cancelad
   assert.equal((await venta({ id: folioC, lineas: lineas(2, 1), efectivo: 100000, descuento_id: await aprobar(83333, 2, 1) })).status, 201);
   const lineaC = (db.prepare('select id from venta_lineas where venta_id = ? and producto_id = ?').get(folioC, PRODUCTO) as any).id;
   assert.equal((await pedir(`/api/ventas/${folioC}/lineas/${lineaC}/cancelar`,
-    { id: crypto.randomUUID(), cantidad: 1, motivo: 'defecto', caja: 'Caja 1', aprobador: DUENO, pin: PIN_DUENO }, 'POST', ana)).status, 201);   // devolver dinero lo aprueba el dueño (#837)
+    { id: crypto.randomUUID(), cantidad: 1, motivo: 'defecto', caja: 'Caja 1', aprobador: DUENO, pin: PIN_DUENO }, 'POST', ana)).status, 201);   // devolver dinero lo aprueba gerencia (#837)
   // D: cancelado completo
   const d = await venta({ lineas: lineas(1, 0) });
   assert.equal((await pedir(`/api/ventas/${d.cuerpo.id}/cancelar`, { motivo: 'prueba', caja: 'Caja 1' }, 'POST', ana)).status, 200);
@@ -475,7 +475,7 @@ test('/reportes: con promo, descuento aprobado, pieza devuelta y ticket cancelad
     r.descuentos.promo + r.descuentos.otros);
 });
 
-test('el descuento que queda pendiente avisa al dueno por correo (#75)', async () => {
+test('el descuento que queda pendiente avisa a gerencia por correo (#75)', async () => {
   const t = await montar();
   const enviados: any[] = [];
   t.env.CORREO = { async send(m: unknown) { enviados.push(m); return { messageId: 'x' }; } } as never;
@@ -490,19 +490,19 @@ test('el descuento que queda pendiente avisa al dueno por correo (#75)', async (
 
 const hace = (minutos: number) => new Date(Date.now() - minutos * 60_000).toISOString();
 
-test('#845 tope del cajero: 10 % sí, 10.01 % no (en % y en pesos); más de 10 % solo con el dueño', async () => {
+test('#845 tope del cajero: 10 % sí, 10.01 % no (en % y en pesos); más de 10 % solo con gerencia', async () => {
   const { pedirDescuento, solicitudes } = await montar();
   assert.equal((await pedirDescuento({ valor: 10 })).status, 201);
   const once = await pedirDescuento({ valor: 11 });
   assert.equal(once.status, 403);
-  assert.match(once.cuerpo.error, /Más de 10 %.*dueño con su PIN/);
+  assert.match(once.cuerpo.error, /Más de 10 %.*gerencia con su PIN/);
   assert.equal((await pedirDescuento({ tipo: 'monto', valor: 2500 })).status, 201);   // 10 % exacto de $250
   assert.equal((await pedirDescuento({ tipo: 'monto', valor: 2501 })).status, 403);    // 10.004 %
   assert.equal(solicitudes().filter((s) => s.estado === 'pendiente').length, 1);       // lo rechazado no deja solicitud
   assert.equal((await pedirDescuento({ valor: 50 })).status, 403);                     // el servidor decide, no el navegador
 });
 
-test('#845 el dueño llega a 50 %: con su sesión en la caja y con su PIN; a 51 % ni él', async () => {
+test('#845 gerencia llega a 50 %: con su sesión en la caja y con su PIN; a 51 % ni él', async () => {
   const { como, pedir, pedirDescuento, token } = await montar();
   assert.equal((await pedirDescuento({ valor: 50, aprobador: DUENO, pin: PIN_DUENO })).cuerpo.estado, 'aprobada');
   assert.equal((await pedirDescuento({ tipo: 'monto', valor: 12500, aprobador: DUENO, pin: PIN_DUENO })).status, 201);
@@ -678,7 +678,7 @@ test('#845 la caja manda el ticket y la caja al pedir, cierra en el servidor al 
   assert.match(html, /caja: cajaActual\(\),\s+lineas: lineas\.map\(\(\{ producto_id, cantidad \}\)/);
   assert.match(html, /\/api\/descuentos\/\$\{encodeURIComponent\(d\.id\)\}\/quitar`, \{ method: 'POST' \}/);
   assert.match(html, /quitar-descuento'\)\.addEventListener\('click', \(\) => \{ if \(ticketEnDuda\(\)\) return; quitarDescuentoEnServidor\(descuento\);/);
-  assert.match(html, /Más de 10 %: lo aprueba el dueño con su PIN/);
+  assert.match(html, /Más de 10 %: lo aprueba gerencia con su PIN/);
   // Los botones de pedir son type=button y los campos no escuchan teclas: el Enter con el que el lector termina un escaneo no pide nada.
   assert.doesNotMatch(html, /\$\('descuento-(?:valor|motivo|tipo|pin-dueno|aprobador)'\)\.addEventListener\('(?:keydown|keypress|keyup)'/);
   assert.doesNotMatch(html, /<form[^>]*>[^]*?id="descuento-form"/);
@@ -731,13 +731,13 @@ test('#845 el reintento de un folio se mide a la hora de su primer intento: perd
   assert.equal((await venta({ id: crypto.randomUUID(), descuento_id: otro, creado_en: hace(40) })).status, 409);
 });
 
-test('#845 /api/yo dice si quien entró con su PIN es el dueño, para que la caja no le ponga el tope de 10 %', async () => {
+test('#845 /api/yo dice si quien entró con su PIN es gerencia, para que la caja no le ponga el tope de 10 %', async () => {
   const { pedir, token, ana } = await montar();
   assert.equal((await pedir('/api/yo', undefined, 'GET', ana)).cuerpo.cajero.es_dueno, false);
   assert.equal((await pedir('/api/yo', undefined, 'GET', { 'x-cajero': await token(DUENO, PIN_DUENO) })).cuerpo.cajero.es_dueno, true);
 });
 
-test('#845 si el cajero quitó la solicitud, el dueño lo lee así; un descuento aprobado antes de la huella contesta «ticket cambió», no «otra caja»', async () => {
+test('#845 si el cajero quitó la solicitud, gerencia lo lee así; un descuento aprobado antes de la huella contesta «ticket cambió», no «otra caja»', async () => {
   const { como, db, pedir, pedirDescuento, venta, ana } = await montar();
   const id = (await pedirDescuento()).cuerpo.id as string;
   await pedir(`/api/descuentos/${id}/quitar`, {}, 'POST', ana);

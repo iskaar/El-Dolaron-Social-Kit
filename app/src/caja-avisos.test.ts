@@ -232,7 +232,7 @@ test('#817 cajón e impresora: sin impresora conectada es una sola línea tranqu
 
 test('#817 cobrar: los retornos antes del cobro dejan el foco en #codigo, no en «Cobrar» (el Enter del lector lo pulsaría otra vez)', async () => {
   const casos: [string, Opciones, RegExp][] = [
-    ['descuento pendiente', { descuento: { estado: 'pendiente' } }, /El descuento sigue esperando al dueño/],
+    ['descuento pendiente', { descuento: { estado: 'pendiente' } }, /El descuento sigue esperando a gerencia/],
     ['descuento sobre el tope', { descuento: { estado: 'aprobada', tipo: 'monto', valor: 29000, monto: 29000 } }, /pasa del 50% del ticket/],
     ['impresión remota con efectivo', { remota: true, valores: { 'imprimir-en': 'Caja 2' } }, /En el celular sólo tarjeta o transferencia/],
     ['faltan pesos', { valores: { efectivo: '100' } }, /^Faltan/],
@@ -873,7 +873,7 @@ test('#817 gasto: se avisa al escribir el importe pero no se bloquea el registro
     return aviso.textContent;
   };
   assert.equal(correr('gasto', '100'), '');
-  assert.equal(correr('gasto', '100.50'), 'Más de $100: lo registra el dueño.');
+  assert.equal(correr('gasto', '100.50'), 'Más de $100: lo registra gerencia.');
   assert.equal(correr('retiro', '5000'), '');
 });
 

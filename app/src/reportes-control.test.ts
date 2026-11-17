@@ -367,7 +367,7 @@ test('armarControl ignora lo que cae fuera del periodo y de la comparacion, y lo
   assert.equal(C.motivos.lista[0].n, 1);
 });
 
-test('el acceso es el de /reportes (solo el dueno) y los parametros malos dan 400', async () => {
+test('el acceso es el de /reportes (solo gerencia) y los parametros malos dan 400', async () => {
   for (const metodo of ['GET', 'POST']) assert.deepEqual(permiso('/api/reportes/control', metodo), permiso('/api/reportes', metodo));
   const cajero = { correo: 'k@x', nombre: '', roles: ['cajero'], activo: true, caja: '', tienda: '', editar_inventario: false };
   assert.equal(puede(cajero as never, permiso('/api/reportes/control', 'GET')), false);

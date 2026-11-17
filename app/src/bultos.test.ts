@@ -186,7 +186,7 @@ test('recibir: las unidades entran al destino en un solo paso; recibir dos veces
   assert.equal((await salk('/api/bultos/recibir', { folio: 'BU-ZZZZZ' })).status, 404);
 });
 
-test('recibir lo hace la tienda destino o el dueño; la computadora sin PIN o sin tienda no recibe; un capturista no recibe', async () => {
+test('recibir lo hace la tienda destino o gerencia; la computadora sin PIN o sin tienda no recibe; un capturista no recibe', async () => {
   const m = montar();
   const cap = m.yo(CAPTURISTA);
   const folio = await m.nuevoBulto(cap, 'romero');
@@ -197,11 +197,11 @@ test('recibir lo hace la tienda destino o el dueño; la computadora sin PIN o si
   assert.equal((await cap('/api/bultos/recibir', { folio })).status, 403);
   const dueno = await m.yo(DUENO)('/api/bultos/recibir', { folio });
   assert.equal(dueno.status, 200, JSON.stringify(dueno.cuerpo));
-  assert.equal(m.enSucursal('romero'), 1, 'entra al destino del bulto, no a la tienda del dueño');
+  assert.equal(m.enSucursal('romero'), 1, 'entra al destino del bulto, no a la tienda de gerencia');
   assert.equal(m.enSucursal('salk'), 0);
 });
 
-test('regresar a Soledad: el mismo flujo con otro origen; el capturista no arma desde sucursal, el dueño sí', async () => {
+test('regresar a Soledad: el mismo flujo con otro origen; el capturista no arma desde sucursal, gerencia sí', async () => {
   const m = montar();
   m.db.prepare("insert into existencia_tienda (producto_id, tienda, unidades, actualizado_en) values (?, 'salk', 5, '')").run(PRODUCTO);
   const cap = m.yo(CAPTURISTA), dueno = m.yo(DUENO);
@@ -388,7 +388,7 @@ test('fusión, juntar y descarte se bloquean si la pieza tiene unidades en una s
   assert.match(fusion.cuerpo.error, /sucursal o en camino/);
 });
 
-test('ajuste de faltante o sobrante en sucursal: sobre su propia existencia, con renglón en conteo_ajustes con tienda, idempotente y solo del dueño', async () => {
+test('ajuste de faltante o sobrante en sucursal: sobre su propia existencia, con renglón en conteo_ajustes con tienda, idempotente y solo de gerencia', async () => {
   const m = montar();
   const cap = m.yo(CAPTURISTA), dueno = m.yo(DUENO);
   const folio = await m.nuevoBulto(cap, 'romero');

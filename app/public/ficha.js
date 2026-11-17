@@ -78,7 +78,7 @@ export function resumenCorreccion(pieza, cuerpo, marca) {
   const lineas = [];
   if (cuerpo.estado_fisico && cuerpo.estado_fisico !== pieza.estado_fisico)
     lineas.push(`Grado ${nombreEstado(pieza.estado_fisico)} → ${nombreEstado(cuerpo.estado_fisico)}.`
-      + (cuerpo.precio === undefined ? ' El precio se recalcula con la banda del grado nuevo; si no te toca cambiarlo, se pide al dueño.' : ''));
+      + (cuerpo.precio === undefined ? ' El precio se recalcula con la banda del grado nuevo; si no te toca cambiarlo, se pide a gerencia.' : ''));
   if (cuerpo.precio !== undefined && cuerpo.precio !== pieza.precio) {
     const pegado = marca?.precio ?? pieza.precio;
     lineas.push(`Precio ${pesos(pieza.precio)} → ${pesos(cuerpo.precio)}.`
@@ -299,7 +299,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     $('campos-precio').hidden = !precios;
     $('e-precio').value = (pieza.precio / 100).toFixed(2); $('e-lista').value = pieza.precio_lista > 0 ? (pieza.precio_lista / 100).toFixed(2) : '';
     $('nota-precio').textContent = pieza.destino !== 'etiqueta' ? 'Pieza de banda: el precio se cambia en /admin.'
-      : puedePrecio ? '' : 'El precio lo cambia solo el dueño.';
+      : puedePrecio ? '' : 'El precio lo cambia solo gerencia.';
     if ($('campo-estado')) { $('campo-estado').hidden = esRopa(pieza); $('e-estado').value = pieza.estado_fisico ?? 'nuevo'; }
     $('reimprimir').hidden = true;
     $('corregir').hidden = false; pintar();

@@ -84,7 +84,7 @@ export async function validarEnMano(
     const pendiente = await env.DB.prepare(`select s.tipo from solicitudes s join venta_lineas l on l.venta_id = json_extract(s.datos, '$.venta_id')
       where s.estado = 'pendiente' and l.producto_id = ?
         and (s.tipo = 'cancelacion' or (s.tipo = 'devolucion' and l.id = json_extract(s.datos, '$.linea_id'))) limit 1`).bind(p.producto_id).first<{ tipo: string }>();
-    if (pendiente) return rechazo(`${nombre}: Hay una ${pendiente.tipo === 'devolucion' ? 'devolución de dinero' : 'cancelación'} pendiente de una venta de esta pieza: espera la respuesta del dueño.`);
+    if (pendiente) return rechazo(`${nombre}: Hay una ${pendiente.tipo === 'devolucion' ? 'devolución de dinero' : 'cancelación'} pendiente de una venta de esta pieza: espera la respuesta de gerencia.`);
     marcas.push({ producto_id: p.producto_id, codigo: pieza.codigo, nombre: pieza.nombre, cantidad: p.cantidad, esperado, faltante: p.cantidad - esperado, motivo,
       otras: await registradaEnOtras(env, tienda, p.producto_id) });
   }

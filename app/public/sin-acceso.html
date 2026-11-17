@@ -38,7 +38,7 @@ function formulario(titulo) {
   panel.innerHTML = `
     <h2 style="margin-top:0">${titulo}</h2>
     ${quien}
-    <p>Pide acceso y el dueño lo revisa. Cuéntale quién eres y para qué lo necesitas.</p>
+    <p>Pide acceso y gerencia lo revisa. Cuéntale quién eres y para qué lo necesitas.</p>
     <form id="pedir">
       <label for="nombre">Tu nombre</label>
       <input id="nombre" required maxlength="80" autocomplete="name">
@@ -69,7 +69,7 @@ function enEspera() {
   panel.innerHTML = `
     <h2 style="margin-top:0">Solicitud enviada</h2>
     ${quien}
-    <p>El dueño tiene que aprobarla. Cuando lo haga, vuelve a abrir esta página o el inicio.</p>
+    <p>Gerencia tiene que aprobarla. Cuando lo haga, vuelve a abrir esta página o el inicio.</p>
     <button type="button" onclick="location.href='/'">Ya me aprobaron, entrar</button>`;
 }
 
@@ -78,11 +78,11 @@ if (usuario?.activo) {
   panel.innerHTML = `
     <h2 style="margin-top:0">Esta pantalla no es de tu rol</h2>
     ${quien}
-    <p>${desde ? `<b>${escapar(desde)}</b> necesita` : 'Necesitas'} otro rol. Tus roles: <b>${escapar(usuario.roles.join(', '))}</b>.
-    Si te hace falta, pídeselo al dueño.</p>
+    <p>${desde ? `<b>${escapar(desde)}</b> necesita` : 'Necesitas'} otro rol. Tus roles: <b>${escapar(usuario.roles.map((r) => (r === 'dueno' ? 'gerencia' : r)).join(', '))}</b>.
+    Si te hace falta, pídeselo a gerencia.</p>
     <button type="button" onclick="location.href='/'">Ir al inicio</button>`;
 } else if (usuario && !usuario.activo) {
-  panel.innerHTML = `<h2 style="margin-top:0">Tu cuenta está desactivada</h2>${quien}<p>Habla con el dueño.</p>`;
+  panel.innerHTML = `<h2 style="margin-top:0">Tu cuenta está desactivada</h2>${quien}<p>Habla con gerencia.</p>`;
 } else if (solicitud?.estado === 'pendiente') {
   enEspera();
 } else {

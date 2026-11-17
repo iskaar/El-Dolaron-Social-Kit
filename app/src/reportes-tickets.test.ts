@@ -69,7 +69,7 @@ test('pagina de 50 en 50 y avisa si hay mas', async () => {
   assert.ok(!primera.tickets.some((t: { id: string }) => t.id === segunda.tickets[0].id));
 });
 
-test('solo el dueno ve los tickets del rango', async () => {
+test('solo gerencia ve los tickets del rango', async () => {
   const { db, env, pedir } = tienda();
   db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values
     ('caja@prueba.mx', 'K', 'cajero', 1, '', ''), ('captura@prueba.mx', 'C', 'capturista', 1, '', '')`).run();
@@ -142,7 +142,7 @@ test('el CSV de tickets lleva el socio y los Dolarones', async () => {
   assert.deepEqual([solo[1][10], solo[1][12], solo[1][13]], ['50.00', '1000.00', 'sí']);
 });
 
-test('solo el dueno exporta los tickets', async () => {
+test('solo gerencia exporta los tickets', async () => {
   const { db, env, pedirTexto } = tienda();
   db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values
     ('caja@prueba.mx', 'K', 'cajero', 1, '', ''), ('captura@prueba.mx', 'C', 'capturista', 1, '', '')`).run();

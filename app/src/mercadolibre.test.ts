@@ -686,7 +686,7 @@ test('descripción por defecto (#565): ropa con talla -> US y MX, estado y orige
   assert.ok(!/https?:|www\.|@/.test(descripcionPorDefecto({ ...base, nombre: 'Playera www.tienda.com ventas@x.mx', talla: 'M' })));
 });
 
-test('publicar: sin descripción del dueño va la plantilla; con ella, la del dueño', () => conML(async (t) => {
+test('publicar: sin descripción de gerencia va la plantilla; con ella, la de gerencia', () => conML(async (t) => {
   const id = pieza(t, { talla: 'L' });
   assert.equal((await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar({ descripcion: '' }))).status, 201);
   const texto = t.sim.de('POST', /\/description$/)[0].cuerpo.plain_text as string;
@@ -1316,7 +1316,7 @@ test('ventas en ML: lista (nuevas primero), conflictos y conteos del estado', as
   });
 });
 
-test('notificación de items: refleja lo que el dueño hizo en ML', async () => {
+test('notificación de items: refleja lo que gerencia hizo en ML', async () => {
   await conML(async (t) => {
     const { id, itemId } = await publicarPieza(t);
     t.sim.items.get(itemId)!.status = 'paused';
@@ -1427,14 +1427,14 @@ test('cron: sin cuenta conectada no llama a ML', async () => {
   }, false);
 });
 
-test('cron: pausa lo agotado, iguala cantidades, respeta pausas del dueño y recoge ordenes perdidas', async () => {
+test('cron: pausa lo agotado, iguala cantidades, respeta pausas de gerencia y recoge ordenes perdidas', async () => {
   await conML(async (t) => {
     const a = await publicarPieza(t);
     const b = await publicarPieza(t);
     const c = await publicarPieza(t);
     t.db.prepare('update productos set stock = 0 where id = ?').run(a.id);                         // vendida en tienda sin aviso
     t.sim.items.get(b.itemId)!.available_quantity = 9;                                              // ML desfasado
-    await t.pedir(`/api/ml/pausar/${c.id}`, {});                                                    // pausa del dueno
+    await t.pedir(`/api/ml/pausar/${c.id}`, {});                                                    // pausa dgerencia
     t.sim.ordenes.set('9201', orden(9201, 'paid', [[b.itemId, 1]]));                                // aviso perdido
 
     await worker.scheduled!({} as never, t.env, t.ctx as never);
@@ -1490,7 +1490,7 @@ test('cron: reintenta el aviso que fallo, aunque la orden sea vieja (Issue #253)
 
 /* ---------- permisos ---------- */
 
-test('permisos: cajero y capturista reciben 403 en /api/ml/*; el dueño entra', async () => {
+test('permisos: cajero y capturista reciben 403 en /api/ml/*; gerencia entra', async () => {
   await conML(async (t) => {
     t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values ('cajero@prueba.mx', 'C', 'cajero', 1, '', '')`).run();
     t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values ('cap@prueba.mx', 'K', 'capturista', 1, '', '')`).run();

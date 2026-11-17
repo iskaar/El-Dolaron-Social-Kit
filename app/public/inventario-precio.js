@@ -114,7 +114,7 @@ export function pedirCambio(ctx, pieza) {
 
     const error = nodo('p', undefined, 'error-hoja'); error.setAttribute('role', 'alert'); error.hidden = true;
     const motivo = nodo('p', undefined, 'ayuda');
-    const enviar = boton('Enviar al dueño', () => enviarPedido(), 'primario');
+    const enviar = boton('Enviar a gerencia', () => enviarPedido(), 'primario');
 
     // Tocar «Enviar» sin elegir deja un aviso en la línea de estado: cuando ya no aplica (se eligió o se cerró) se quita.
     const avisoViejo = () => { if ($('estado').dataset.tipo === 'aviso' && $('estado').textContent.includes(FALTA_SENTIDO)) restaurarNeutro(); };
@@ -127,7 +127,7 @@ export function pedirCambio(ctx, pieza) {
       bloquear(enviar, falta); motivo.textContent = falta;
     }
     function cargando(si) {
-      enviar.textContent = si ? 'Enviando…' : 'Enviar al dueño';
+      enviar.textContent = si ? 'Enviando…' : 'Enviar a gerencia';
       enviar.toggleAttribute('aria-busy', si);
       if (si) bloquear(enviar, 'Enviando…'); else actualizar();
     }
@@ -141,7 +141,7 @@ export function pedirCambio(ctx, pieza) {
       try {
         const texto = nota.value.replace(/\s+/g, ' ').trim();
         const d = await api(`/api/piezas/${pieza.id}/solicitud-precio`, { id, ...r.cuerpo, ...(texto ? { nota:texto } : {}) });
-        resultado = d.solicitud; cerrarHoja(); mensaje('Solicitud enviada al dueño', 'ok');
+        resultado = d.solicitud; cerrarHoja(); mensaje('Solicitud enviada a gerencia', 'ok');
       } catch (e) {
         if (e.status === 409 && e.datos?.solicitud) {
           resultado = e.datos.solicitud; cerrarHoja(); mensaje('Esta pieza ya tiene una solicitud de precio pendiente', 'aviso');

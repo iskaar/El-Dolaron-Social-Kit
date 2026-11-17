@@ -301,7 +301,7 @@ test('comision de la terminal: sin porcentaje no hay estimacion; con el, ventas 
   t.db.close();
 });
 
-test('la comision se valida: de 0 a 20 % en puntos base enteros, y solo la guarda el dueno', async () => {
+test('la comision se valida: de 0 a 20 % en puntos base enteros, y solo la guarda gerencia', async () => {
   const t = tienda();
   const guardar = (valor: unknown) => t.pedir('/api/config', { [CLAVE_COMISION]: valor }, 'PUT');
   for (const bueno of [0, 1, 350, 1999, LIMITE_COMISION_BP, '350']) assert.equal((await guardar(bueno)).status, 200, String(bueno));

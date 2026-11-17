@@ -301,7 +301,7 @@ test('capturas: embudo, correcciones tras la IA, bitacora con su fecha y pendien
   assert.match(htmlVista(r), /desde el 27 oct/);
 });
 
-test('capturas: solo el dueno la consulta y su codigo es el de cualquier pantalla', () => {
+test('capturas: solo gerencia la consulta y su codigo es el de cualquier pantalla', () => {
   assert.deepEqual(permiso('/api/reportes/capturas', 'GET'), []);
   assert.equal(permiso('/reportes-capturas.js', 'GET'), 'cuenta');
 });
