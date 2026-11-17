@@ -1,5 +1,5 @@
 /**
- * Ticket ESC/POS por WebUSB, para la Epson TM-T20 II. Sin driver ni dialogo de
+ * Ticket ESC/POS por WebUSB, para la Epson TM-T20 II y la Kinwodon POS80. Sin driver ni dialogo de
  * impresion del sistema: la venta ya se cobro y se guardo, el ticket es un
  * extra que nunca debe bloquear ni retrasar el cobro. Una falla no detiene la
  * venta: queda en errorImpresora() para que la caja la muestre.
@@ -9,7 +9,13 @@
 
 import { codigoEnDigitos } from './code128.js';
 
-const VENDOR_ID_EPSON = 0x04b8;
+// Fabricantes USB de las impresoras de tickets que la caja ofrece y reabre.
+// 0x04b8 Epson TM-T20 II. 0x0416 Kinwodon de 80 mm: se reporta como
+// «POS80 Printer USB» con el chip de muchas termicas genericas; habla ESC/POS.
+// La sonda autoriza cualquier USB en este origen: reabrir solo estos evita que
+// la caja tome otro aparato como impresora.
+export const FABRICANTES_IMPRESORA = [0x04b8, 0x0416];
+const esImpresoraDeTickets = (dev) => FABRICANTES_IMPRESORA.includes(dev.vendorId);
 
 // ponytail: 48 columnas es lo documentado para la TM-T20 II en Fuente A sobre
 // papel de 80mm. Si el primer ticket real sale con el texto cortado o con
@@ -96,7 +102,7 @@ async function abrir(dev) {
 export async function reconectarImpresora() {
   if (!('usb' in navigator)) return false;
   try {
-    const [previo] = await navigator.usb.getDevices();
+    const previo = (await navigator.usb.getDevices()).find(esImpresoraDeTickets);
     if (!previo) return false;
     await abrir(previo);
     return true;
@@ -107,7 +113,7 @@ export async function reconectarImpresora() {
 
 /** Pide el permiso de WebUSB. Solo funciona disparado por un clic real del usuario. */
 export async function conectarImpresora() {
-  const dev = await navigator.usb.requestDevice({ filters: [{ vendorId: VENDOR_ID_EPSON }] });
+  const dev = await navigator.usb.requestDevice({ filters: FABRICANTES_IMPRESORA.map((vendorId) => ({ vendorId })) });
   await abrir(dev);
 }
 

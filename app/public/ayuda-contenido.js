@@ -113,7 +113,7 @@ export const ESCENARIOS = [
   },
   {
     id: 'impresora-no-conectada', categoria: 'dia', titulo: 'Abajo dice «Impresora no conectada»',
-    palabras: ['impresora', 'usb', 'conectar', 'ticket no sale', 'sin impresora', 'epson'],
+    palabras: ['impresora', 'usb', 'conectar', 'ticket no sale', 'sin impresora', 'epson', 'kinwodon', 'pos80'],
     pasos: [
       'Revisa que la impresora esté prendida, con papel y con su cable USB.',
       'Toca «Conectar impresora», abajo.',

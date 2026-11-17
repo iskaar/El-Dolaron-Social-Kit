@@ -309,7 +309,7 @@ test('configuración por defecto: caja monetaria sigue vendiendo; alta, portal, 
 test('el comprobante de devolucion sale con piezas, lo devuelto, el motivo y las firmas', async () => {
   const pedazos: Uint8Array[] = [];
   const dev = {
-    opened: false, configuration: { configurationValue: 1 },
+    vendorId: 0x04b8, opened: false, configuration: { configurationValue: 1 },
     configurations: [{ interfaces: [{ interfaceNumber: 0, alternates: [{ endpoints: [{ direction: 'out', endpointNumber: 1 }] }] }] }],
     async open() { dev.opened = true; }, async close() { dev.opened = false; },
     async selectConfiguration() {}, async claimInterface() {}, async clearHalt() {},
