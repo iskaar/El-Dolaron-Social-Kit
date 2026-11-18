@@ -397,9 +397,37 @@ export function tsplBulto(bulto, y0 = corrimiento(), barra = modulo()) {
 export const tsplPrecio = (codigo, precioPesos, copias = 1, y0 = corrimiento(), barra = modulo()) =>
   tsplBanda({ familia: '', precioPesos, codigo, semana: '' }, copias, y0, barra);
 
+/** Etiquetas con precio por trabajo: PRINT 1,n como las bandas, en tandas para que «Detener» corte entre una y otra. */
+export const TANDA_PRECIO = 100;
+
+/**
+ * Imprime `copias` etiquetas con precio en tandas de TANDA_PRECIO, y anota CADA tanda en el historial de envíos (con hora), para
+ * saber hasta dónde llegó aunque se cierre la página. Devuelve cuántas se enviaron; menos de `copias` = se detuvo o se cortó
+ * (errorEnvio() dice por qué). «Enviada» es que la impresora recibió el trabajo, no que haya salido el papel.
+ */
+export async function imprimirPrecio(codigo, precioPesos, copias, alAvanzar) {
+  let enviadas = 0;
+  ultimoError = '';
+  while (enviadas < copias && !detenido) {
+    const n = Math.min(TANDA_PRECIO, copias - enviadas);
+    reconectada = false;
+    const salio = await mandarTspl(tsplPrecio(codigo, precioPesos, n));
+    const envio = { hora: new Date().toISOString(), nombre: `${codigo} $${precioPesos} (${enviadas + 1}-${enviadas + n} de ${copias})`,
+      copias: n, enviadas: salio ? n : 0, ritmo: reconectada ? 'se cayo el enlace y se reconecto solo' : undefined };
+    if (!salio) envio.error = ultimoError;
+    anotarEnvio(envio);
+    if (!salio) break;
+    enviadas += n;
+    alAvanzar?.(enviadas, copias);
+  }
+  if (detenido && enviadas < copias) anotarEnvio({ hora: new Date().toISOString(), nombre: `${codigo} $${precioPesos}`, copias: copias - enviadas, enviadas: 0, error: 'detenido a mano' });
+  return enviadas;
+}
+
 /**
  * Lo pegado de Excel: un renglon por codigo, y la cantidad en la columna de al
- * lado (tabulador, coma o punto y coma; sin cantidad = 1). Una tercera columna
+ * lado (tabulador, coma, punto y coma o espacios -- copiado de un chat los tabuladores llegan
+ * como espacios; un codigo con espacio no se imprime de todos modos; sin cantidad = 1). Una tercera columna
  * opcional es el precio en pesos (entero de 1 a 99999, con o sin $): la etiqueta lo lleva en grande.
  * Lo que no se puede imprimir (encabezados, codigos con acentos o muy largos) regresa en `malas`.
  */
@@ -408,7 +436,7 @@ export function leerCodigos(texto) {
   const malas = [];
   for (const renglon of String(texto).split(/\r?\n/)) {
     if (!renglon.trim()) continue;
-    const [codigo = '', cantidad = '1', precio = ''] = renglon.split(/[\t;,]/).map((c) => c.trim());
+    const [codigo = '', cantidad = '1', precio = ''] = renglon.trim().split(/\s*[\t;,]\s*|\s+/);
     const n = Number(cantidad || 1);
     const p = precio === '' ? null : Number(precio.replace(/^\$/, ''));
     const precioMalo = p !== null && (!Number.isInteger(p) || p < 1 || p > 99999);
