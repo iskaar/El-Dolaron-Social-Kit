@@ -278,7 +278,7 @@ export function tsplBanda(banda, copias = 1, y0 = corrimiento(), barra = modulo(
   const desplazamiento = Math.max(y0, -PRIMER_RENGLON);
   const y = (base) => base + desplazamiento;
   const precio = `$${Math.round(banda.precioPesos)}`;
-  const pie = limpiar(`${banda.codigo} - ${banda.semana}`);
+  const pie = limpiar(banda.semana ? `${banda.codigo} - ${banda.semana}` : banda.codigo);
 
   const ordenes = [
     'SIZE 50.8 mm,25.4 mm',
@@ -286,7 +286,8 @@ export function tsplBanda(banda, copias = 1, y0 = corrimiento(), barra = modulo(
     'DIRECTION 1',
     ...(velocidad > 0 ? [`SPEED ${velocidad}`] : []),
     'CLS',
-    `TEXT ${MARGEN},${y(PRIMER_RENGLON)},"2",0,1,1,"${limpiar(banda.familia).toUpperCase().slice(0, NOMBRE_MAX)}"`,
+    // Sin familia (/codigos con precio) no hay renglón de arriba: el precio se queda donde mismo.
+    ...(banda.familia ? [`TEXT ${MARGEN},${y(PRIMER_RENGLON)},"2",0,1,1,"${limpiar(banda.familia).toUpperCase().slice(0, NOMBRE_MAX)}"`] : []),
     `TEXT ${centrar(precio, ANCHO_PRECIO_BANDA)},${y(30)},"3",0,3,3,"${precio}"`,
     `BARCODE ${centrarBarras(banda.codigo, barra)},${y(110)},"128",48,0,0,${barra},${barra * 2},"${banda.codigo}"`,
     `TEXT ${centrar(pie, ANCHO_PIE)},${y(164)},"1",0,1,1,"${pie}"`,
@@ -390,19 +391,29 @@ export function tsplBulto(bulto, y0 = corrimiento(), barra = modulo()) {
 }
 
 /**
+ * La etiqueta de /codigos con precio: el diseño de la banda sin familia ni semana (precio grande, barras y el código abajo).
+ * Para genéricos por precio de una sucursal (SK100 = $100 en Avenida Salk). `copias` en un solo trabajo (PRINT 1,n), como la banda.
+ */
+export const tsplPrecio = (codigo, precioPesos, copias = 1, y0 = corrimiento(), barra = modulo()) =>
+  tsplBanda({ familia: '', precioPesos, codigo, semana: '' }, copias, y0, barra);
+
+/**
  * Lo pegado de Excel: un renglon por codigo, y la cantidad en la columna de al
- * lado (tabulador, coma o punto y coma; sin cantidad = 1). Lo que no se puede
- * imprimir (encabezados, codigos con acentos o muy largos) regresa en `malas`.
+ * lado (tabulador, coma o punto y coma; sin cantidad = 1). Una tercera columna
+ * opcional es el precio en pesos (entero de 1 a 99999, con o sin $): la etiqueta lo lleva en grande.
+ * Lo que no se puede imprimir (encabezados, codigos con acentos o muy largos) regresa en `malas`.
  */
 export function leerCodigos(texto) {
   const filas = [];
   const malas = [];
   for (const renglon of String(texto).split(/\r?\n/)) {
     if (!renglon.trim()) continue;
-    const [codigo = '', cantidad = '1'] = renglon.split(/[\t;,]/).map((c) => c.trim());
+    const [codigo = '', cantidad = '1', precio = ''] = renglon.split(/[\t;,]/).map((c) => c.trim());
     const n = Number(cantidad || 1);
-    if (!codigoImprimible(codigo) || !Number.isInteger(n) || n < 1 || n > 999) malas.push(renglon.trim());
-    else filas.push({ codigo, cantidad: n });
+    const p = precio === '' ? null : Number(precio.replace(/^\$/, ''));
+    const precioMalo = p !== null && (!Number.isInteger(p) || p < 1 || p > 99999);
+    if (!codigoImprimible(codigo) || !Number.isInteger(n) || n < 1 || n > 999 || precioMalo) malas.push(renglon.trim());
+    else filas.push(p === null ? { codigo, cantidad: n } : { codigo, cantidad: n, precio: p });
   }
   return { filas, malas };
 }

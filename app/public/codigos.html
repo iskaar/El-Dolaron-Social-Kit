@@ -44,9 +44,11 @@
     Para códigos que ya existen en otro sistema (por ejemplo, Salumax): cada etiqueta lleva
     solo el código de barras y el código en texto. No se guarda nada ni toca el inventario
     de la tienda. Usa la misma impresora y calibración que <a href="/etiquetas">/etiquetas</a>.
+    Si agregas una tercera columna con el precio, la etiqueta lleva el precio en grande
+    arriba del código (como los genéricos de Avenida Salk: <code>SK100	544	100</code>).
   </p>
 
-  <label for="pegar">Pega desde Excel: código y, en la columna de al lado, cuántas etiquetas (sin cantidad = 1)</label>
+  <label for="pegar">Pega desde Excel: código, cuántas etiquetas (sin cantidad = 1) y, si quieres, el precio</label>
   <textarea id="pegar" spellcheck="false" placeholder="7501234567890	3&#10;SAL-0042	1"></textarea>
   <div class="botones"><button id="agregar-lista" class="claro" type="button">Agregar a la lista</button></div>
 
@@ -58,7 +60,7 @@
   <p class="malas" id="malas"></p>
 
   <table id="tabla" hidden>
-    <thead><tr><th>Código</th><th class="num">Etiquetas</th><th></th></tr></thead>
+    <thead><tr><th>Código</th><th class="num">Precio</th><th class="num">Etiquetas</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
 
@@ -74,19 +76,21 @@
 <script type="module">
 import {
   conectarEtiquetera, etiqueteraLista, cargarCalibracion, mandarCopias, detenerEnvio, envioDetenido,
-  errorEnvio, tsplCodigo, leerCodigos,
+  errorEnvio, tsplCodigo, leerCodigos, tsplPrecio, mandarTspl,
 } from '/etiquetera.js';
 
 cargarCalibracion();
 
-const lista = [];   // { codigo, cantidad }; vive mientras la pagina este abierta
+const lista = [];   // { codigo, cantidad, precio? }; vive mientras la pagina este abierta
+// Con precio, cada trabajo es PRINT 1,n (como las bandas): en tandas de 100 para que «Detener» corte entre una y otra.
+const TANDA_PRECIO = 100;
 const $ = (id) => document.getElementById(id);
 const avisar = (texto) => { $('estado').textContent = texto; };
 
 function agregar(texto) {
   const { filas, malas } = leerCodigos(texto);
   for (const fila of filas) {
-    const igual = lista.find((f) => f.codigo === fila.codigo);
+    const igual = lista.find((f) => f.codigo === fila.codigo && f.precio === fila.precio);
     if (igual) igual.cantidad = Math.min(999, igual.cantidad + fila.cantidad);
     else lista.push(fila);
   }
@@ -101,9 +105,10 @@ function pintar() {
   const cuerpo = $('tabla').querySelector('tbody');
   cuerpo.replaceChildren(...lista.map((fila, i) => {
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td><code></code></td><td class="num"></td><td class="num"><button class="claro" type="button">Quitar</button></td>';
+    tr.innerHTML = '<td><code></code></td><td class="num"></td><td class="num"></td><td class="num"><button class="claro" type="button">Quitar</button></td>';
     tr.querySelector('code').textContent = fila.codigo;
-    tr.children[1].textContent = fila.cantidad;
+    tr.children[1].textContent = fila.precio ? `$${fila.precio}` : '—';
+    tr.children[2].textContent = fila.cantidad;
     tr.querySelector('button').addEventListener('click', () => { lista.splice(i, 1); pintar(); });
     return tr;
   }));
@@ -136,6 +141,18 @@ async function conectarSiHaceFalta(cualquiera) {
   }
 }
 
+// Un renglón con precio: trabajos PRINT 1,n de hasta TANDA_PRECIO etiquetas. Devuelve si salieron todas; alAvanzar recibe las enviadas.
+async function mandarConPrecio(fila, alAvanzar) {
+  let enviadas = 0;
+  while (enviadas < fila.cantidad && !envioDetenido()) {
+    const n = Math.min(TANDA_PRECIO, fila.cantidad - enviadas);
+    if (!await mandarTspl(tsplPrecio(fila.codigo, fila.precio, n))) return false;
+    enviadas += n;
+    alAvanzar(enviadas);
+  }
+  return enviadas === fila.cantidad;
+}
+
 $('imprimir').addEventListener('click', async () => {
   if (!await conectarSiHaceFalta(false)) return;
   detenerEnvio(false);
@@ -145,10 +162,12 @@ $('imprimir').addEventListener('click', async () => {
   try {
     for (const fila of [...lista]) {
       let hechas = 0;
-      const salio = await mandarCopias(tsplCodigo(fila.codigo), fila.cantidad,
-        (n) => { hechas = n; avisar(`Imprimiendo ${antes + n} de ${total}: ${fila.codigo}`); },
-        `Código ${fila.codigo}`,
-        (segundos) => avisar(`Pausa de ${segundos} s para que la impresora vacíe su memoria…`));
+      const salio = fila.precio
+        ? await mandarConPrecio(fila, (n) => { hechas = n; avisar(`Imprimiendo ${antes + n} de ${total}: ${fila.codigo} $${fila.precio}`); })
+        : await mandarCopias(tsplCodigo(fila.codigo), fila.cantidad,
+          (n) => { hechas = n; avisar(`Imprimiendo ${antes + n} de ${total}: ${fila.codigo}`); },
+          `Código ${fila.codigo}`,
+          (segundos) => avisar(`Pausa de ${segundos} s para que la impresora vacíe su memoria…`));
       if (!salio) {
         fila.cantidad -= hechas;
         pintar();
