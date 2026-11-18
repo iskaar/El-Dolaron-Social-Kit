@@ -1102,3 +1102,10 @@ test('POST /api/portal/apartar con carrito (#681): un pedido de varias piezas po
     assert.equal(stockPieza(p, a.id), 0);
   } finally { p.cerrar(); }
 });
+
+test('portal.js crea un solo RecaptchaVerifier por página: un segundo sobre #enviar falla con «already been rendered» (#865)', () => {
+  const js = readFileSync('public/portal.js', 'utf8');
+  assert.equal(js.match(/new sdk\.RecaptchaVerifier\(/g)?.length, 1);
+  assert.match(js, /verificador \?\?= new sdk\.RecaptchaVerifier\(/);
+  assert.doesNotMatch(js, /verificador\??\.clear\(/);
+});
