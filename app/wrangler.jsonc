@@ -59,6 +59,8 @@
     // por pieza y sin tocar productos.precio. Para apagarlo, quitar las dos lineas y desplegar. Intervalo [desde, hasta).
     "BUENFIN_DESDE": "2026-11-14T06:00:00Z",
     "BUENFIN_HASTA": "2026-11-18T06:00:00Z",
+    // Solo Soledad (Isaac, 17/11): Salk 1 (eldolaron2) cobra sin Buen Fin. Ausente = todas las tiendas.
+    "BUENFIN_TIENDAS": "soledad",
     "PORTAL_REGISTRO_ABIERTO": "si",
     // Referidos abiertos a todo socio (Issue #597). Apagado de emergencia: quitarla y desplegar.
     "REFERIDOS_ABIERTO": "si",

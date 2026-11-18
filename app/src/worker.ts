@@ -2002,7 +2002,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   // Hora fiable de la venta (la de la caja): una hora futura no se acepta.
   const horaCaja = Date.parse(String(venta.creado_en ?? ''));
   const horaVenta = Number.isFinite(horaCaja) && horaCaja <= Date.now() + 300_000 ? horaCaja : Date.now();
-  const preparado = prepararLineas(venta.lineas as LineaVenta[], productos, horaVenta, buenFinDe(env));
+  const preparado = prepararLineas(venta.lineas as LineaVenta[], productos, horaVenta, buenFinDe(env, tienda));
   if (!preparado.ok) {
     return json({ error: preparado.error }, 400);
   }
@@ -2942,7 +2942,7 @@ export default {
       {
         const promo = promoDe(env), restantes = promo && await promoRestantes(env);
         return json({ habilitado:valesAbiertos(env), prueba:env.AMBIENTE === 'sandbox', promo:promo && (restantes === null ? promo : { ...promo, restantes }),
-          buenfin:buenFinDe(env),
+          buenfin:buenFinDe(env, tienda),
           cupon_porcentaje:await porcentajeCupon(env) });
       }
       if (pathname === '/api/vales/buscar' && request.method === 'POST')

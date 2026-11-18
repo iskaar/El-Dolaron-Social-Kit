@@ -72,6 +72,8 @@ declare global {
     /** Buen Fin (Issue #772), ISO UTC: ambas o ninguna. Descuento por pieza dentro de [desde, hasta). Quitarlas y desplegar lo apaga. */
     BUENFIN_DESDE?: string;
     BUENFIN_HASTA?: string;
+    /** Tiendas con Buen Fin, separadas por comas (p. ej. "soledad"). Ausente = todas. */
+    BUENFIN_TIENDAS?: string;
     /** Cuantos tickets reciben la promo (Issue #250). Ausente = sin tope. */
     PROMO_CUPO?: string;
     /** Conteo de alto valor (Issue #219): precio minimo en centavos. Ausente = 30000. */
