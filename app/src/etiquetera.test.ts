@@ -4,7 +4,7 @@
 // etiqueta, que es donde se rompio todo lo anterior.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, NOMBRE_MAX_PIEZA, TSPL_REGLA, TSPL_CALIBRAR, tsplCodigo, tsplBulto, leerCodigos,
+import { tsplEtiqueta, tsplBanda, tsplMarco, tsplPruebaCodigo, tsplPruebaLargos, partirNombre, NOMBRE_MAX, NOMBRE_MAX_PIEZA, TSPL_REGLA, TSPL_CALIBRAR, tsplCodigo, tsplBulto, leerCodigos, tsplPrecio,
   reconectarEtiquetera, etiqueteraLista, reclamarEtiquetas, soltarEtiquetas, adoptarMarca, adoptarMarcas, olvidarMarca, marcarImpresa, impresas, desmarcarDesde } from '../public/etiquetera.js';
 
 // El letrero (#737) es la unica linea que cambia con la categoria: TEXT x,y,"3",0,2,2,"11".
@@ -673,4 +673,24 @@ test('etiqueta del bulto (#795): destino, folio en Code 128 y en letras, y pie c
   assert.ok(!/ED-/.test(t));
   assert.match(tsplBulto({ folio: 'BU-K7Q2M', destino: 'Avenida Salk', origen: 'Soledad', piezas: 1, fecha: 'x' }, 0, 4), /"A: AVENIDA SALK"/);
   assert.throws(() => tsplBulto({ folio: 'BU "2', destino: 'x', origen: 'y', piezas: 1, fecha: 'z' }));
+});
+
+test('leerCodigos: una tercera columna opcional es el precio en pesos (con o sin $); un precio inválido manda el renglón a malas', () => {
+  const { filas, malas } = leerCodigos('SK100\t544\t100\nSK20;742;$20\nSAL-1\t2\nSK5\t1\t0\nSK6\t1\t12.5\nSK7\t1\tcien');
+  assert.deepEqual(filas, [{ codigo: 'SK100', cantidad: 544, precio: 100 }, { codigo: 'SK20', cantidad: 742, precio: 20 }, { codigo: 'SAL-1', cantidad: 2 }]);
+  assert.deepEqual(malas, ['SK5\t1\t0', 'SK6\t1\t12.5', 'SK7\t1\tcien']);
+});
+
+test('tsplPrecio: el diseño de la banda sin renglón de familia, precio grande, barras del código y el código solo abajo', () => {
+  const tspl = tsplPrecio('SK2750', 2750, 100, 0, 4);
+  const lineas = tspl.trim().split('\r\n');
+  assert.ok(lineas.some((l) => /^TEXT \d+,30,"3",0,3,3,"\$2750"$/.test(l)));
+  assert.ok(lineas.some((l) => /^BARCODE \d+,110,"128",48,0,0,4,8,"SK2750"$/.test(l)));
+  assert.ok(lineas.some((l) => /^TEXT \d+,164,"1",0,1,1,"SK2750"$/.test(l)));
+  assert.equal(lineas.filter((l) => l.startsWith('TEXT')).length, 2);   // sin familia
+  assert.equal(lineas.at(-1), 'PRINT 1,100');
+  // La banda con familia no cambia: su renglón de arriba y «código - semana» abajo.
+  const banda = tsplBanda({ familia: 'General', precioPesos: 49, codigo: 'G49', semana: 'S47' }, 1, 0, 4);
+  assert.match(banda, /"GENERAL"/);
+  assert.match(banda, /"G49 - S47"/);
 });
