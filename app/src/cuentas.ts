@@ -444,7 +444,8 @@ export async function yo(env: Env, correo: string, cajero: Usuario | null = null
   const cajas = cajasDe(tienda);
   return json({ correo, usuario, solicitud, vendedor, revendedora: esRevendedora(usuario), modos_inventario: modos,
     tienda, tienda_nombre: esTienda(tienda) ? TIENDAS[tienda].nombre : '', cajas,
-    tiendas: (Object.keys(TIENDAS) as Tienda[]).map((clave) => ({ clave, nombre: TIENDAS[clave].nombre })),   // #800: dónde puede recoger un cliente
+    // #800: dónde puede recoger un cliente; #863: sus cajas, para el fondo de cada una en /reportes.
+    tiendas: (Object.keys(TIENDAS) as Tienda[]).map((clave) => ({ clave, nombre: TIENDAS[clave].nombre, cajas: [...TIENDAS[clave].cajas] })),
     // es_dueno: el dueño con su PIN en la computadora de la caja no tiene el tope de 10 % de un cajero (#845); el servidor lo decide igual.
     cajero: cajero && { correo: cajero.correo, nombre: cajero.nombre, caja: cajas.includes(cajero.caja) ? cajero.caja : '', es_dueno: cajero.roles.includes('dueno') } });
 }

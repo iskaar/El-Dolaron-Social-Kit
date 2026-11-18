@@ -59,6 +59,7 @@ import { reporteVentas } from './reportes-ventas.ts';
 import { reporteClientes } from './reportes-clientes.ts';
 import { reporteFinanzas } from './reportes-finanzas.ts';
 import { configInvalida } from '../public/reportes-finanzas.js';
+import { esClaveFondoCaja } from '../public/fondos.js';
 
 // Las pruebas importan estos dos desde aqui.
 export { hoyTienda, rangoDias };
@@ -1651,6 +1652,11 @@ async function guardarConfig(request: Request, env: Env): Promise<Response> {
     return json({ error: 'Configuracion invalida.' }, 400);
   }
   for (const [clave, valor] of entradas) {
+    // #863: null quita el fondo propio de una caja y la regresa al centralizado.
+    if (valor === null && esClaveFondoCaja(clave)) {
+      await env.DB.prepare('delete from config where clave = ?').bind(clave).run();
+      continue;
+    }
     const numero = Math.round(Number(valor));
     // El tope de retiros (#846) son centavos enteros; un monto con decimales o vacio no se redondea en silencio.
     const topeMalo = clave === CLAVE_TOPE_RETIRO && (valor === '' || valor === null || typeof valor === 'boolean' || !Number.isInteger(Number(valor)) || numero > 100_000_000);

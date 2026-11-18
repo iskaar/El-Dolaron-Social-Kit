@@ -3,6 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda, codigoPrueba, PRODUCTO, DUENO } from './prueba-d1.ts';
+import { claveFondo } from '../public/fondos.js';
 
 type Pedir = ReturnType<typeof tienda>['pedir'];
 
@@ -119,23 +120,38 @@ test('el fondo sale de la configuracion y un corte no se cuenta dos veces', asyn
   assert.equal((await pedir('/api/cortes?caja=Caja%201')).cuerpo.id, id);   // para reimprimir
 });
 
-test('18/11: el fondo de la tienda de la caja (fondo_caja_<tienda>) manda sobre el general', async () => {
+test('#863: claveFondo da la clave de config de cada caja', () => {
+  assert.equal(claveFondo('Salk 1'), 'fondo_caja_salk_1');
+  assert.equal(claveFondo('Caja 2'), 'fondo_caja_caja_2');
+  assert.equal(claveFondo(' Coronel  Romero 1 '), 'fondo_caja_coronel_romero_1');
+});
+
+test('#863: el fondo propio de la caja manda sobre el centralizado; quitarlo la regresa al centralizado', async () => {
   const { db, pedir } = tienda();
   db.prepare(`update config set valor = '221000' where clave = 'fondo_caja'`).run();
-  db.prepare(`insert into config (clave, valor) values ('fondo_caja_salk', '120000')`).run();
+  assert.equal((await pedir('/api/config', { fondo_caja_caja_2: 100000 }, 'PUT')).status, 200);
   await vender(pedir, 'Caja 1');
-  // Caja 1 es de Soledad: el fondo de Salk no le toca, usa el general.
-  const soledad = (await cortar(pedir, 'Caja 1', 246000)).cuerpo;
-  assert.equal(soledad.fondo_inicial, 221000);
-  assert.equal(soledad.diferencia, 0);
-  db.prepare(`insert into config (clave, valor) values ('fondo_caja_soledad', '100000')`).run();
+  // Caja 1 sin fondo propio: el centralizado.
+  const caja1 = (await cortar(pedir, 'Caja 1', 246000)).cuerpo;
+  assert.equal(caja1.fondo_inicial, 221000);
+  assert.equal(caja1.diferencia, 0);
   await vender(pedir, 'Caja 2');
-  // Primer corte de Caja 2: arranca con el fondo de Soledad y deja ese fondo; lo demas se entrega.
+  // Primer corte de Caja 2: arranca con su fondo y deja ese fondo; lo demas se entrega.
   const caja2 = (await cortar(pedir, 'Caja 2', 125000)).cuerpo;
   assert.equal(caja2.fondo_inicial, 100000);
   assert.equal(caja2.diferencia, 0);
   assert.equal(caja2.fondo_siguiente, 100000);
   assert.equal(caja2.entregado, 25000);
+  // Quitarle el fondo propio: el siguiente corte deja el centralizado (todo, si no alcanza).
+  const quitado = await pedir('/api/config', { fondo_caja_caja_2: null }, 'PUT');
+  assert.equal(quitado.status, 200);
+  assert.equal(quitado.cuerpo.fondo_caja_caja_2, undefined);
+  await vender(pedir, 'Caja 2');
+  const otra = (await cortar(pedir, 'Caja 2', 125000)).cuerpo;
+  assert.equal(otra.fondo_inicial, 100000);
+  assert.equal(otra.fondo_siguiente, 125000);
+  // null solo borra fondos de caja: otra clave con null sigue siendo invalida.
+  assert.equal((await pedir('/api/config', { tope_retiro: null }, 'PUT')).status, 400);
 });
 
 test('datos invalidos no hacen corte ni retiro', async () => {
