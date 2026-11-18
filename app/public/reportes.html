@@ -671,11 +671,16 @@
       <article class="panel">
         <header><h4>Cortes de caja</h4></header>
         <div class="fondo-caja">
-          <label for="fondo-caja">Fondo de caja: lo que se queda en cada cajón después del corte ($)</label>
+          <label for="fondo-caja">Fondo de caja centralizado: lo que se queda en cada cajón después del corte ($), salvo en las cajas con fondo propio</label>
           <input id="fondo-caja" type="number" min="0" step="1" inputmode="numeric">
           <button id="guardar-fondo" type="button">Guardar</button>
           <span id="aviso-fondo"></span>
         </div>
+        <details class="fondo-caja" id="fondos-caja">
+          <summary>Fondo propio por caja (vacío = usa el centralizado)</summary>
+          <div id="fondos-caja-filas" style="flex-basis: 100%"></div>
+          <span id="aviso-fondos-caja" role="status"></span>
+        </details>
         <div class="fondo-caja">
           <label for="tope-retiro">Retiro del cajón sin aprobación: hasta cuánto puede sacar un cajero solo ($). Arriba de esto lo aprueba un supervisor o tú con su PIN en la caja. 0 = todo retiro pide aprobación (sin fijar, también)</label>
           <input id="tope-retiro" type="number" min="0" step="1" inputmode="numeric">
@@ -825,6 +830,7 @@ import * as Clientes from '/reportes-clientes.js';
 import { montarControl } from '/reportes-control.js';
 import { montarEquipo } from '/reportes-equipo.js';
 import * as Finanzas from '/reportes-finanzas.js';
+import { claveFondo } from '/fondos.js';
 import { CLAVES_DE_PARTE, PARTES_FOTO, PARTES_SIN_TIENDA } from '/reportes-partes.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1898,7 +1904,60 @@ async function cargarFondo() {
     $('tope-retiro').value = config.tope_retiro === undefined ? '' : Math.round(Number(config.tope_retiro) / 100);
     const bp = Finanzas.bpDeConfig(config[Finanzas.CLAVE_COMISION]);
     $('comision-terminal').value = bp ? (bp / 100).toFixed(2) : '';
+    const { tiendas = [] } = await (await fetch('/api/yo')).json();
+    pintarFondosCaja(config, tiendas);
   } catch { /* sin red: se ve al recargar */ }
+}
+
+// Fondo propio por caja (#863): una fila por caja de cada tienda. Vacío = usa el centralizado; «Usar centralizado» lo quita.
+function pintarFondosCaja(config, tiendas) {
+  const centralizado = Math.round(Number(config.fondo_caja ?? 50000) / 100);
+  const filas = $('fondos-caja-filas');
+  filas.replaceChildren();
+  for (const t of tiendas) {
+    for (const caja of t.cajas ?? []) {
+      const clave = claveFondo(caja);
+      const fila = document.createElement('div');
+      fila.className = 'fondo-caja';
+      const etiqueta = document.createElement('label');
+      etiqueta.htmlFor = `fondo-${clave}`;
+      etiqueta.textContent = `${caja} (${t.nombre})`;
+      const campo = document.createElement('input');
+      Object.assign(campo, { id: `fondo-${clave}`, type: 'number', min: '0', step: '1', inputMode: 'numeric', placeholder: `${centralizado} (centralizado)` });
+      if (config[clave] !== undefined) campo.value = Math.round(Number(config[clave]) / 100);
+      const guardar = document.createElement('button');
+      guardar.type = 'button';
+      guardar.textContent = 'Guardar';
+      const quitar = document.createElement('button');
+      quitar.type = 'button';
+      quitar.textContent = 'Usar centralizado';
+      const enviar = async (valor) => {
+        const aviso = $('aviso-fondos-caja');
+        try {
+          const r = await fetch('/api/config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ [clave]: valor }) });
+          const cuerpo = await r.json().catch(() => ({}));
+          aviso.textContent = r.ok ? `${caja}: ${valor === null ? 'usa el centralizado' : 'guardado'}. Aplica desde su siguiente corte.` : (cuerpo.error ?? 'No se pudo guardar.');
+          aviso.style.color = r.ok ? 'var(--bien)' : 'var(--mal)';
+          if (r.ok) pintarFondosCaja(cuerpo, tiendas);
+        } catch {
+          aviso.textContent = 'Sin red: no se guardó.';
+          aviso.style.color = 'var(--mal)';
+        }
+      };
+      guardar.addEventListener('click', () => {
+        const pesos = Number(campo.value);
+        if (campo.value === '' || !Number.isFinite(pesos) || pesos < 0) {
+          $('aviso-fondos-caja').textContent = `${caja}: escribe una cantidad o usa el centralizado.`;
+          $('aviso-fondos-caja').style.color = 'var(--mal)';
+          return;
+        }
+        enviar(Math.round(pesos * 100));
+      });
+      quitar.addEventListener('click', () => enviar(null));
+      fila.append(etiqueta, campo, guardar, quitar);
+      filas.append(fila);
+    }
+  }
 }
 $('guardar-fondo').addEventListener('click', async () => {
   const pesosFondo = Number($('fondo-caja').value);
@@ -1913,7 +1972,8 @@ $('guardar-fondo').addEventListener('click', async () => {
     body: JSON.stringify({ fondo_caja: Math.round(pesosFondo * 100) }),
   });
   const cuerpo = await r.json().catch(() => ({}));
-  aviso.textContent = r.ok ? 'Guardado. Aplica desde el siguiente corte de cada caja.' : (cuerpo.error ?? 'No se pudo guardar.');
+  aviso.textContent = r.ok ? 'Guardado. Aplica desde el siguiente corte de cada caja sin fondo propio.' : (cuerpo.error ?? 'No se pudo guardar.');
+  if (r.ok) cargarFondo();
   aviso.style.color = r.ok ? 'var(--bien)' : 'var(--mal)';
 });
 
