@@ -263,8 +263,8 @@ $('telefono-form').addEventListener('submit', (e) => {
   accion($('enviar'), async () => {
     if (Date.now() < reenviarDesde) throw new Error('Espera un minuto antes de pedir otro SMS.');
     await sdk.setPersistence(auth, $('recordar').checked ? sdk.browserLocalPersistence : sdk.browserSessionPersistence);
-    verificador?.clear();
-    verificador = new sdk.RecaptchaVerifier(auth, 'enviar', { size:'invisible' });
+    // Un verificador por página: con reCAPTCHA invisible, crear otro sobre el mismo botón falla con «already been rendered» (#865).
+    verificador ??= new sdk.RecaptchaVerifier(auth, 'enviar', { size:'invisible' });
     confirmacion = await sdk.signInWithPhoneNumber(auth, '+52' + $('telefono').value.trim(), verificador);
     reenviarDesde = Date.now() + 60_000;
     $('destino-sms').textContent = 'Enviamos un código al +52 ' + $('telefono').value.trim();
