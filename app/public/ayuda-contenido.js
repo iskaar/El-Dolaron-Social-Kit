@@ -80,7 +80,7 @@ export const ESCENARIOS = [
       'Escribe tu PIN.',
       'Revisa el ticket antes de cobrar: puede quedar abierto el de la persona anterior.',
     ],
-    ojo: 'En cada cambio de turno se usa «Cambiar cajero», no «Cerrar sesión»: «Cerrar sesión» saca a toda la computadora y, para volver a entrar, hace falta el encargado. La caja se bloquea sola después de 1 hora sin tocar nada. Al volver, las piezas del ticket siguen ahí («Se recuperó el ticket que estaba en curso.»); el socio, los Dolarones y el efectivo que habías escrito se vuelven a poner.',
+    ojo: 'En cada cambio de turno se usa «Cambiar cajero», no «Cerrar sesión»: «Cerrar sesión» saca a toda la computadora y, para volver a entrar, hace falta el encargado; por eso en la computadora de caja solo aparece cuando gerencia entra con su PIN. La caja se bloquea sola después de 1 hora sin tocar nada. Al volver, las piezas del ticket siguen ahí («Se recuperó el ticket que estaba en curso.»); el socio, los Dolarones y el efectivo que habías escrito se vuelven a poner.',
     ver: ['entrar-con-pin', 'recargue-la-pagina'],
     pantalla: 'caja',
     textos: [['cajero', 'Cambiar cajero'], 'Se recuperó el ticket que estaba en curso.', 'Cerrar sesión'],
