@@ -119,6 +119,25 @@ test('el fondo sale de la configuracion y un corte no se cuenta dos veces', asyn
   assert.equal((await pedir('/api/cortes?caja=Caja%201')).cuerpo.id, id);   // para reimprimir
 });
 
+test('18/11: el fondo de la tienda de la caja (fondo_caja_<tienda>) manda sobre el general', async () => {
+  const { db, pedir } = tienda();
+  db.prepare(`update config set valor = '221000' where clave = 'fondo_caja'`).run();
+  db.prepare(`insert into config (clave, valor) values ('fondo_caja_salk', '120000')`).run();
+  await vender(pedir, 'Caja 1');
+  // Caja 1 es de Soledad: el fondo de Salk no le toca, usa el general.
+  const soledad = (await cortar(pedir, 'Caja 1', 246000)).cuerpo;
+  assert.equal(soledad.fondo_inicial, 221000);
+  assert.equal(soledad.diferencia, 0);
+  db.prepare(`insert into config (clave, valor) values ('fondo_caja_soledad', '100000')`).run();
+  await vender(pedir, 'Caja 2');
+  // Primer corte de Caja 2: arranca con el fondo de Soledad y deja ese fondo; lo demas se entrega.
+  const caja2 = (await cortar(pedir, 'Caja 2', 125000)).cuerpo;
+  assert.equal(caja2.fondo_inicial, 100000);
+  assert.equal(caja2.diferencia, 0);
+  assert.equal(caja2.fondo_siguiente, 100000);
+  assert.equal(caja2.entregado, 25000);
+});
+
 test('datos invalidos no hacen corte ni retiro', async () => {
   const { pedir } = tienda();
   assert.equal((await cortar(pedir, '', 0)).status, 400);

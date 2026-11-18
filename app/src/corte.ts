@@ -25,7 +25,7 @@
 
 import { lineasNetas } from './netas.ts';
 import { contadoDe } from '../public/venta.js';
-import { leerUsuario, cajasDe, apruebaDinero } from './cuentas.ts';
+import { leerUsuario, cajasDe, apruebaDinero, tiendaDeCaja } from './cuentas.ts';
 import { aprobadorConPin, aprobadoresDeDinero } from './cancelaciones.ts';
 import { CATEGORIAS_GASTO } from '../public/categorias.js';
 
@@ -214,7 +214,10 @@ export async function registrarCorte(request: Request, env: Env, correo: string,
   const previo = await leerCorte(env, id);
   if (previo) return json(previo);   // reenvio tras red caida: el mismo corte, sin volver a contar
 
-  const config = await env.DB.prepare(`select valor from config where clave = 'fondo_caja'`).first<{ valor: string }>();
+  // Fondo por tienda (18/11, Isaac: Salk trabaja con $1,200): `fondo_caja_<tienda>` si existe; si no, el general `fondo_caja`.
+  const config = await env.DB.prepare(
+    `select valor from config where clave in ('fondo_caja_' || ?, 'fondo_caja') order by clave = 'fondo_caja' limit 1`,
+  ).bind(tiendaDeCaja(caja)).first<{ valor: string }>();
   const fondo = Number.parseInt(config?.valor ?? '', 10);
   const fondoConfig = Number.isFinite(fondo) && fondo >= 0 ? fondo : FONDO_POR_OMISION;
   const ahora = new Date().toISOString();
