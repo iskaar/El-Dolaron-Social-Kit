@@ -214,7 +214,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <a href="/avisos" id="avisos-ml" target="_blank" hidden></a>
   <button id="abrir-guia" type="button" title="Guía de la caja: qué hacer cuando… (tecla F1)">¿Cómo se hace?</button>
   <button id="pedir-ayuda" type="button" aria-live="polite">Ayuda</button>
-  <button id="cerrar-sesion" type="button">Cerrar sesión</button>
+  <button id="cerrar-sesion" type="button" hidden>Cerrar sesión</button>
 </header>
 
 <main>
@@ -764,11 +764,30 @@ $('caja-nombre').addEventListener('change', () => {
 });
 const cajaActual = () => $('caja-nombre').value;
 
+// #856: en la computadora de caja (cuenta solo «computadora»), «Cerrar sesión» saca a toda la computadora de Access y
+// para volver a entrar hace falta su correo, que los cajeros no tienen: solo lo ve gerencia con su PIN. Cualquier otra
+// cuenta lo ve como siempre. Sin /api/yo, un turno de PIN guardado dice que es la computadora de caja: se queda oculto.
+// No da permisos (salir no los necesita): solo evita el clic por error.
+function puedeCerrarSesion(yo) {
+  if (!yo) { try { return !localStorage.getItem('cajero-en-turno'); } catch { return true; } }
+  const roles = yo.usuario?.roles ?? [];
+  const soloComputadora = roles.includes('computadora') && !roles.includes('cajero') && !roles.includes('dueno');
+  return !soloComputadora || yo.cajero?.es_dueno === true;
+}
+let cerrarSesionDecidido = false;
+const pintarCerrarSesion = (yo) => {
+  if (!yo && cerrarSesionDecidido) return;   // ya lo decidió /api/yo; una falla después no lo cambia
+  cerrarSesionDecidido = cerrarSesionDecidido || !!yo;
+  $('cerrar-sesion').hidden = !puedeCerrarSesion(yo);
+};
+// Fin #856.
+
 // Issue #105: si el dueno le asigno una caja a quien entro, esa es la suya en
 // cualquier computadora (el servidor la usa aunque aqui diga otra). Sin red se
 // queda lo que se eligio en esta computadora. En la computadora de la tienda,
 // la del cajero que entro con su PIN (Issue #112).
 fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero, cajas, tienda }) => {
+  pintarCerrarSesion({ usuario, cajero });
   // La tienda y sus cajas las decide el servidor por la cuenta de esta computadora (#793). Una respuesta de una version
   // anterior del servidor no trae `cajas`: se queda la lista conocida.
   if (Array.isArray(cajas) && cajas.length) {
@@ -794,7 +813,7 @@ fetch('/api/yo').then((r) => r.json()).then(({ usuario, cajero, cajas, tienda })
   $('caja-nombre').title = 'Tu caja, asignada por gerencia';
   $('caja-nombre').closest('label').firstChild.textContent = 'Tu caja ';
   pintarImpresora();
-}).catch(() => { /* sin red: la de la computadora */ });
+}).catch(() => { pintarCerrarSesion(null); /* sin red: la de la computadora */ });
 
 // Issue #750: quien atendió en piso (no siempre quien cobra). Por omisión, quien cobra; la última elección se
 // recuerda mientras dure esta sesión del PIN (si entra otro cajero, vuelve a su nombre). Sin red, la lista de la última vez.
