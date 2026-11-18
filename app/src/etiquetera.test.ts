@@ -694,3 +694,37 @@ test('tsplPrecio: el diseño de la banda sin renglón de familia, precio grande,
   assert.match(banda, /"GENERAL"/);
   assert.match(banda, /"G49 - S47"/);
 });
+
+test('leerCodigos: copiado de un chat los tabuladores llegan como espacios, y también sirven', () => {
+  const { filas, malas } = leerCodigos('SK10    6       10\n  SK15 43 15  \nSK20, 742, 20');
+  assert.deepEqual(filas, [{ codigo: 'SK10', cantidad: 6, precio: 10 }, { codigo: 'SK15', cantidad: 43, precio: 15 }, { codigo: 'SK20', cantidad: 742, precio: 20 }]);
+  assert.deepEqual(malas, []);
+});
+
+test('imprimirPrecio: tandas de 100 con PRINT 1,n, cada tanda anotada en el historial; «Detener» corta entre tandas y queda anotado', async () => {
+  const guardado = new Map<string, string>();
+  const g = globalThis as any;
+  g.localStorage = { getItem: (k: string) => guardado.get(k) ?? null, setItem: (k: string, v: string) => guardado.set(k, v) };
+  const navegador = globalThis.navigator as unknown as { bluetooth?: unknown };
+  let enviado = '';
+  const aparato = { name: 'AE240-bt_1DDE-LE', addEventListener() {},
+    gatt: { connected: false, disconnect() {}, connect: async () => ({ getPrimaryService: async () => ({
+      getCharacteristic: async () => ({ properties: { writeWithoutResponse: true },
+        writeValueWithoutResponse: async (b: Uint8Array) => { enviado += new TextDecoder().decode(b); } }) }) }) } };
+  try {
+    navegador.bluetooth = { getDevices: async () => [aparato] };
+    // Instancia nueva del módulo: la de arriba ya trae enlazada la impresora falsa de otra prueba.
+    const ruta: string = '../public/etiquetera.js?imprimir-precio';
+    const { reconectarEtiquetera, imprimirPrecio, historialTexto, detenerEnvio } = await import(ruta);
+    assert.equal(await reconectarEtiquetera(), true);
+    detenerEnvio(false);
+    assert.equal(await imprimirPrecio('SK20', 20, 250), 250);
+    assert.deepEqual(enviado.match(/PRINT 1,\d+/g), ['PRINT 1,100', 'PRINT 1,100', 'PRINT 1,50']);
+    assert.match(historialTexto(), /SK20 \$20 \(201-250 de 250\): 50 enviadas[\s\S]*SK20 \$20 \(1-100 de 250\): 100 enviadas/);
+    enviado = '';
+    detenerEnvio(false);
+    assert.equal(await imprimirPrecio('SK100', 100, 544, (n: number) => { if (n === 100) detenerEnvio(); }), 100);
+    assert.deepEqual(enviado.match(/PRINT 1,\d+/g), ['PRINT 1,100']);
+    assert.match(historialTexto().split('\n')[0], /SK100 \$100: SE CORTO \(0 de 444\)  \[detenido a mano\]/);
+  } finally { delete navegador.bluetooth; delete g.localStorage; }
+});
