@@ -292,3 +292,29 @@ test('Buen Fin: ticket mixto cobra ropa -20 % y lo demas -30 %, no se le cree a 
     assert.equal(dev.cuerpo.devuelto, 9600);
   } finally { Date.now = ahoraReal; t.db.close(); }
 });
+
+test('Buen Fin por tienda: BUENFIN_TIENDAS deja el descuento solo en las tiendas listadas (caja y cobro)', async () => {
+  const t = tienda();   // la cuenta de la prueba no tiene tienda: cuenta como Soledad
+  t.db.prepare(`update productos set categoria = 'hogar' where id = ?`).run(PRODUCTO);
+  const ahoraReal = Date.now;
+  Date.now = () => Date.parse('2026-11-19T00:00:00Z');
+  try {
+    Object.assign(t.env, { BUENFIN_DESDE: BUENFIN.desde, BUENFIN_HASTA: BUENFIN.hasta });
+    const cobrar = async () => {
+      const v = { id: crypto.randomUUID(), forma_pago: 'tarjeta', efectivo: 0, caja: 'Caja 1', creado_en: '2026-11-15T18:00:00Z',
+        lineas: [{ producto_id: PRODUCTO, cantidad: 1, precio: 1 }] };
+      const r = await t.pedir('/api/ventas', v);
+      assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+      return (t.db.prepare('select precio from venta_lineas where venta_id = ?').get(v.id) as any).precio;
+    };
+
+    t.env.BUENFIN_TIENDAS = 'soledad';
+    assert.deepEqual((await t.pedir('/api/vales/config', undefined, 'GET')).cuerpo.buenfin, BUENFIN);
+    assert.equal(await cobrar(), 17500);
+
+    // Otra tienda en la lista: Soledad cobra precio completo y su caja no muestra el descuento.
+    t.env.BUENFIN_TIENDAS = ' salk , romero ';
+    assert.equal((await t.pedir('/api/vales/config', undefined, 'GET')).cuerpo.buenfin, null);
+    assert.equal(await cobrar(), 25000);
+  } finally { Date.now = ahoraReal; t.db.close(); }
+});

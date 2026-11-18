@@ -194,10 +194,17 @@ export async function validarDescuento(
 export const promoDe = (env: Env) =>
   env.PROMO_DESDE && env.PROMO_HASTA && Date.parse(env.PROMO_DESDE) < Date.parse(env.PROMO_HASTA)
     ? { desde: env.PROMO_DESDE, hasta: env.PROMO_HASTA } : null;
-/** Ventana del Buen Fin (#772); null si no esta configurada. La usan la venta del servidor y la caja (/api/vales/config). */
-export const buenFinDe = (env: Env) =>
-  env.BUENFIN_DESDE && env.BUENFIN_HASTA && Date.parse(env.BUENFIN_DESDE) < Date.parse(env.BUENFIN_HASTA)
-    ? { desde: env.BUENFIN_DESDE, hasta: env.BUENFIN_HASTA } : null;
+/**
+ * Ventana del Buen Fin (#772) para la tienda de la cuenta; null si no esta configurada o si esa tienda no la lleva.
+ * BUENFIN_TIENDAS (lista separada por comas) limita las tiendas; ausente = todas. La tienda sale de la cuenta de
+ * Access (tiendaDe), nunca del navegador. La usan la venta del servidor y la caja (/api/vales/config).
+ */
+export const buenFinDe = (env: Env, tienda: string) => {
+  if (!(env.BUENFIN_DESDE && env.BUENFIN_HASTA && Date.parse(env.BUENFIN_DESDE) < Date.parse(env.BUENFIN_HASTA))) return null;
+  const tiendas = (env.BUENFIN_TIENDAS ?? '').split(',').map((t) => t.trim()).filter(Boolean);
+  if (tiendas.length > 0 && !tiendas.includes(tienda)) return null;
+  return { desde: env.BUENFIN_DESDE, hasta: env.BUENFIN_HASTA };
+};
 /**
  * Cuantas promos quedan del cupo (Issue #250, «a las primeras 100 personas»); null sin PROMO_CUPO = sin tope.
  * Un ticket cancelado devuelve su lugar. Solo cuentan las ventas de la ventana vigente: las de una
