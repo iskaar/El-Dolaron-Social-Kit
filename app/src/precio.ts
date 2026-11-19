@@ -9,8 +9,14 @@ export type EstadoFisico = 'nuevo' | 'danado';
 /** Prefijo de una familia de banda: una o dos letras minusculas ('r', 'ju'). Vive en la tabla `familias`. */
 export type Familia = string;
 
-/** Once precios (39 y 69 desde el 31/10; 119 y 129 desde el 4/10, Issue #168), compartidos por todas las familias. Ver PLAN-ETIQUETAS-POR-BANDA.md. */
-export const MONTOS_BANDA = [19, 29, 39, 49, 69, 79, 99, 119, 129, 149, 199] as const;
+/** Once precios en multiplos de $10 (#869, 18/11/2026; antes 19...199), compartidos por todas las familias. Ver PLAN-ETIQUETAS-POR-BANDA.md. */
+export const MONTOS_BANDA = [20, 30, 40, 50, 70, 80, 100, 120, 130, 150, 200] as const;
+
+/**
+ * #869: los montos de antes del cambio. Ya no se imprimen ni se ofrecen para piezas nuevas, pero hay etiquetas
+ * viejas pegadas (R49, JU199...) que se siguen cobrando a su precio (config `banda_49` etc.) y piezas con ese destino.
+ */
+export const MONTOS_BANDA_ANTERIORES = [19, 29, 39, 49, 69, 79, 99, 119, 129, 149, 199] as const;
 
 export type Destino = 'etiqueta' | `banda_${string}`;
 
@@ -19,7 +25,9 @@ const BANDA = /^banda_([a-z]{1,2})(\d+)$/;
 /** Un destino de banda bien formado (p.ej. `banda_ju49`). Que la familia exista lo dice la tabla `familias`. */
 export function esDestinoBanda(destino: string): boolean {
   const m = BANDA.exec(destino);
-  return m !== null && (MONTOS_BANDA as readonly number[]).includes(Number(m[2]));
+  if (m === null) return false;
+  const monto = Number(m[2]);
+  return (MONTOS_BANDA as readonly number[]).includes(monto) || (MONTOS_BANDA_ANTERIORES as readonly number[]).includes(monto);
 }
 
 /** El codigo de barras impreso (p.ej. "JU79") a partir del destino de banda. */

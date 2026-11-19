@@ -111,19 +111,24 @@ test('codigoDeDestino da el codigo impreso de la banda, o nulo para etiqueta', (
   assert.equal(codigoDeDestino('etiqueta'), null);
 });
 
-test('destinos de banda: cualquier familia de 1 o 2 letras con uno de los nueve montos', () => {
-  assert.ok(esDestinoBanda('banda_r49'));
+test('destinos de banda: cualquier familia de 1 o 2 letras con un monto nuevo o anterior (#869)', () => {
+  assert.ok(esDestinoBanda('banda_r49'));        // etiqueta vieja: sigue valiendo
+  assert.ok(esDestinoBanda('banda_r50'));
   assert.ok(esDestinoBanda('banda_r119'));
+  assert.ok(esDestinoBanda('banda_r120'));
   assert.ok(esDestinoBanda('banda_ju129'));
+  assert.ok(esDestinoBanda('banda_ju130'));
   assert.ok(esDestinoBanda('banda_ju199'));
-  assert.ok(!esDestinoBanda('banda_ju50'));      // monto que no es de banda
-  assert.ok(!esDestinoBanda('banda_ju139'));     // ni entre 129 y 149
-  assert.equal(codigoDeDestino('banda_ju119'), 'JU119');
-  assert.equal(ajustarManual({ precio: 123, destino: 'banda_ju129', config: {} }), 12900);
-  assert.ok(!esDestinoBanda('banda_abc49'));     // prefijo de 3 letras
+  assert.ok(esDestinoBanda('banda_ju200'));
+  assert.ok(!esDestinoBanda('banda_r55'));       // monto que no es de banda
+  assert.ok(!esDestinoBanda('banda_ju139'));     // ni entre 130 y 150
+  assert.equal(codigoDeDestino('banda_ju120'), 'JU120');
+  assert.equal(ajustarManual({ precio: 123, destino: 'banda_ju130', config: {} }), 13000);
+  assert.ok(!esDestinoBanda('banda_abc50'));     // prefijo de 3 letras
   assert.ok(!esDestinoBanda('etiqueta'));
-  assert.equal(codigoDeDestino('banda_ju79'), 'JU79');
-  assert.equal(ajustarManual({ precio: 123, destino: 'banda_ju49', config: {} }), 4900);
+  assert.equal(codigoDeDestino('banda_ju80'), 'JU80');
+  assert.equal(ajustarManual({ precio: 123, destino: 'banda_ju50', config: {} }), 5000);
+  assert.equal(ajustarManual({ precio: 123, destino: 'banda_ju49', config: {} }), 4900);   // la vieja conserva su precio
 });
 
 test('prefijoParaFamilia: dos primeras letras, y cuando estan ocupadas la primera y la siguiente libre', () => {

@@ -83,7 +83,7 @@ quiera etiquetar sin foto, ni análisis, va con una banda (§2).
 
 Detalle completo en `docs/PLAN-ETIQUETAS-POR-BANDA.md`. Resumen:
 
-- Productos fijos en el POS — nueve precios ($19/$29/$49/$79/$99/$119/$129/$149/$199, desde el 4/10) ×
+- Productos fijos en el POS — once precios ($20/$30/$40/$50/$70/$80/$100/$120/$130/$150/$200; actualizado 2026-11-18, Isaac, #869: antes $19 … $199, cuyas etiquetas viejas se siguen cobrando a su precio) ×
   las familias de banda (hoy 18, ver `PLAN-ETIQUETAS-POR-BANDA.md`). Sus catorce códigos de barras viven en una tarjeta
   laminada junto a la caja, como respaldo si el código pegado en la pieza no escanea.
 - Impresión por lote desde `/bandas`, no por pieza: se elige cuántas etiquetas de una

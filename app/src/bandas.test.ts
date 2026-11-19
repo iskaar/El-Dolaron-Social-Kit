@@ -1,19 +1,20 @@
 // node --test src/bandas.test.ts
-// Los nueve montos de banda (Issue #168): lo que dan las migraciones y lo que crea una familia nueva.
+// Los montos de banda (Issues #168 y #869): lo que dan las migraciones y lo que crea una familia nueva.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda } from './prueba-d1.ts';
 
-const MONTOS = [19, 29, 39, 49, 69, 79, 99, 119, 129, 149, 199];
+const MONTOS = [20, 30, 40, 50, 70, 80, 100, 120, 130, 150, 200];
+const ANTERIORES = [19, 29, 39, 49, 69, 79, 99, 119, 129, 149, 199];
 
-test('/api/familias ofrece los once montos y cada familia sembrada tiene sus once productos', async () => {
+test('/api/familias ofrece los once montos nuevos y cada familia sembrada tiene los nuevos y los de antes', async () => {
   const { db, pedir } = tienda();
   const { montos, familias } = (await pedir('/api/familias')).cuerpo;
   assert.deepEqual(montos, MONTOS);
   assert.equal(familias.length, 18);
 
   for (const f of familias as { nombre: string; prefijo: string }[]) {
-    for (const monto of MONTOS) {
+    for (const monto of [...ANTERIORES, ...MONTOS]) {
       const p = db.prepare('select nombre, precio, destino, stock, sin_inventario from productos where codigo = ?')
         .get(`${f.prefijo.toUpperCase()}${monto}`) as Record<string, unknown> | undefined;
       assert.ok(p, `falta ${f.prefijo.toUpperCase()}${monto}`);
@@ -23,7 +24,27 @@ test('/api/familias ofrece los once montos y cada familia sembrada tiene sus onc
       assert.equal(p.stock, 0);
     }
   }
-  assert.equal((db.prepare(`select count(*) as n from productos where destino like 'banda_%'`).get() as { n: number }).n, 18 * 11);
+  assert.equal((db.prepare(`select count(*) as n from productos where destino like 'banda_%'`).get() as { n: number }).n, 18 * 22);
+});
+
+// #869: las etiquetas viejas impresas se respetan, y los montos nuevos se cobran a su precio.
+test('un R49 viejo se sigue cobrando a $49 y el R50 nuevo a $50; los destinos viejos y nuevos valen, uno intermedio no', async () => {
+  const { db, pedir, como } = conFamiliaFep();
+  como(CAJERO);
+  const fila = (codigo: string) => db.prepare('select id, precio, destino from productos where codigo = ?').get(codigo) as { id: string; precio: number; destino: string };
+  assert.equal(fila('R49').precio, 4900);
+  assert.equal(fila('R50').precio, 5000);
+  assert.equal(fila('R50').destino, 'banda_r50');
+  const r = await pedir('/api/ventas', { id: crypto.randomUUID(), caja: 'Caja 1', forma_pago: 'efectivo', efectivo: 10000,
+    lineas: [{ producto_id: fila('R49').id, cantidad: 1 }, { producto_id: fila('R50').id, cantidad: 1 }] });
+  assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
+  const lineas = db.prepare('select codigo, precio from venta_lineas order by codigo').all() as { codigo: string; precio: number }[];
+  assert.deepEqual(lineas.map((l) => [l.codigo, l.precio]), [['R49', 4900], ['R50', 5000]]);
+
+  como(DUENO);
+  for (const [destino, status] of [['banda_r49', 200], ['banda_r50', 200], ['banda_r55', 400]] as const) {
+    assert.equal((await pedir(`/api/borradores/${PRODUCTO}`, { destino }, 'PATCH')).status, status, destino);
+  }
 });
 
 test('la migracion 024 es repetible: correrla otra vez no duplica nada', async () => {
@@ -35,16 +56,16 @@ test('la migracion 024 es repetible: correrla otra vez no duplica nada', async (
   assert.equal((db.prepare(`select valor from config where clave = 'banda_119'`).get() as { valor: string }).valor, '11900');
 });
 
-test('una familia nueva nace con los nueve montos, y el precio de la configuracion manda', async () => {
+test('una familia nueva nace solo con los montos nuevos, y el precio de la configuracion manda', async () => {
   const { db, pedir } = tienda();
-  db.prepare(`update config set valor = '12500' where clave = 'banda_129'`).run();
+  db.prepare(`update config set valor = '12500' where clave = 'banda_130'`).run();
   const r = await pedir('/api/familias', { nombre: 'Termos' });
   assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
   const filas = db.prepare(`select codigo, precio from productos where destino like ? order by precio`)
     .all(`banda_${r.cuerpo.prefijo}%`) as { codigo: string; precio: number }[];
   assert.equal(filas.length, 11);
-  assert.ok(filas.some((f) => f.codigo === `${r.cuerpo.prefijo.toUpperCase()}119`));
-  assert.equal(filas.find((f) => f.codigo.endsWith('129'))?.precio, 12500);
+  assert.ok(filas.some((f) => f.codigo === `${r.cuerpo.prefijo.toUpperCase()}120`));
+  assert.equal(filas.find((f) => f.codigo.endsWith('130'))?.precio, 12500);
 });
 
 // Familias de FEP (#694): cada propietario tiene las suyas y sus bandas se venden a su nombre.
@@ -119,12 +140,12 @@ test('una pieza solo puede ir a una banda de una familia de su propietario', asy
   const aBandaTienda = await pedir(`/api/borradores/${FEP_ID}`, { destino: 'banda_r49' }, 'PATCH');
   assert.equal(aBandaTienda.status, 400, JSON.stringify(aBandaTienda.cuerpo));
   assert.equal(destino(FEP_ID), 'etiqueta');
-  const aBandaPropia = await pedir(`/api/borradores/${FEP_ID}`, { destino: `banda_${fep.prefijo}49` }, 'PATCH');
+  const aBandaPropia = await pedir(`/api/borradores/${FEP_ID}`, { destino: `banda_${fep.prefijo}50` }, 'PATCH');
   assert.equal(aBandaPropia.status, 200, JSON.stringify(aBandaPropia.cuerpo));
-  assert.equal(destino(FEP_ID), `banda_${fep.prefijo}49`);
+  assert.equal(destino(FEP_ID), `banda_${fep.prefijo}50`);
 
   como(DUENO);
-  const aBandaFep = await pedir(`/api/borradores/${PRODUCTO}`, { destino: `banda_${fep.prefijo}49` }, 'PATCH');
+  const aBandaFep = await pedir(`/api/borradores/${PRODUCTO}`, { destino: `banda_${fep.prefijo}50` }, 'PATCH');
   assert.equal(aBandaFep.status, 400, JSON.stringify(aBandaFep.cuerpo));
   assert.equal(destino(PRODUCTO), 'etiqueta');
   assert.equal((await pedir(`/api/borradores/${PRODUCTO}`, { destino: 'banda_r49' }, 'PATCH')).status, 200);
@@ -137,10 +158,10 @@ test('vender el código de una banda de FEP registra la línea como de FEP; la d
   como(CAJERO);
   const id = (codigo: string) => (db.prepare('select id from productos where codigo = ?').get(codigo) as { id: string }).id;
   const venta = { id: crypto.randomUUID(), caja: 'Caja 1', forma_pago: 'efectivo', efectivo: 10000,
-    lineas: [{ producto_id: id(`${fep.prefijo.toUpperCase()}49`), cantidad: 1 }, { producto_id: id('R49'), cantidad: 1 }] };
+    lineas: [{ producto_id: id(`${fep.prefijo.toUpperCase()}50`), cantidad: 1 }, { producto_id: id('R50'), cantidad: 1 }] };
   const r = await pedir('/api/ventas', venta);
   assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
   const lineas = db.prepare('select codigo, propietario from venta_lineas order by codigo').all() as { codigo: string; propietario: string }[];
-  assert.equal(lineas.find((l) => l.codigo === `${fep.prefijo.toUpperCase()}49`)?.propietario, 'fep');
-  assert.equal(lineas.find((l) => l.codigo === 'R49')?.propietario, 'dolaron');
+  assert.equal(lineas.find((l) => l.codigo === `${fep.prefijo.toUpperCase()}50`)?.propietario, 'fep');
+  assert.equal(lineas.find((l) => l.codigo === 'R50')?.propietario, 'dolaron');
 });

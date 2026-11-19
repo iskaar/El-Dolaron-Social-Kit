@@ -21,6 +21,14 @@
 > **La caja ya no tiene botones de banda**: todo se escanea como un producto normal, y si el
 > código no lee se busca en la caja por descripción («juguetes 49») o por código.
 
+> **Actualizado 2026-11-18 (Isaac, #869): bandas en múltiplos de $10.** Los once montos vigentes son
+> **20, 30, 40, 50, 70, 80, 100, 120, 130, 150 y 200** (+$1 a cada uno de los de abajo). Los montos
+> anteriores (19 … 199) **ya no se imprimen** en `/bandas`, ni salen en la tarjeta laminada, ni se ofrecen
+> como destino nuevo ni a las familias nuevas; pero una etiqueta vieja ya pegada (R49, JU199…) **se sigue
+> cobrando a su precio** (`banda_49` etc. en config, sin tocar) hasta que la reetiqueten, y las piezas con
+> destino `banda_r49` siguen siendo válidas. Las familias existentes reciben los productos nuevos con
+> `app/migracion-085-bandas-base-10.sql`. Los montos citados abajo son históricos.
+
 > **Actualización 2026-10-04 (Isaac): $119 y $129.** Los montos pasan de siete a **nueve**
 > (19, 29, 49, 79, 99, 119, 129, 149, 199) para todas las familias. Las familias existentes
 > reciben sus dos productos nuevos con `app/migracion-024-bandas-119-129.sql` (Issue #168);
