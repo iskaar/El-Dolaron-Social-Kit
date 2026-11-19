@@ -154,6 +154,8 @@ Comprobación: la ISB a $949 recibió $636.25 en Seller Center (comisión $142.3
 | $499 | 84.0 | 295.0 | Banda muerta |
 | $519 | 84.0 | 310.2 | Recupera |
 
+> **Actualizado 2026-11-18 (Isaac, #871):** el precio de una pieza en catálogo ya no se quiebra a X9 ni esquiva estas bandas: es el precio de referencia de Mercado Libre menos 20 % o más (`ml_descuento_referencia`), redondeado al peso; sin referencia, tienda + `ml_pct` también al peso. La tabla sigue sirviendo para entender el neto, no como regla de redondeo. Ver [MERCADOLIBRE.md](MERCADOLIBRE.md), paso «Precio».
+
 Recomendación: `ml_precio_minimo` = **$329** (neto ≈ 56 %); el $349 que propone #522 es equivalente en la práctica (+$15 de neto). Si Isaac quiere probar ropa ligera, puede bajar el mínimo a $199 en la configuración y vigilar el neto que #522 mostrará; esa ventana solo vale sin envío gratis y hasta $289.
 
 **La regla +20 % por separado.** Los costos de ML son ≈ 24 % del precio más $41–$84 fijos; con +20 % el neto es 0.91 × precio de tienda − envío, es decir, 64 % del precio de tienda en $299, 68 % en $349 y 80 % en $949. Empatar el precio de tienda exigiría +61 % en una pieza de $300 y +45 % en una de $800, fuera de lo que paga un comprador que compara en el listado. La regla se queda en +20 % como piso competitivo, con tres ajustes: el mínimo de $329, el quebrado que esquive las bandas muertas y el neto a la vista (#522). En términos de tienda: con +20 % conviene publicar piezas **desde ~$275 de precio de tienda**; la mediana del catálogo (~$100) no es publicable.

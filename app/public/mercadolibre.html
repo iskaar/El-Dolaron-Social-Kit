@@ -276,6 +276,8 @@ function formularioConfig() {
   const tipo = h('select', { id: 'cfg-tipo' },
     Object.entries(TIPOS).filter(([k]) => k !== 'free' || actual === 'free')
       .map(([k, texto]) => h('option', { value: k, selected: k === actual }, texto)));
+  const descuento = h('input', { id: 'cfg-descuento', type: 'number', min: 20, max: 90, step: 1, inputMode: 'numeric',
+    value: String(estado.config?.ml_descuento_referencia ?? 20) });
   const mensaje = h('span', { class: 'nota', role: 'status', 'aria-live': 'polite' });
   const guardar = h('button', { type: 'submit' }, 'Guardar');
   return h('form', {
@@ -287,8 +289,13 @@ function formularioConfig() {
         mensaje.textContent = 'El recargo debe ser un número entero entre 0 y 300.';
         return;
       }
+      const d = Number(descuento.value);
+      if (descuento.value.trim() === '' || !Number.isInteger(d) || d < 20 || d > 90) {
+        mensaje.textContent = 'El descuento sobre la referencia debe ser un número entero entre 20 y 90.';
+        return;
+      }
       guardar.disabled = true;
-      const r = await api('/api/ml/config', { metodo: 'PUT', cuerpo: { ml_pct: n, ml_tipo_publicacion: tipo.value } });
+      const r = await api('/api/ml/config', { metodo: 'PUT', cuerpo: { ml_pct: n, ml_descuento_referencia: d, ml_tipo_publicacion: tipo.value } });
       guardar.disabled = false;
       if (r.ok && r.datos) {
         estado.config = r.datos;
@@ -296,7 +303,8 @@ function formularioConfig() {
       } else mensaje.textContent = textoError(r, 'No se pudo guardar.');
     },
   },
-  h('label', { htmlFor: 'cfg-pct' }, 'Recargo sobre el precio de tienda (%)', pct),
+  h('label', { htmlFor: 'cfg-descuento' }, 'Descuento bajo el precio de referencia de ML (%, mínimo 20)', descuento),
+  h('label', { htmlFor: 'cfg-pct' }, 'Recargo sobre el precio de tienda, si ML no da referencia (%)', pct),
   h('label', { htmlFor: 'cfg-tipo' }, 'Tipo de publicación', tipo),
   guardar, mensaje);
 }
@@ -515,6 +523,7 @@ function filaPieza(item) {
     const k = String(pub.estado ?? '').toLowerCase();
     if (['activa', 'active'].includes(k)) acciones.append(botonCambio(p, 'pausar', 'Pausar'));
     if (esPausada(pub.estado)) acciones.append(botonCambio(p, 'reactivar', 'Reactivar', sinPiso && motivoPiso));
+    if (pub.ml_item_id && (['activa', 'active'].includes(k) || esPausada(pub.estado))) acciones.append(botonReferencia(p, info));
   }
   if (publicable) {
     acciones.append(h('button', { type: 'button', class: 'primario', onclick: () => abrirPublicar(p), disabled: sinPiso, title: sinPiso ? motivoPiso : null },
@@ -523,6 +532,40 @@ function filaPieza(item) {
   return h('div', { class: 'pieza' },
     h('img', { src: `/api/foto/${encodeURIComponent(p.id)}`, alt: `Foto de ${p.nombre}`, loading: 'lazy', width: 72, height: 72 }),
     info, acciones);
+}
+
+// #871: lo que Mercado Libre recomienda cobrar por una publicación; cambiar el precio es otro toque, uno por publicación.
+function botonReferencia(p, info) {
+  const salida = h('div', { class: 'nota', role: 'status', 'aria-live': 'polite', style: 'margin-top:6px' });
+  info.append(salida);
+  return h('button', {
+    type: 'button',
+    onclick: async (e) => {
+      const boton = e.currentTarget;
+      boton.disabled = true;
+      salida.replaceChildren('Consultando a Mercado Libre…');
+      const r = await api(`/api/ml/precio-referencia/${encodeURIComponent(p.id)}`);
+      boton.disabled = false;
+      const d = r.datos;
+      if (!r.ok || !d) return salida.replaceChildren(textoError(r, 'No se pudo consultar el precio de referencia.'));
+      if (d.referencia == null) return salida.replaceChildren(d.mensaje ?? 'Mercado Libre no tiene precio de referencia para esta publicación.');
+      salida.replaceChildren(
+        `Referencia de Mercado Libre: ${pesos(d.referencia)} · tu precio ahora: ${pesos(d.precio_actual)} · propuesto (−${d.descuento} %): ${pesos(d.propuesto)}`,
+        d.aplicable === false ? h('div', {}, 'Mercado Libre marca esta referencia como no aplicable a la publicación: revísala antes de aplicar.') : null,
+        d.propuesto < p.precio ? h('div', {}, `⚠ Queda por debajo del precio de tienda (${pesos(p.precio)}).`) : null,
+        d.propuesto === d.precio_actual ? h('div', {}, 'Ya cobras ese precio.') : h('button', {
+          type: 'button', style: 'margin-top:6px',
+          onclick: async (ev) => {
+            const aplicar = ev.currentTarget;
+            if (!confirm(`¿Cambiar el precio en Mercado Libre de ${pesos(d.precio_actual)} a ${pesos(d.propuesto)}?`)) return;
+            aplicar.disabled = true;
+            const a = await api(`/api/ml/precio/${encodeURIComponent(p.id)}`, { metodo: 'POST', cuerpo: { precio_ml: d.propuesto } });
+            if (a.ok && a.datos?.publicacion) { actualizarFila(p.id, a.datos.publicacion); aviso(`Precio actualizado en Mercado Libre: ${pesos(d.propuesto)}.`); }
+            else { aplicar.disabled = false; aviso(textoError(a, 'No se pudo cambiar el precio.'), true); }
+          },
+        }, `Aplicar ${pesos(d.propuesto)}`));
+    },
+  }, 'Precio de referencia');
 }
 
 function botonCambio(p, accion, texto, bloqueado = false) {
@@ -614,9 +657,16 @@ function cargarPropuesta(respuesta, conservar) {
   prop = respuesta.propuesta;
   p = respuesta.producto ?? p;
   const antes = f?.attr ?? {};
+  // #871: el precio sale de la referencia de ML; solo se respeta lo que gerencia escribió a mano.
+  const propia = prop.precio_referencia != null;
+  const toma = !conservar || (propia && !f.precioEditado);
+  const refDe = propia ? { referencia: prop.precio_referencia, origen: prop.origen_referencia, producto: prop.producto_referencia, descuento: prop.descuento_referencia } : null;
   f = {
     titulo: conservar ? f.titulo : prop.titulo ?? '',
-    precio: conservar ? f.precio : centavosATexto(prop.precio_ml ?? p.precio),
+    precio: toma ? centavosATexto(prop.precio_ml ?? p.precio) : f.precio,
+    precioEditado: conservar ? f.precioEditado : false,
+    ref: toma ? refDe : f.ref,
+    avisoRef: toma ? '' : f.avisoRef,
     descripcion: conservar ? f.descripcion : '',
     categoria_id: prop.categoria_id,
     attr: Object.fromEntries((prop.atributos ?? []).map((a) => [a.id, antes[a.id] ?? prellenar(a)])),
@@ -755,7 +805,7 @@ function revisar() {
   ref.contador.textContent = `${f.titulo.length}/60`;
   const c = aCentavos(f.precio);
   ref.precioNota.textContent = c
-    ? `Precio en tienda ${pesos(p.precio)} · diferencia ${p.precio > 0 ? ((c - p.precio) * 100 / p.precio).toFixed(1) : '—'}%`
+    ? `Precio en tienda ${pesos(p.precio)} · diferencia ${p.precio > 0 ? ((c - p.precio) * 100 / p.precio).toFixed(1) : '—'}%${p.precio > 0 && c < p.precio ? ' · ⚠ por debajo del precio de tienda' : ''}`
     : `Precio en tienda ${pesos(p.precio)}`;
   const falta = faltante();
   ref.enviar.disabled = ref.enviando || falta.length > 0;
@@ -777,7 +827,18 @@ function pintarCatalogo() {
   const caja = (...hijos) => h('fieldset', {}, h('legend', {}, 'Catálogo de Mercado Libre'), buscador, ...hijos);
   if (c.error) return caja(h('div', { class: 'aviso' }, c.error));
   if (!c.candidatos.length) return caja(h('div', { class: 'nota' }, 'No hay productos de catálogo parecidos a esta pieza.'));
-  const elegir = (id) => { f.catalogo_id = id; pintarFormulario(); };
+  // #871: al elegir un producto se pide su referencia; el precio cambia solo si gerencia no lo escribió a mano.
+  const elegir = async (id) => {
+    f.catalogo_id = id;
+    pintarFormulario();
+    if (!id) return;
+    const r = await api(`/api/ml/referencia?producto=${encodeURIComponent(id)}&pieza=${encodeURIComponent(p.id)}`);
+    if (!dialogo.open || !f || f.catalogo_id !== id || !r.ok || !r.datos) return;
+    f.ref = r.datos.referencia != null ? { referencia: r.datos.referencia, origen: r.datos.origen, producto: id, descuento: r.datos.descuento } : null;
+    f.avisoRef = r.datos.aviso ?? '';
+    if (!f.precioEditado) f.precio = centavosATexto(r.datos.precio_propuesto);
+    pintarFormulario();
+  };
   const opcion = (id, ...contenido) => h('label', { style: 'display:flex;gap:10px;align-items:center;margin-bottom:8px;cursor:pointer' },
     h('input', { type: 'radio', name: 'catalogo', checked: (f.catalogo_id ?? '') === id, onchange: () => elegir(id) }), ...contenido);
   return caja(
@@ -812,8 +873,16 @@ function pintarFormulario() {
   const filaBusqueda = h('div', { style: 'display:flex;gap:8px' }, ref.busqueda,
     h('button', { type: 'button', onclick: buscar }, 'Buscar'));
   const precio = h('input', { type: 'text', inputMode: 'decimal', value: f.precio, required: true, autocomplete: 'off',
-    oninput: (e) => { f.precio = e.target.value; revisar(); } });
+    oninput: (e) => { f.precio = e.target.value; f.precioEditado = true; revisar(); } });
   ref.precioNota = h('div', { class: 'nota' });
+  const origenRef = { buy_box: 'la publicación que gana la página del producto', publicaciones: 'la publicación activa más barata del producto' };
+  const notaReferencia = f.ref
+    ? h('div', { class: 'nota', style: 'margin-bottom:8px' },
+      `Referencia de Mercado Libre: ${pesos(f.ref.referencia)} (${origenRef[f.ref.origen] ?? 'su precio'}, ${f.ref.producto}). Propuesto: referencia −${f.ref.descuento} %.`)
+    : null;
+  // Con referencia (la de la propuesta o la del producto elegido) ya no aplica el aviso de «sin referencia».
+  const avisosPropuesta = (prop.avisos ?? []).filter((t) => !(f.ref || f.avisoRef) || !/precio de referencia/.test(t));
+  if (f.avisoRef) avisosPropuesta.push(f.avisoRef);
   const descripcion = h('textarea', { value: f.descripcion, maxLength: 5000,
     oninput: (e) => { f.descripcion = e.target.value; } });
   ref.falta = h('span', { class: 'falta', 'aria-live': 'polite' });
@@ -829,7 +898,7 @@ function pintarFormulario() {
       h('img', { class: 'foto-dialogo', src: `/api/foto/${encodeURIComponent(p.id)}`, alt: `Foto de ${p.nombre}`, width: 88, height: 88 }),
       h('div', {}, h('div', { style: 'font-weight:700;overflow-wrap:anywhere' }, p.nombre),
         h('div', { class: 'nota' }, [p.codigo, p.marca].filter(Boolean).join(' · ')))),
-    ...(prop.avisos ?? []).map((t) => h('div', { class: 'aviso', role: 'alert', style: 'margin-bottom:12px' }, t)),
+    ...avisosPropuesta.map((t) => h('div', { class: 'aviso', role: 'alert', style: 'margin-bottom:12px' }, t)),
     prop.fotos_extra && !f.catalogo_id ? h('div', { class: 'nota', style: 'margin-bottom:12px' },
       `📷 Se suben ${prop.fotos_extra + 1} fotos: ${prop.fotos_extra} adicional${prop.fotos_extra === 1 ? '' : 'es'} (la primera es la miniatura) y la foto de la pieza al final.`) : null,
     ref.pendientes,
@@ -842,6 +911,7 @@ function pintarFormulario() {
     campo('Categoría', ref.categoria, { ayuda: 'Si la categoría no es la correcta, cámbiala: se recargan los atributos.' }),
     h('div', { class: 'campo' }, h('label', { htmlFor: 'buscar-categoria' }, 'Buscar categoría'), filaBusqueda,
       h('div', { class: 'nota' }, 'Describe la pieza con otras palabras y Mercado Libre sugiere categorías.')),
+    notaReferencia,
     campo('Precio en Mercado Libre (pesos)', precio, { requerido: true }),
     ref.precioNota,
     // #189: comparar con la competencia antes de subirla.
