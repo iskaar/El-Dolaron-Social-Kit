@@ -58,15 +58,6 @@ export function prefijoParaFamilia(nombre: string, ocupados: Set<string>): strin
 const REDONDEO = 500; // $5 MXN
 
 /**
- * Quiebra la decena: redondea al multiplo de $10 mas cercano y resta $1 ($233 ->
- * $229, $235 -> $239), minimo $9. Desde #868 ya no la usan las etiquetas, solo
- * Mercado Libre (precioML), que sigue en X9.
- */
-export function quebrarDecena(centavos: number): number {
-  return centavos <= 0 ? 0 : Math.max(900, Math.floor((centavos + 500) / 1000) * 1000 - 100);
-}
-
-/**
  * Precio de etiqueta: multiplo de $10 mas cercano (de $5 en adelante sube),
  * minimo $10 para que una pieza barata no quede en $0 (#868).
  */

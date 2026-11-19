@@ -14,7 +14,6 @@
  * - Dinero en centavos MXN; a ML se manda en pesos.
  */
 
-import { quebrarDecena } from './precio.ts';
 import { correoADuenos } from './avisos.ts';
 import { sugerirAtributos, base64 } from './analisis.ts';
 import { tallaUs } from '../public/tallas.js';
@@ -160,13 +159,18 @@ const leerCuenta = (env: Env) => env.DB.prepare('select * from ml_cuenta where i
 const conectada = (c: FilaCuenta | null): c is FilaCuenta => !!c?.refresh_token_cifrado;
 const faltantes = (env: Env) => FALTANTES.filter((nombre) => !env[nombre]);
 
-async function config(env: Env): Promise<{ ml_pct: number; ml_tipo_publicacion: string }> {
-  const { results } = await env.DB.prepare(`select clave, valor from config where clave in ('ml_pct', 'ml_tipo_publicacion')`)
+const DESCUENTO_MINIMO = 20;              // #871: bajo la referencia de ML siempre se baja al menos 20 %
+const DESCUENTO_MAXIMO = 90;
+
+async function config(env: Env): Promise<{ ml_pct: number; ml_tipo_publicacion: string; ml_descuento_referencia: number }> {
+  const { results } = await env.DB.prepare(`select clave, valor from config where clave in ('ml_pct', 'ml_tipo_publicacion', 'ml_descuento_referencia')`)
     .all<{ clave: string; valor: string }>();
   const mapa = Object.fromEntries(results.map((f) => [f.clave, f.valor]));
   const pct = Number.parseInt(mapa.ml_pct ?? '', 10);
+  const descuento = Number.parseInt(mapa.ml_descuento_referencia ?? '', 10);
   return {
     ml_pct: Number.isFinite(pct) && pct >= 0 ? pct : 20,
+    ml_descuento_referencia: Number.isInteger(descuento) && descuento >= DESCUENTO_MINIMO && descuento <= DESCUENTO_MAXIMO ? descuento : DESCUENTO_MINIMO,
     ml_tipo_publicacion: TIPOS_PUBLICACION.includes(mapa.ml_tipo_publicacion) ? mapa.ml_tipo_publicacion : 'gold_special',
   };
 }
@@ -365,10 +369,36 @@ async function piezaPublicable(env: Env, id: string): Promise<{ ok: true; pieza:
   return { ok: true, pieza: p };
 }
 
-/** precio de tienda + ml_pct %, quebrado a X9 como el de la tienda, nunca menos de $35. */
+/** Al peso (100 centavos), sin X9 (#871), nunca menos de $35. */
+const alPeso = (c: number) => Math.max(PRECIO_MINIMO, Math.round(c / 100) * 100);
+
+/** Respaldo sin referencia de ML: precio de tienda + ml_pct %, al peso. */
 export function precioML(precio: number, pct: number): number {
-  return Math.max(PRECIO_MINIMO, quebrarDecena(Math.round((precio * (100 + pct)) / 100)));
+  return alPeso((precio * (100 + pct)) / 100);
 }
+
+/** Referencia de ML menos `descuentoPct` %, al peso, nunca menos de $35 (#871). */
+export function precioDesdeReferencia(referencia: number, descuentoPct: number): number {
+  return alPeso((referencia * (100 - descuentoPct)) / 100);
+}
+
+/**
+ * Lo que ML da como precio de un producto de catalogo (#871): el de quien gana la buy box
+ * (GET /products/{id} -> buy_box_winner.price) o, si no hay ganador, el menor de sus
+ * publicaciones (GET /products/{id}/items -> results[].price). Null si ML no da ninguno o lo niega.
+ */
+export async function referenciaCatalogo(env: Env, productoId: string): Promise<{ centavos: number; origen: 'buy_box' | 'publicaciones' } | null> {
+  const ganador = await mlPublico(env, `/products/${productoId}`).catch(() => null);
+  const enBuyBox = centavos(ganador?.buy_box_winner?.price);
+  if (enBuyBox && (ganador.buy_box_winner.currency_id ?? 'MXN') === 'MXN') return { centavos: enBuyBox, origen: 'buy_box' };
+  // ponytail: este segundo recurso no pudo confirmarse en la documentacion; se lee con tolerancia y cualquier falla cuenta como "sin referencia".
+  const r = await mlPublico(env, `/products/${productoId}/items`).catch(() => null);
+  const lista: any[] = Array.isArray(r?.results) ? r.results : Array.isArray(r) ? r : [];
+  const precios = lista.filter((x) => (x?.currency_id ?? 'MXN') === 'MXN').map((x) => centavos(x?.price)).filter((c): c is number => !!c);
+  return precios.length ? { centavos: Math.min(...precios), origen: 'publicaciones' } : null;
+}
+
+const pesosTexto = (c: number) => `$${(c / 100).toLocaleString('es-MX', { minimumFractionDigits: c % 100 ? 2 : 0 })}`;
 
 /** Titulo para ML: sin signos de puntuacion, con la marca, de 60 caracteres como mucho. */
 export function tituloML(nombre: string, marca: string): string {
@@ -520,8 +550,15 @@ async function guia(env: Env, orden: string, url: URL): Promise<Response> {
 }
 
 async function guardarConfig(request: Request, env: Env): Promise<Response> {
-  const cuerpo = (await request.json().catch(() => ({}))) as { ml_pct?: unknown; ml_tipo_publicacion?: unknown };
+  const cuerpo = (await request.json().catch(() => ({}))) as { ml_pct?: unknown; ml_tipo_publicacion?: unknown; ml_descuento_referencia?: unknown };
   const cambios: [string, string][] = [];
+  if (cuerpo.ml_descuento_referencia !== undefined) {
+    const d = Number(cuerpo.ml_descuento_referencia);
+    if (!Number.isInteger(d) || d < DESCUENTO_MINIMO || d > DESCUENTO_MAXIMO) {
+      return json({ error: `El descuento sobre la referencia debe ser un entero entre ${DESCUENTO_MINIMO} y ${DESCUENTO_MAXIMO}.` }, 400);
+    }
+    cambios.push(['ml_descuento_referencia', String(d)]);
+  }
   if (cuerpo.ml_pct !== undefined) {
     const pct = Number(cuerpo.ml_pct);
     if (!Number.isInteger(pct) || pct < 0 || pct > 300) return json({ error: 'El porcentaje debe ser un entero entre 0 y 300.' }, 400);
@@ -934,7 +971,7 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
 
   try {
     const perfil = await perfilML(env);
-    const { ml_pct, ml_tipo_publicacion } = await config(env);
+    const { ml_pct, ml_tipo_publicacion, ml_descuento_referencia } = await config(env);
     const avisos: string[] = await avisosDuplicado(env, p);
 
     const consulta =buscada || tituloML(p.nombre, p.marca) || p.nombre;
@@ -994,10 +1031,21 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
     // Lo que no es ropa puede ir al catalogo con fotos oficiales; la ropa, con fotos propias.
     const catalogo = p.categoria !== 'ropa' ? await candidatosCatalogo(env, enCatalogo || consulta) : null;
 
-    const precio = precioML(p.precio, ml_pct);
-    if (p.precio > 0 && Math.round((p.precio * (100 + ml_pct)) / 100) < PRECIO_MINIMO) {
+    // #871: con un producto de catalogo seguro (el unico candidato) el precio sale de la referencia de ML;
+    // con varios, el cliente la pide al elegir uno (GET /api/ml/referencia). Sin referencia: tienda + ml_pct, al peso.
+    const respaldo = precioML(p.precio, ml_pct);
+    const unico = catalogo?.candidatos.length === 1 ? catalogo.candidatos[0].id : '';
+    const referencia = unico ? await referenciaCatalogo(env, unico) : null;
+    const precio = referencia ? precioDesdeReferencia(referencia.centavos, ml_descuento_referencia) : respaldo;
+    if (!referencia) {
+      avisos.push(catalogo && catalogo.candidatos.length > 1
+        ? `Elige el producto del catálogo para tomar su precio de referencia; mientras, el precio sale del de tienda + ${ml_pct} %.`
+        : `Mercado Libre no dio precio de referencia; el precio sale del de tienda + ${ml_pct} %. Revísalo con «Ver precios».`);
+    }
+    if (p.precio > 0 && Math.round(referencia ? (referencia.centavos * (100 - ml_descuento_referencia)) / 100 : (p.precio * (100 + ml_pct)) / 100) < PRECIO_MINIMO) {
       avisos.push('El precio queda por debajo del mínimo de Mercado Libre ($35); se subió a $35.');
     }
+    if (p.precio > 0 && precio < p.precio) avisos.push(`El precio propuesto (${pesosTexto(precio)}) queda por debajo del de tienda (${pesosTexto(p.precio)}).`);
     if (!p.marca.trim()) avisos.push('La pieza no tiene marca: casi todas las categorías de ropa la piden.');
     else if (MARCAS_RESTRINGIDAS.includes(p.marca.trim().toLowerCase())) {
       avisos.push(`${p.marca} es una marca restringida en México: solo la venden tiendas oficiales o vendedores acreditados; Mercado Libre puede rechazar o dar de baja la publicación.`);
@@ -1024,6 +1072,11 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
         consulta,
         catalogo,
         precio_ml: precio,
+        precio_respaldo: respaldo,
+        precio_referencia: referencia?.centavos ?? null,
+        producto_referencia: referencia ? unico : null,
+        origen_referencia: referencia?.origen ?? null,
+        descuento_referencia: ml_descuento_referencia,
         tipo_publicacion: ml_tipo_publicacion,
         atributos,
         guia_tallas: guia,
@@ -1034,6 +1087,85 @@ async function preparar(env: Env, id: string, request: Request): Promise<Respons
   } catch (error) {
     return respuestaError(error, 'No se pudo preparar la publicación.');
   }
+}
+
+/* ---------- precio de referencia (#871) ---------- */
+
+/**
+ * GET /api/ml/referencia?producto=MLM...&pieza=<id>: la referencia de ML para el producto de catalogo que
+ * eligio el dueno y el precio que saldria. Sin referencia: respaldo y `aviso`.
+ */
+async function referenciaDeProducto(env: Env, url: URL): Promise<Response> {
+  const producto = url.searchParams.get('producto') ?? '';
+  const id = url.searchParams.get('pieza') ?? '';
+  if (!/^MLM\d+$/.test(producto)) return json({ error: 'Producto de catálogo inválido.' }, 400);
+  if (!ID_PIEZA.test(id)) return json({ error: 'La pieza no existe.' }, 404);
+  const fila = await env.DB.prepare('select precio from productos where id = ?').bind(id).first<{ precio: number }>();
+  if (!fila) return json({ error: 'La pieza no existe.' }, 404);
+  const { ml_pct, ml_descuento_referencia } = await config(env);
+  const respaldo = precioML(fila.precio, ml_pct);
+  const ref = await referenciaCatalogo(env, producto);
+  const propuesto = ref ? precioDesdeReferencia(ref.centavos, ml_descuento_referencia) : respaldo;
+  return json({
+    producto, referencia: ref?.centavos ?? null, origen: ref?.origen ?? null, descuento: ml_descuento_referencia,
+    precio_propuesto: propuesto, precio_respaldo: respaldo,
+    aviso: ref ? (fila.precio > 0 && propuesto < fila.precio ? `El precio propuesto (${pesosTexto(propuesto)}) queda por debajo del de tienda (${pesosTexto(fila.precio)}).` : null)
+      : `Mercado Libre no dio precio de referencia de ese producto; el precio sale del de tienda + ${ml_pct} %. Revísalo con «Ver precios».`,
+  });
+}
+
+const ESTADOS_PRECIO = ['activa', 'pausada'];
+
+/**
+ * GET /api/ml/precio-referencia/:pieza: lo que ML recomienda para una publicacion
+ * (GET /suggestions/items/{id}/details -> suggested_price.amount, lowest_price.amount, current_price.amount, applicable_suggestion).
+ * Solo lectura: aplicar el precio es otra accion.
+ */
+async function precioReferenciaPublicacion(env: Env, id: string): Promise<Response> {
+  if (!ID_PIEZA.test(id)) return json({ error: 'La pieza no existe.' }, 404);
+  const pub = await leerPublicacion(env, id);
+  if (!pub?.ml_item_id) return json({ error: 'Esta pieza no está publicada en Mercado Libre.' }, 404);
+  const { ml_descuento_referencia } = await config(env);
+  const sin = (mensaje: string) => json({ item_id: pub.ml_item_id, referencia: null, propuesto: null, precio_actual: pub.precio_ml, descuento: ml_descuento_referencia, mensaje });
+  try {
+    const d = await mlFetch(env, `/suggestions/items/${pub.ml_item_id}/details`);
+    const referencia = centavos(d?.suggested_price?.amount);
+    if (!referencia) return sin('Mercado Libre no tiene precio de referencia para esta publicación.');
+    return json({
+      item_id: pub.ml_item_id, referencia, minimo: centavos(d?.lowest_price?.amount),
+      aplicable: d?.applicable_suggestion !== false, estado_ml: String(d?.status ?? ''),
+      precio_actual: centavos(d?.current_price?.amount) ?? pub.precio_ml,
+      descuento: ml_descuento_referencia, propuesto: precioDesdeReferencia(referencia, ml_descuento_referencia), mensaje: null,
+    });
+  } catch (error) {
+    if (error instanceof ErrorML && !error.local && (error.status === 404 || error.status === 403)) {
+      return sin(error.status === 404
+        ? 'Mercado Libre no tiene precio de referencia para esta publicación.'
+        : 'Mercado Libre no dejó consultar la referencia de esta publicación (403). Compara con «Ver precios».');
+    }
+    return respuestaError(error, 'No se pudo consultar el precio de referencia.');
+  }
+}
+
+/** POST /api/ml/precio/:pieza {precio_ml}: cambia el precio de la publicacion en ML (PUT /items/{id}). Una publicacion, a peticion. */
+async function aplicarPrecio(env: Env, id: string, request: Request): Promise<Response> {
+  if (!ID_PIEZA.test(id)) return json({ error: 'La pieza no existe.' }, 404);
+  const cuerpo = (await request.json().catch(() => ({}))) as { precio_ml?: unknown } | null;
+  const precio = Number(cuerpo?.precio_ml);
+  if (!Number.isInteger(precio) || precio < PRECIO_MINIMO || precio > 10_000_000) {
+    return json({ error: 'El precio debe ser de al menos $35 (en centavos, entero).' }, 400);
+  }
+  const pub = await leerPublicacion(env, id);
+  if (!pub?.ml_item_id) return json({ error: 'Esta pieza no está publicada en Mercado Libre.' }, 404);
+  if (!ESTADOS_PRECIO.includes(pub.estado)) return json({ error: `No se puede cambiar el precio de una publicación en estado «${pub.estado}».` }, 409);
+  try {
+    await mlFetch(env, `/items/${pub.ml_item_id}`, { method: 'PUT', json: { price: precio / 100 } });
+  } catch (error) {
+    return respuestaError(error, 'Mercado Libre no dejó cambiar el precio.');
+  }
+  await env.DB.prepare(`update ml_publicaciones set precio_ml = ?, ultimo_error = '', actualizado_en = ? where producto_id = ?`)
+    .bind(precio, new Date().toISOString(), id).run();
+  return json({ publicacion: await leerPublicacion(env, id) });
 }
 
 /* ---------- publicar, pausar, reactivar ---------- */
@@ -1632,6 +1764,10 @@ export async function rutaML(request: Request, env: Env, url: URL): Promise<Resp
   if (pathname === '/api/ml/conectar' && metodo === 'GET') return conectar(env, url);
   if (pathname === '/api/ml/piezas' && metodo === 'GET') return listarPiezas(env, url);
   if (pathname === '/api/ml/ventas' && metodo === 'GET') return listarVentas(env, url);
+  if (pathname === '/api/ml/referencia' && metodo === 'GET') return referenciaDeProducto(env, url);
+  const dePrecio = /^\/api\/ml\/(precio-referencia|precio)\/([^/]+)$/.exec(pathname);
+  if (dePrecio && dePrecio[1] === 'precio-referencia' && metodo === 'GET') return precioReferenciaPublicacion(env, dePrecio[2]);
+  if (dePrecio && dePrecio[1] === 'precio' && metodo === 'POST') return aplicarPrecio(env, dePrecio[2], request);
   const deGuia = /^\/api\/ml\/guia\/([^/]+)$/.exec(pathname);
   if (deGuia && metodo === 'GET') return guia(env, deGuia[1], url);
   const accion = /^\/api\/ml\/(preparar|publicar|pausar|reactivar)\/([^/]+)$/.exec(pathname);

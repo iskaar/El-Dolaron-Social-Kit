@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.ts';
 import { tienda, DUENO } from './prueba-d1.ts';
-import { guardarTokens, mlFetch, rellenarPrecios, centavos, precioML, tituloML, dimensionesJpeg, idProductoML, gtinDe, modeloDe, descripcionPorDefecto } from './mercadolibre.ts';
+import { guardarTokens, mlFetch, rellenarPrecios, centavos, precioML, tituloML, dimensionesJpeg, idProductoML, gtinDe, modeloDe, descripcionPorDefecto, precioDesdeReferencia } from './mercadolibre.ts';
 
 const LLAVE = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
 const RUTA = 'ruta-secreta-de-prueba';
@@ -53,6 +53,12 @@ class SimML {
   /** Guias de Mercado Envios (#691): bytes por shipment y formato (`pdf`/`zpl2`); sin entrada = ML contesta 400 (envio no listo). */
   guias = new Map<string, Uint8Array>();
   productoActivo = true;
+  /** #871: precio (pesos) del ganador de la buy box de cualquier producto de catalogo; null = sin ganador. */
+  buyBox: number | null = null;
+  /** #871: GET /products/{id}/items; null = ML no lo contesta (404). */
+  itemsProducto: unknown = null;
+  /** #871: GET /suggestions/items/{id}/details por articulo; sin entrada = 404. */
+  sugerencias = new Map<string, { status?: number; cuerpo: unknown }>();
   /** Lo que contesta la IA (Gemini) a la propuesta de atributos (por omisión, nada); null = no responde. Cada cuerpo pedido se anota en `pedidosIA`. */
   ia: ((cuerpo: any) => Record<string, string>) | null = () => ({});
   pedidosIA: any[] = [];
@@ -96,7 +102,15 @@ class SimML {
     }
     if (metodo === 'GET' && ruta.startsWith('/products/search?')) return this.catalogo;
     const producto = /^\/products\/(MLM\d+)$/.exec(ruta);
-    if (metodo === 'GET' && producto) return { cuerpo: { id: producto[1], status: this.productoActivo ? 'active' : 'inactive', domain_id: 'MLM-SHORTS', name: 'Lanzador SplatRball 800' } };
+    if (metodo === 'GET' && producto) {
+      return { cuerpo: { id: producto[1], status: this.productoActivo ? 'active' : 'inactive', domain_id: 'MLM-SHORTS', name: 'Lanzador SplatRball 800',
+        buy_box_winner: this.buyBox == null ? null : { item_id: 'MLM999', price: this.buyBox, currency_id: 'MXN' } } };
+    }
+    if (metodo === 'GET' && /^\/products\/MLM\d+\/items$/.test(ruta)) {
+      return this.itemsProducto ? { cuerpo: this.itemsProducto } : { status: 404, cuerpo: { message: 'not found', error: 'not_found', status: 404 } };
+    }
+    const sugerido = /^\/suggestions\/items\/(MLM\d+)\/details$/.exec(ruta);
+    if (metodo === 'GET' && sugerido) return this.sugerencias.get(sugerido[1]) ?? { status: 404, cuerpo: { message: 'no suggestion', error: 'not_found', status: 404 } };
     const cat = /^\/categories\/(MLM\d+)$/.exec(ruta);
     if (metodo === 'GET' && cat) return { cuerpo: { id: cat[1], settings: { catalog_domain: cat[1] === 'MLM1234' ? 'MLM-SHORTS' : 'MLM-PANTS' } } };
     if (metodo === 'GET' && ruta === '/categories/MLM194175/attributes') return { cuerpo: ATRIBUTOS };
@@ -238,13 +252,22 @@ const avisar = (t: Tienda, recurso: string, extra: Record<string, unknown> = {})
 
 /* ---------- precio y utilidades ---------- */
 
-test('precio ML: precio de tienda + %, quebrado a X9, nunca menos de $35', () => {
-  assert.equal(precioML(25000, 20), 29900);
-  assert.equal(precioML(25000, 30), 32900);
-  assert.equal(precioML(24900, 20), 29900);
+test('precio ML: precio de tienda + %, al peso y sin X9, nunca menos de $35', () => {
+  assert.equal(precioML(25000, 20), 30000);
+  assert.equal(precioML(25000, 30), 32500);
+  assert.equal(precioML(24900, 20), 29900);   // $298.80 -> $299, sin quebrar a X9
+  assert.equal(precioML(24800, 20), 29800);   // $297.60 -> $298 (al peso, no a X9)
   assert.equal(precioML(4900, 20), 5900);
   assert.equal(precioML(900, 20), 3500);
   assert.equal(precioML(1900, 0), 3500);
+});
+
+test('precio desde la referencia de ML: referencia - descuento, al peso, nunca menos de $35 (#871)', () => {
+  assert.equal(precioDesdeReferencia(50000, 20), 40000);
+  assert.equal(precioDesdeReferencia(49900, 20), 39900);    // $399.20 -> $399, sin X9
+  assert.equal(precioDesdeReferencia(34567, 25), 25900);    // $259.2525 -> $259
+  assert.equal(precioDesdeReferencia(4000, 20), 3500);       // $32 -> mínimo $35
+  assert.equal(precioDesdeReferencia(10000, 90), 3500);
 });
 
 test('título: sin puntuación, con la marca, máximo 60 sin cortar palabras; JPEG: lee sus medidas', () => {
@@ -264,7 +287,7 @@ test('estado: sin conectar muestra qué falta (nombres, nunca valores); conectad
   assert.equal(r.status, 200);
   assert.equal(r.cuerpo.conectado, false);
   assert.equal(r.cuerpo.usuario, null);
-  assert.deepEqual(r.cuerpo.config, { ml_pct: 20, ml_tipo_publicacion: 'gold_special' });
+  assert.deepEqual(r.cuerpo.config, { ml_pct: 20, ml_tipo_publicacion: 'gold_special', ml_descuento_referencia: 20 });
   assert.deepEqual(r.cuerpo.faltan, ['ML_CLIENT_ID', 'ML_CLIENT_SECRET', 'ML_LLAVE_TOKENS', 'ML_RUTA_NOTIFICACIONES', 'ML_REDIRECT_URI']);
 
   await conML(async (t) => {
@@ -363,7 +386,8 @@ test('preparar: categoría, atributos pedidos, precio con ml_pct, guía de talla
     assert.equal(p.usa_family_name, false);
     assert.deepEqual([p.categoria_id, p.categoria_nombre, p.dominio], ['MLM194175', 'Pantalones', 'MLM-PANTS']);
     assert.equal(p.sugerencias.length, 2);
-    assert.equal(p.precio_ml, 29900);
+    assert.equal(p.precio_ml, 30000);
+    assert.equal(p.precio_referencia, null);
     assert.equal(p.tipo_publicacion, 'gold_special');
     const ids = p.atributos.map((a: any) => a.id);
     // Lo obligatorio, sin lo que ML llena o el sistema pone; el GTIN deja de ser obligatorio con razon de vacio.
@@ -373,7 +397,8 @@ test('preparar: categoría, atributos pedidos, precio con ml_pct, guía de talla
     assert.equal(p.atributos.find((a: any) => a.id === 'EMPTY_GTIN_REASON').valor_sugerido.id, '17055160');
     assert.deepEqual(p.atributos.find((a: any) => a.id === 'GENDER').valores[0], { id: '339666', nombre: 'Hombre' });
     assert.deepEqual(p.guia_tallas, { requerida: true, guias: [{ id: '26008', nombre: 'Jeans hombre', filas: [{ id: '26008:1', talla: '32' }] }] });
-    assert.deepEqual(p.avisos, []);
+    // La ropa no va al catálogo: sin referencia de ML, solo el aviso del respaldo (#871).
+    assert.deepEqual(p.avisos, ['Mercado Libre no dio precio de referencia; el precio sale del de tienda + 20 %. Revísalo con «Ver precios».']);
     assert.equal(t.sim.de('POST', /^\/catalog\/charts\/search$/)[0].cuerpo.domain_id, 'PANTS');
     assert.equal(t.sim.de('POST', /^\/items$/).length, 0, 'preparar no publica nada');
 
@@ -381,7 +406,7 @@ test('preparar: categoría, atributos pedidos, precio con ml_pct, guía de talla
     assert.equal((await t.pedir('/api/ml/config', { ml_pct: 30 }, 'PUT')).status, 200);
     t.sim.tags = ['user_product_seller'];
     const q = (await t.pedir(`/api/ml/preparar/${id}`, {})).cuerpo.propuesta;
-    assert.equal(q.precio_ml, 32900);
+    assert.equal(q.precio_ml, 32500);
     assert.equal(q.usa_family_name, true);
   });
 });
@@ -1501,6 +1526,8 @@ test('permisos: cajero y capturista reciben 403 en /api/ml/*; gerencia entra', a
         ['/api/ml/estado', undefined, 'GET'], ['/api/ml/piezas', undefined, 'GET'], ['/api/ml/ventas', undefined, 'GET'], ['/api/ml/conectar', undefined, 'GET'],
         [`/api/ml/preparar/${id}`, {}, 'POST'], [`/api/ml/publicar/${id}`, cuerpoPublicar(), 'POST'],
         [`/api/ml/pausar/${id}`, {}, 'POST'], [`/api/ml/reactivar/${id}`, {}, 'POST'], ['/api/ml/config', { ml_pct: 50 }, 'PUT'],
+        [`/api/ml/referencia?producto=MLM2001&pieza=${id}`, undefined, 'GET'], [`/api/ml/precio-referencia/${id}`, undefined, 'GET'],
+        [`/api/ml/precio/${id}`, { precio_ml: 30000 }, 'POST'],
       ] as [string, unknown, string][]) {
         const r = await t.pedir(ruta, cuerpo, metodo);
         assert.equal(r.status, 403, `${correo} ${metodo} ${ruta}`);
@@ -1520,10 +1547,16 @@ test('permisos: cajero y capturista reciben 403 en /api/ml/*; gerencia entra', a
 test('config de ML: porcentaje y tipo de publicación, validados', async () => {
   await conML(async (t) => {
     assert.equal((await t.pedir('/api/ml/config', { ml_pct: 25, ml_tipo_publicacion: 'gold_pro' }, 'PUT')).status, 200);
-    assert.deepEqual((await t.pedir('/api/ml/estado')).cuerpo.config, { ml_pct: 25, ml_tipo_publicacion: 'gold_pro' });
-    for (const malo of [{ ml_pct: -1 }, { ml_pct: 1.5 }, { ml_pct: 999 }, { ml_tipo_publicacion: 'gold' }, {}]) {
+    assert.deepEqual((await t.pedir('/api/ml/estado')).cuerpo.config, { ml_pct: 25, ml_tipo_publicacion: 'gold_pro', ml_descuento_referencia: 20 });
+    for (const malo of [{ ml_pct: -1 }, { ml_pct: 1.5 }, { ml_pct: 999 }, { ml_tipo_publicacion: 'gold' }, {},
+      { ml_descuento_referencia: 15 }, { ml_descuento_referencia: 19.5 }, { ml_descuento_referencia: 91 }, { ml_descuento_referencia: 'x' }]) {
       assert.equal((await t.pedir('/api/ml/config', malo, 'PUT')).status, 400, JSON.stringify(malo));
     }
+    // El descuento sobre la referencia (#871): 20 o más, hasta 90.
+    const guardado = await t.pedir('/api/ml/config', { ml_descuento_referencia: 30 }, 'PUT');
+    assert.equal(guardado.status, 200);
+    assert.equal(guardado.cuerpo.ml_descuento_referencia, 30);
+    assert.equal((await t.pedir('/api/ml/config', { ml_descuento_referencia: 20 }, 'PUT')).cuerpo.ml_descuento_referencia, 20);
   });
 });
 
@@ -1596,6 +1629,115 @@ test('preparar: si ML niega el catálogo, lo dice sin romper la propuesta', () =
   assert.deepEqual(r.cuerpo.propuesta.catalogo.candidatos, []);
   assert.match(r.cuerpo.propuesta.catalogo.error, /no dejó buscar en su catálogo \(403/);
   assert.equal(t.sim.de('GET', /^\/products\/search/).length, 2, 'con token y luego sin token');
+}));
+
+/* ---------- precio de referencia (#871) ---------- */
+
+const AVISO_SIN_REF = 'Mercado Libre no dio precio de referencia; el precio sale del de tienda + 20 %. Revísalo con «Ver precios».';
+
+test('preparar: con ganador de la buy box, precio = referencia − 20 % al peso, sin X9', () => conML(async (t) => {
+  t.sim.buyBox = 499.5;   // $499.50 -> 399.60 -> $400
+  const r = await t.pedir(`/api/ml/preparar/${juguete(t)}`, {});
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  const p = r.cuerpo.propuesta;
+  assert.deepEqual([p.precio_referencia, p.origen_referencia, p.producto_referencia, p.descuento_referencia], [49950, 'buy_box', 'MLM2001', 20]);
+  assert.equal(p.precio_ml, 40000);
+  assert.equal(p.precio_respaldo, 30000);
+  assert.deepEqual(p.avisos, []);
+  assert.equal(t.sim.de('POST', /^\/items$/).length, 0);
+}));
+
+test('preparar: el descuento configurado manda; sin ganador se usa la publicación más barata del producto', () => conML(async (t) => {
+  assert.equal((await t.pedir('/api/ml/config', { ml_descuento_referencia: 30 }, 'PUT')).status, 200);
+  t.sim.itemsProducto = { results: [{ item_id: 'MLM1', price: 480, currency_id: 'MXN' }, { item_id: 'MLM2', price: 450, currency_id: 'MXN' }, { item_id: 'MLM3', price: 100, currency_id: 'USD' }] };
+  const p = (await t.pedir(`/api/ml/preparar/${juguete(t)}`, {})).cuerpo.propuesta;
+  assert.deepEqual([p.precio_referencia, p.origen_referencia, p.precio_ml], [45000, 'publicaciones', 31500]);
+}));
+
+test('preparar: sin referencia (ML no la da) cae a tienda + ml_pct con aviso; la ropa también', () => conML(async (t) => {
+  const p = (await t.pedir(`/api/ml/preparar/${juguete(t)}`, {})).cuerpo.propuesta;   // el simulado no tiene buy box ni /items
+  assert.deepEqual([p.precio_referencia, p.precio_ml], [null, 30000]);
+  assert.deepEqual(p.avisos, [AVISO_SIN_REF]);
+  assert.ok(t.sim.de('GET', /^\/products\/MLM2001\/items$/).length > 0, 'probó la segunda fuente');
+  assert.deepEqual((await t.pedir(`/api/ml/preparar/${pieza(t)}`, {})).cuerpo.propuesta.avisos, [AVISO_SIN_REF]);
+}));
+
+test('preparar: con varios candidatos no adivina la referencia; avisa si el precio queda bajo el de tienda', () => conML(async (t) => {
+  const varios = (t.sim.catalogo.cuerpo as any).results;
+  t.sim.catalogo = { cuerpo: { results: [varios[0], { ...varios[0], id: 'MLM2002' }] } };
+  t.sim.buyBox = 500;
+  const p = (await t.pedir(`/api/ml/preparar/${juguete(t)}`, {})).cuerpo.propuesta;
+  assert.equal(p.precio_referencia, null);
+  assert.equal(t.sim.de('GET', /^\/products\/MLM\d+$/).length, 0);
+  assert.match(p.avisos[0], /^Elige el producto del catálogo/);
+  // Con un solo candidato y la tienda más cara que la referencia − 20 %: aviso, no bloqueo.
+  t.sim.catalogo = { cuerpo: { results: [varios[0]] } };
+  const caro = (await t.pedir(`/api/ml/preparar/${pieza(t, { categoria: 'juguetes', nombre: 'SplatRball 800 Pyro Blaster Kit', marca: 'Splat R Ball', precio: 60000 })}`, {})).cuerpo.propuesta;
+  assert.equal(caro.precio_ml, 40000);
+  assert.ok(caro.avisos.some((a: string) => a === 'El precio propuesto ($400) queda por debajo del de tienda ($600).'), JSON.stringify(caro.avisos));
+}));
+
+test('GET /api/ml/referencia: la referencia del producto que eligió el dueño y el precio que saldría', () => conML(async (t) => {
+  const id = juguete(t);
+  t.sim.buyBox = 500;
+  const r = await t.pedir(`/api/ml/referencia?producto=MLM2002&pieza=${id}`, undefined, 'GET');
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.deepEqual([r.cuerpo.referencia, r.cuerpo.origen, r.cuerpo.precio_propuesto, r.cuerpo.precio_respaldo, r.cuerpo.aviso], [50000, 'buy_box', 40000, 30000, null]);
+  t.sim.buyBox = null;
+  const sin = await t.pedir(`/api/ml/referencia?producto=MLM2002&pieza=${id}`, undefined, 'GET');
+  assert.deepEqual([sin.cuerpo.referencia, sin.cuerpo.precio_propuesto], [null, 30000]);
+  assert.match(sin.cuerpo.aviso, /no dio precio de referencia de ese producto/);
+  assert.equal((await t.pedir(`/api/ml/referencia?producto=abc&pieza=${id}`, undefined, 'GET')).status, 400);
+  assert.equal((await t.pedir('/api/ml/referencia?producto=MLM2002&pieza=no-es-id', undefined, 'GET')).status, 404);
+}));
+
+test('publicación activa: lee la referencia de ML, propone con el descuento y aplica el precio solo a petición', () => conML(async (t) => {
+  const id = pieza(t);
+  assert.equal((await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar())).status, 201);
+  // Sin sugerencia de ML (404): mensaje claro, nada que aplicar.
+  const vacia = await t.pedir(`/api/ml/precio-referencia/${id}`, undefined, 'GET');
+  assert.equal(vacia.status, 200, JSON.stringify(vacia.cuerpo));
+  assert.deepEqual([vacia.cuerpo.referencia, vacia.cuerpo.propuesto, vacia.cuerpo.precio_actual], [null, null, 29900]);
+  assert.match(vacia.cuerpo.mensaje, /no tiene precio de referencia/);
+
+  t.sim.sugerencias.set('MLM100', { cuerpo: {
+    item_id: 'MLM100', status: 'with_benchmark_high', currency_id: 'MXN', applicable_suggestion: true,
+    current_price: { amount: 299 }, suggested_price: { amount: 400 }, lowest_price: { amount: 380 },
+  } });
+  const r = await t.pedir(`/api/ml/precio-referencia/${id}`, undefined, 'GET');
+  assert.deepEqual([r.cuerpo.referencia, r.cuerpo.minimo, r.cuerpo.precio_actual, r.cuerpo.propuesto, r.cuerpo.descuento, r.cuerpo.aplicable],
+    [40000, 38000, 29900, 32000, 20, true]);
+  assert.equal(t.sim.de('PUT', /^\/items\//).length, 0, 'consultar no cambia nada');
+
+  assert.equal((await t.pedir(`/api/ml/precio/${id}`, { precio_ml: 3000 })).status, 400);
+  assert.equal((await t.pedir(`/api/ml/precio/${id}`, { precio_ml: 32000.5 })).status, 400);
+  assert.equal((await t.pedir(`/api/ml/precio/${pieza(t)}`, { precio_ml: 32000 })).status, 404, 'sin publicación');
+  const a = await t.pedir(`/api/ml/precio/${id}`, { precio_ml: r.cuerpo.propuesto });
+  assert.equal(a.status, 200, JSON.stringify(a.cuerpo));
+  assert.equal(a.cuerpo.publicacion.precio_ml, 32000);
+  const put = t.sim.de('PUT', /^\/items\/MLM100$/);
+  assert.equal(put.length, 1);
+  assert.deepEqual(put[0].cuerpo, { price: 320 });
+  assert.equal((t.db.prepare('select precio_ml from ml_publicaciones where producto_id = ?').get(id) as any).precio_ml, 32000);
+
+  // Una publicación cerrada ya no se reprecia.
+  t.db.prepare(`update ml_publicaciones set estado = 'cerrada' where producto_id = ?`).run(id);
+  assert.equal((await t.pedir(`/api/ml/precio/${id}`, { precio_ml: 30000 })).status, 409);
+}));
+
+test('publicación activa: si ML niega la consulta (403) lo dice; un precio rechazado por ML no cambia el guardado', () => conML(async (t) => {
+  const id = pieza(t);
+  await t.pedir(`/api/ml/publicar/${id}`, cuerpoPublicar());
+  t.sim.sugerencias.set('MLM100', { status: 403, cuerpo: { message: 'forbidden', error: 'forbidden', status: 403, cause: [] } });
+  const r = await t.pedir(`/api/ml/precio-referencia/${id}`, undefined, 'GET');
+  assert.equal(r.status, 200);
+  assert.match(r.cuerpo.mensaje, /no dejó consultar la referencia.*403/);
+  const original = t.sim.responder.bind(t.sim);
+  t.sim.responder = (l) => l.metodo === 'PUT' && l.ruta === '/items/MLM100'
+    ? { status: 400, cuerpo: { message: 'price invalid', error: 'validation_error', status: 400, cause: [] } } : original(l);
+  const mala = await t.pedir(`/api/ml/precio/${id}`, { precio_ml: 32000 });
+  assert.equal(mala.status, 422);
+  assert.equal((t.db.prepare('select precio_ml from ml_publicaciones where producto_id = ?').get(id) as any).precio_ml, 29900);
 }));
 
 test('publicar en catálogo: sin foto propia, categoría del dominio del producto y ficha oficial', () => conML(async (t) => {

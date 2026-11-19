@@ -1,7 +1,7 @@
 // node --test src/precio.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calcularPrecio, ajustarManual, redondear5, quebrarDecena, redondear10, precioDesdeSugerencia, codigoDeDestino, esDestinoBanda, prefijoParaFamilia } from './precio.ts';
+import { calcularPrecio, ajustarManual, redondear5, redondear10, precioDesdeSugerencia, codigoDeDestino, esDestinoBanda, prefijoParaFamilia } from './precio.ts';
 
 // Los valores confirmados por Isaac: porcentajes 2026-09-11, bandas 2026-09-24
 // (limite subido a $200, ropa/general comparten los siete precios).
@@ -94,12 +94,6 @@ test('un precio escrito a mano en etiqueta se respeta tal cual', () => {
   assert.equal(redondear10(23499), 23000);
   assert.equal(redondear10(400), 1000);   // minimo $10
   assert.equal(redondear10(0), 0);
-  assert.equal(quebrarDecena(23300), 22900);   // $233 baja
-  assert.equal(quebrarDecena(23500), 23900);   // $235 sube
-  assert.equal(quebrarDecena(23499), 22900);   // $234.99 todavia baja
-  assert.equal(quebrarDecena(30100), 29900);
-  assert.equal(quebrarDecena(400), 900);       // minimo $9
-  assert.equal(quebrarDecena(0), 0);
   assert.equal(redondear5(7500), 7500);
   assert.equal(redondear5(1), 500);
   assert.equal(redondear5(0), 0);
