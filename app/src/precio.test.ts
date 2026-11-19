@@ -1,7 +1,7 @@
 // node --test src/precio.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calcularPrecio, ajustarManual, redondear5, quebrarDecena, precioDesdeSugerencia, codigoDeDestino, esDestinoBanda, prefijoParaFamilia } from './precio.ts';
+import { calcularPrecio, ajustarManual, redondear5, quebrarDecena, redondear10, precioDesdeSugerencia, codigoDeDestino, esDestinoBanda, prefijoParaFamilia } from './precio.ts';
 
 // Los valores confirmados por Isaac: porcentajes 2026-09-11, bandas 2026-09-24
 // (limite subido a $200, ropa/general comparten los siete precios).
@@ -15,33 +15,33 @@ const config = {
 const precio = (precioLista: number, categoria = 'ropa', estadoFisico = 'nuevo') =>
   calcularPrecio({ precioLista, categoria, estadoFisico, config });
 
-test('mitad del precio de lista, quebrado al $10 mas cercano menos $1: siempre termina en 9', () => {
-  assert.deepEqual(precio(50000), { precio: 24900, destino: 'etiqueta' });   // $500 -> $250 -> $249
-  assert.deepEqual(precio(50300), { precio: 24900, destino: 'etiqueta' });   // $503 -> $251.50 -> $250 -> $249
-  assert.deepEqual(precio(51000), { precio: 25900, destino: 'etiqueta' });   // $510 -> $255 -> $260 -> $259
-  assert.deepEqual(precio(46600), { precio: 22900, destino: 'etiqueta' });   // $466 -> $233 -> $230 -> $229
+test('mitad del precio de lista, al multiplo de $10 mas cercano', () => {
+  assert.deepEqual(precio(50000), { precio: 25000, destino: 'etiqueta' });   // $500 -> $250
+  assert.deepEqual(precio(50300), { precio: 25000, destino: 'etiqueta' });   // $503 -> $251.50 -> $250
+  assert.deepEqual(precio(51000), { precio: 26000, destino: 'etiqueta' });   // $510 -> $255 -> $260
+  assert.deepEqual(precio(46600), { precio: 23000, destino: 'etiqueta' });   // $466 -> $233 -> $230
 });
 
 test('una pieza danada baja al 60 % de ese precio', () => {
-  assert.deepEqual(precio(100000, 'ropa', 'danado'), { precio: 29900, destino: 'etiqueta' }); // $1000 * 0.3 = $300 -> $299
+  assert.deepEqual(precio(100000, 'ropa', 'danado'), { precio: 30000, destino: 'etiqueta' }); // $1000 * 0.3 = $300
 });
 
 test('liquidación (C) es un % del precio de lista, sin el de categoría: hasta 80 % de descuento (#371)', () => {
-  assert.deepEqual(precio(100000, 'ropa', 'liquidacion'), { precio: 19900, destino: 'etiqueta' }); // $1000 * 0.2 = $200 -> $199
+  assert.deepEqual(precio(100000, 'ropa', 'liquidacion'), { precio: 20000, destino: 'etiqueta' }); // $1000 * 0.2 = $200
   assert.deepEqual(calcularPrecio({ precioLista: 100000, categoria: 'hogar', estadoFisico: 'liquidacion', config: { ...config, pct_liquidacion: '10' } }),
-    { precio: 9900, destino: 'etiqueta' });
+    { precio: 10000, destino: 'etiqueta' });
   assert.ok(precio(100000, 'ropa', 'liquidacion').precio < precio(100000, 'ropa', 'danado').precio);
 });
 
 test('toda pieza fotografiada lleva etiqueta, tambien la barata: ya no cae sola a una banda', () => {
-  assert.deepEqual(precio(7000), { precio: 3900, destino: 'etiqueta' });   // $70 -> $35 -> $40 -> $39
-  assert.deepEqual(precio(3000), { precio: 1900, destino: 'etiqueta' });   // $30 -> $15 -> $20 -> $19
-  assert.deepEqual(precio(3000, 'hogar'), { precio: 1900, destino: 'etiqueta' });
-  assert.deepEqual(precio(40000), { precio: 19900, destino: 'etiqueta' }); // $400 -> $200 -> $199, con su propia etiqueta
+  assert.deepEqual(precio(7000), { precio: 4000, destino: 'etiqueta' });   // $70 -> $35 -> $40
+  assert.deepEqual(precio(3000), { precio: 2000, destino: 'etiqueta' });   // $30 -> $15 -> $20
+  assert.deepEqual(precio(3000, 'hogar'), { precio: 2000, destino: 'etiqueta' });
+  assert.deepEqual(precio(40000), { precio: 20000, destino: 'etiqueta' }); // $400 -> $200, con su propia etiqueta
 });
 
-test('lo muy barato no baja de $9, ni queda en $0', () => {
-  assert.deepEqual(precio(600), { precio: 900, destino: 'etiqueta' });     // $6 -> $3 -> minimo $9
+test('lo muy barato no baja de $10, ni queda en $0', () => {
+  assert.deepEqual(precio(600), { precio: 1000, destino: 'etiqueta' });    // $6 -> $3 -> minimo $10
   assert.deepEqual(precio(100), { precio: 500, destino: 'etiqueta' });     // lista $1: el tope del precio de lista (a $5) le gana al minimo
 });
 
@@ -54,7 +54,7 @@ test('el precio nunca queda por encima del precio de lista', () => {
 });
 
 test('una categoria desconocida usa el porcentaje de otros', () => {
-  assert.deepEqual(precio(100000, 'ferreteria'), { precio: 49900, destino: 'etiqueta' });
+  assert.deepEqual(precio(100000, 'ferreteria'), { precio: 50000, destino: 'etiqueta' });
 });
 
 test('sin precio de lista la pieza espera al admin, no se queda en el minimo', () => {
@@ -65,14 +65,14 @@ test('la sugerencia del modelo pasa por las mismas guardas', () => {
   const desde = (precioLista: number, sugerido: number) => precioDesdeSugerencia({ precioLista, sugerido });
 
   // El ventilador: lista $350 y el modelo propone los $250 que cobra Isaac.
-  assert.deepEqual(desde(35000, 25000), { precio: 24900, destino: 'etiqueta' });
-  // Al $10 mas cercano menos $1: 242 -> 240 -> 239, 246 -> 250 -> 249.
-  assert.equal(desde(35000, 24200).precio, 23900);
-  assert.equal(desde(35000, 24600).precio, 24900);
+  assert.deepEqual(desde(35000, 25000), { precio: 25000, destino: 'etiqueta' });
+  // Al $10 mas cercano: 242 -> 240, 246 -> 250.
+  assert.equal(desde(35000, 24200).precio, 24000);
+  assert.equal(desde(35000, 24600).precio, 25000);
   // Nunca por encima del precio de lista, aunque el modelo se pase.
   assert.equal(desde(10000, 50000).precio, 10000);
   // Lo barato tambien lleva etiqueta.
-  assert.deepEqual(desde(12000, 4000), { precio: 3900, destino: 'etiqueta' });
+  assert.deepEqual(desde(12000, 4000), { precio: 4000, destino: 'etiqueta' });
   // Sin sugerencia, el que llama usa el porcentaje.
   assert.deepEqual(desde(35000, 0), { precio: 0, destino: 'etiqueta' });
 });
@@ -84,11 +84,16 @@ test('una pieza de banda se vende al precio de la banda, no al que se tecleo', (
   assert.equal(ajustarManual({ precio: 9999, destino: 'banda_r19', config }), 1900);
 });
 
-test('un precio escrito a mano tambien quiebra la decena', () => {
-  assert.equal(ajustarManual({ precio: 25000, destino: 'etiqueta', config }), 24900);
-  assert.equal(ajustarManual({ precio: 24900, destino: 'etiqueta', config }), 24900);   // idempotente
-  assert.equal(ajustarManual({ precio: 7200, destino: 'etiqueta', config }), 6900);   // 72 -> 70 -> 69
+test('un precio escrito a mano en etiqueta se respeta tal cual', () => {
+  assert.equal(ajustarManual({ precio: 25000, destino: 'etiqueta', config }), 25000);
+  assert.equal(ajustarManual({ precio: 24900, destino: 'etiqueta', config }), 24900);
+  assert.equal(ajustarManual({ precio: 7200, destino: 'etiqueta', config }), 7200);
   assert.equal(ajustarManual({ precio: 0, destino: 'etiqueta', config }), 0);
+  assert.equal(redondear10(23300), 23000);
+  assert.equal(redondear10(23500), 24000);
+  assert.equal(redondear10(23499), 23000);
+  assert.equal(redondear10(400), 1000);   // minimo $10
+  assert.equal(redondear10(0), 0);
   assert.equal(quebrarDecena(23300), 22900);   // $233 baja
   assert.equal(quebrarDecena(23500), 23900);   // $235 sube
   assert.equal(quebrarDecena(23499), 22900);   // $234.99 todavia baja
