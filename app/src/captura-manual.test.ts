@@ -119,7 +119,7 @@ test('capturista y dueño capturan sin código ni foto y sale a etiquetas con ED
     const cuerpo = pieza({ upc: '', estado_fisico: 'danado', precio_lista: 100000, destino: 'banda_g19' });
     const r = await t.pedir(RUTA_ESCANER, cuerpo);
     assert.equal(r.status, 201);
-    assert.equal(r.cuerpo.precio, 29900); // $1000 × 50 % × 60 %, con redondeo vigente.
+    assert.equal(r.cuerpo.precio, 30000); // $1000 × 50 % × 60 %, con redondeo vigente.
     const p = t.db.prepare('select * from productos where id = ?').get(cuerpo.id)!;
     assert.equal(p.upc, ''); assert.equal(p.foto_key, ''); assert.equal(p.estado_analisis, 'listo');
     assert.equal(p.destino, 'etiqueta'); assert.equal(p.stock, 2);
@@ -130,7 +130,7 @@ test('capturista y dueño capturan sin código ni foto y sale a etiquetas con ED
     t.db.prepare('update productos set stock = 1 where id = ?').run(cuerpo.id);
     const reintento = await t.pedir(RUTA_ESCANER, { ...cuerpo, nombre: 'Otro', precio: 100, stock: 9 });
     assert.equal(reintento.status, 201);
-    assert.equal(reintento.cuerpo.stock, 1); assert.equal(reintento.cuerpo.nombre, cuerpo.nombre); assert.equal(reintento.cuerpo.precio, 29900);
+    assert.equal(reintento.cuerpo.stock, 1); assert.equal(reintento.cuerpo.nombre, cuerpo.nombre); assert.equal(reintento.cuerpo.precio, 30000);
   }
 });
 
@@ -175,7 +175,7 @@ test('cantidad sin foto: cinco minutos desde la captura, en 0 cancela y un reint
   const cuerpo = pieza({ upc: '' });
   await t.pedir(RUTA_ESCANER, cuerpo);
   assert.equal((await t.pedir(RUTA_ESCANER, { id: cuerpo.id, stock: 3, precio: 1 }, 'PATCH')).status, 200);
-  assert.equal(t.db.prepare('select precio from productos where id = ?').get(cuerpo.id)!.precio, 44900);
+  assert.equal(t.db.prepare('select precio from productos where id = ?').get(cuerpo.id)!.precio, 45000);
   t.db.prepare('update productos set creado_en = ? where id = ?').run(new Date(Date.now() - 301000).toISOString(), cuerpo.id);
   assert.equal((await t.pedir(RUTA_ESCANER, { id: cuerpo.id, stock: 4 }, 'PATCH')).status, 404);
   assert.equal((await t.pedir(RUTA_ESCANER, { id: cuerpo.id, stock: 0 }, 'PATCH')).status, 404);

@@ -144,7 +144,7 @@ test('con nombre y sin precio busca el nombre en tiendas mexicanas; si no aparec
     const fila = db.prepare('select nombre, precio_lista, precio, estado_analisis from productos where id = ?').get(id) as any;
     assert.equal(fila.estado_analisis, esperado);
     assert.equal(fila.nombre, 'Peluche perro');
-    if (esperado === 'listo') assert.deepEqual([fila.precio_lista, fila.precio], [45000, 22900]);   // $450 x 50 % = $225 -> $230 -> $229
+    if (esperado === 'listo') assert.deepEqual([fila.precio_lista, fila.precio], [45000, 23000]);   // $450 x 50 % = $225 -> $230
   }
 });
 
@@ -158,7 +158,7 @@ test('la sugerencia por ejemplos solo manda con confianza alta; si no, el % de l
     db.prepare(`insert into productos (id, nombre, categoria, precio_lista, precio, precio_sugerido, semana_ingreso, creado_en, actualizado_en)
       values (?, ?, 'juguetes', 20000, 7900, 9900, 'S40', '', '')`).run(crypto.randomUUID(), `Ejemplo ${i}`);
   }
-  for (const [confianza, esperado] of [[0.55, 7900], [0.9, 4900]] as const) {
+  for (const [confianza, esperado] of [[0.55, 8000], [0.9, 5000]] as const) {
     globalThis.fetch = (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({
       nombre: 'Muñeco Gigglescape', marca: 'Gigglescape', categoria: 'juguetes', precio_lista_mxn: 150, precio_venta_mxn: 50, confianza,
     }) }] } }] }))) as typeof fetch;
@@ -167,7 +167,7 @@ test('la sugerencia por ejemplos solo manda con confianza alta; si no, el % de l
     db.prepare(`insert into productos (id, nombre, estado_analisis, foto_key, semana_ingreso, creado_en, actualizado_en)
       values (?, '', 'pendiente', ?, 'S40', '', '')`).run(id, `fotos/${id}.jpg`);
     await analizarBorrador(id, env, 'gemini', false);
-    // $150 x 50 % = $75 -> $79; la sugerencia de $50 -> $49 solo con confianza alta.
+    // $150 x 50 % = $75 -> $80; la sugerencia de $50 solo con confianza alta.
     assert.equal((db.prepare('select precio from productos where id = ?').get(id) as { precio: number }).precio, esperado, String(confianza));
   }
 });
@@ -206,9 +206,9 @@ test('foto con código y sin precio: va a la cola, que busca el código en cualq
     assert.equal(busqueda[0].contents[0].parts[0].text, 'upc 840397509898');
     assert.match(busqueda[0].systemInstruction.parts[0].text, /eBay/);
     const fila = db.prepare('select nombre, precio_lista, precio, estado_analisis, codigo from productos where id = ?').get(id) as any;
-    // US$7.99 x $18.50 = $148 de lista; 50 % = $74 -> $70 -> $69, con el nombre del código.
+    // US$7.99 x $18.50 = $148 de lista; 50 % = $74 -> $70, con el nombre del código.
     assert.deepEqual({ ...fila, codigo: !!fila.codigo },
-      { nombre: 'Bolsa peluche perro FAO Schwarz', precio_lista: 14800, precio: 6900, estado_analisis: 'listo', codigo: true });
+      { nombre: 'Bolsa peluche perro FAO Schwarz', precio_lista: 14800, precio: 7000, estado_analisis: 'listo', codigo: true });
   }
 });
 

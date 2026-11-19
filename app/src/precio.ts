@@ -50,15 +50,20 @@ export function prefijoParaFamilia(nombre: string, ocupados: Set<string>): strin
 const REDONDEO = 500; // $5 MXN
 
 /**
- * Quiebra la decena: redondea al multiplo de $10 mas cercano (de $5 en adelante
- * sube, menos de $5 baja) y resta $1, asi que el precio de una etiqueta siempre
- * termina en 9 ($233 -> $229, $235 -> $239, $250 -> $249), con minimo $9 para
- * que una pieza barata no quede en $0. Idempotente: un precio que ya termina en
- * 9 se queda igual. Se aplica al precio SIN redondear antes a $5, para no
- * redondear dos veces.
+ * Quiebra la decena: redondea al multiplo de $10 mas cercano y resta $1 ($233 ->
+ * $229, $235 -> $239), minimo $9. Desde #868 ya no la usan las etiquetas, solo
+ * Mercado Libre (precioML), que sigue en X9.
  */
 export function quebrarDecena(centavos: number): number {
   return centavos <= 0 ? 0 : Math.max(900, Math.floor((centavos + 500) / 1000) * 1000 - 100);
+}
+
+/**
+ * Precio de etiqueta: multiplo de $10 mas cercano (de $5 en adelante sube),
+ * minimo $10 para que una pieza barata no quede en $0 (#868).
+ */
+export function redondear10(centavos: number): number {
+  return centavos <= 0 ? 0 : Math.max(1000, Math.floor((centavos + 500) / 1000) * 1000);
 }
 
 /** Redondeo hacia arriba al multiplo de $5. */
@@ -68,6 +73,7 @@ export function redondear5(centavos: number): number {
 
 /**
  * Ajusta un precio escrito a mano por el admin.
+ * En etiqueta el precio tecleado se respeta tal cual: el capturista decide (#868).
  * Una pieza en una banda se vende al precio de la banda: si el destino es
  * `banda_g49`, el precio sale de la configuracion `banda_49` (compartida entre
  * todas las familias), aunque en el campo se haya tecleado otra cosa. Una banda con un
@@ -79,7 +85,7 @@ export function ajustarManual({ precio, destino, config }: {
   config: Record<string, string>;
 }): number {
   if (destino === 'etiqueta') {
-    return quebrarDecena(precio);
+    return precio;
   }
   const m = BANDA.exec(destino);
   const pesosPorDefecto = m ? Number.parseInt(m[2], 10) : 0;
@@ -99,7 +105,7 @@ function entero(config: Record<string, string>, clave: string, porDefecto: numbe
 }
 
 /**
- * precio = precio_lista x %categoria x %danado, quebrado a X9 (ver quebrarDecena).
+ * precio = precio_lista x %categoria x %danado, redondeado al multiplo de $10 (ver redondear10).
  * Toda pieza fotografiada lleva su propia etiqueta, sea cual sea su precio: las
  * bandas se imprimen y se pegan aparte, sin foto ni analisis, y ya no son el
  * destino automatico de nada (ver PLAN-ETIQUETAS-POR-BANDA.md).
@@ -132,14 +138,14 @@ export function calcularPrecio({ precioLista, categoria, estadoFisico, config }:
   return conEtiqueta(bruto, precioLista);
 }
 
-/** El precio de una etiqueta individual: X9 y nunca por encima del precio de lista. */
+/** El precio de una etiqueta individual: multiplo de $10 y nunca por encima del precio de lista. */
 function conEtiqueta(bruto: number, precioLista: number): { precio: number; destino: Destino } {
-  return { precio: Math.min(quebrarDecena(bruto), redondear5(precioLista)), destino: 'etiqueta' };
+  return { precio: Math.min(redondear10(bruto), redondear5(precioLista)), destino: 'etiqueta' };
 }
 
 /**
  * Precio a partir de lo que propuso el modelo mirando como cobra Isaac.
- * Pasa por las mismas guardas que el calculo por porcentaje: X9 y nunca por
+ * Pasa por las mismas guardas que el calculo por porcentaje: multiplo de $10 y nunca por
  * encima del precio de lista.
  */
 export function precioDesdeSugerencia({ precioLista, sugerido }: {

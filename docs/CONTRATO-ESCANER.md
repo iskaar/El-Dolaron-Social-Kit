@@ -16,11 +16,15 @@
 
 > **Actualizado 2026-09-25 (Isaac): toda pieza fotografiada lleva su etiqueta
 > individual, cueste lo que cueste.** El precio ya no manda a una banda: el análisis
-> da un precio que termina en 9 (mínimo $9) y la pieza sale por `/etiquetas` como
+> da un precio al múltiplo de $10 más cercano (mínimo $10; antes terminaba en 9) y la pieza sale por `/etiquetas` como
 > cualquier otra. Las **bandas** se imprimen por lote desde `/bandas` y se pegan a lo
 > que se etiqueta **sin fotografiar ni analizar**; se cobran escaneando su código, y
 > siguen disponibles en el admin como destino manual. Donde abajo se lea que el precio
 > enruta a banda, vale esta nota.
+
+> **Actualizado 2026-11-18 (Isaac, #868):** el precio calculado de una etiqueta va al
+> múltiplo de $10 más cercano (de $5 en adelante sube, mínimo $10, sin pasar del precio
+> de lista) y el precio tecleado a mano se respeta tal cual. Bandas y Mercado Libre no cambian.
 
 > **Ropa, probada en sandbox el 2026-10-11 y autorizada para producción el
 > 2026-10-13 (Isaac, Issues #273 y #302):** la ropa ya tiene precios

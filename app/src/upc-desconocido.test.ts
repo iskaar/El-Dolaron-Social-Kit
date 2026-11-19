@@ -38,8 +38,8 @@ test('un UPC desconocido se guarda al instante y se identifica solo por el códi
   assert.deepEqual(llamada.cuerpo.tools, [{ googleSearch: {} }]);
   assert.deepEqual(llamada.cuerpo.contents[0].parts, [{ text: `upc ${UPC}` }]);
   const fila = p.db.prepare('select nombre, precio_lista, precio, stock, estado_analisis, codigo, estado_fisico from productos where id=?').get(id)!;
-  // $1000 x 50 % x 60 % (dañado) = $300 -> $299, con código para imprimir.
-  assert.deepEqual({ ...fila }, { nombre: 'Termo Stanley 1 L', precio_lista: 100000, precio: 29900, stock: 2, estado_analisis: 'listo',
+  // $1000 x 50 % x 60 % (dañado) = $300, con código para imprimir.
+  assert.deepEqual({ ...fila }, { nombre: 'Termo Stanley 1 L', precio_lista: 100000, precio: 30000, stock: 2, estado_analisis: 'listo',
     codigo: fila.codigo, estado_fisico: 'danado' });
   assert.match(String(fila.codigo), /^ED-\d{6}$/);
   assert.equal((await p.pedir(`/api/borradores/upc/${id}`, undefined, 'GET')).cuerpo.estado_analisis, 'listo');
@@ -123,7 +123,7 @@ test('un UPC identificado sin foto se reutiliza: el siguiente escaneo no vuelve 
   const id = crypto.randomUUID();
   assert.equal((await p.pedir('/api/borradores/upc', { id, upc: '012345678905', stock: 3, estado_fisico:'danado' })).status, 201);
   assert.deepEqual({ ...p.db.prepare('select nombre, precio, stock, estado_analisis from productos where id=?').get(id)! },
-    { nombre: 'Termo Stanley 1 L', precio: 29900, stock: 3, estado_analisis: 'listo' });
+    { nombre: 'Termo Stanley 1 L', precio: 30000, stock: 3, estado_analisis: 'listo' });
   assert.equal(p.llamadas.length, 1);
   // FEP o una pieza sin precio no sirven de catálogo.
   p.db.prepare("update productos set propietario = 'fep' where upc = ?").run(UPC);
