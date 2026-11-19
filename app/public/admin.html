@@ -165,6 +165,7 @@ const DESTINOS = [
   ...FAMILIAS.flatMap((f) => MONTOS_BANDA.map((p) =>
     [`banda_${f.prefijo}${p}`, `Banda ${f.nombre} $${p} → ${f.prefijo.toUpperCase()}${p}`])),
 ];
+// #869: una pieza con destino de banda anterior (banda_r49) lo conserva en su lista, aunque ya no se ofrezca.
 const opcionesEstado = (actual) => ESTADOS.map(([e, nombre]) => `<option value="${e}" ${e === actual ? 'selected' : ''}>${nombre}</option>`).join('');
 document.getElementById('m-estado').innerHTML = opcionesEstado('nuevo');
 const CLAVES_CONFIG = [
@@ -258,7 +259,7 @@ function ficha(p) {
         <div><label>Existencia</label>
           <input data-campo="stock" type="number" min="0" max="999" value="${p.stock ?? 1}"></div>
         <div><label>Destino</label><select data-campo="destino">
-          ${DESTINOS.map(([v, t]) => `<option value="${v}" ${v === p.destino ? 'selected' : ''}>${t}</option>`).join('')}
+          ${(DESTINOS.some(([v]) => v === p.destino) ? DESTINOS : [...DESTINOS, [p.destino, p.destino]]).map(([v, t]) => `<option value="${v}" ${v === p.destino ? 'selected' : ''}>${t}</option>`).join('')}
         </select></div>
       </div>
       <div class="acciones">

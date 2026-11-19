@@ -259,12 +259,13 @@ export const ESCENARIOS = [
   },
   {
     id: 'bandas-de-precio', categoria: 'cobrar', titulo: 'Es una pieza de banda de precio',
-    palabras: ['banda', 'precio fijo', '$19', '$49', 'tarjeta laminada', 'código de banda', 'juguetes'],
+    palabras: ['banda', 'precio fijo', '$20', '$50', '$49', 'tarjeta laminada', 'código de banda', 'juguetes'],
     pasos: [
       'Escanea la etiqueta de la pieza: las piezas de banda comparten el código de su precio.',
       'Si no escanea, busca en la tarjeta laminada junto a la caja el código de ese precio y escanéalo.',
       'Si son varias del mismo precio, escribe antes la cantidad, por ejemplo 5*, y escanea.',
       'Revisa que el renglón diga el precio correcto.',
+      'Una etiqueta vieja (por ejemplo R49 o JU199) se cobra a lo que dice: escanéala igual, no la cambies por la banda nueva.',
     ],
     ojo: 'Las bandas no se acaban: no llevan existencia que revisar.',
     ver: ['varias-iguales', 'etiqueta-no-escanea'],

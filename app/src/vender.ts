@@ -47,6 +47,7 @@ async function listarPiezas(env: Env, url: URL, correo: string, revendedora: boo
   const codigo = /^ED-\d{1,10}$/i.test(q) ? q.toUpperCase() : null;
   const piezas: Pieza[] = [];
   let hayMas = false;
+  // #869: las bandas (sin_inventario, destino banda_*) nunca son elegibles; filtrarlas aqui evita que ~400 de ellas gasten las 240 candidatas.
   // Un nombre inexistente tampoco recorre toda productos: máximo 240 candidatas por petición.
   // El cursor avanza aun en un tramo sin coincidencias; la pantalla permite seguir buscando.
   for (let tramo = 0; tramo < 10 && piezas.length < PAGINA; tramo++) {
@@ -56,7 +57,7 @@ async function listarPiezas(env: Env, url: URL, correo: string, revendedora: boo
         (${VENDIBLE} ${categoria ? 'and p.categoria = ?' : ''}
           ${q && !codigo ? "and instr(lower(p.nombre), lower(?)) > 0" : ''}) as elegible
       from productos p ${codigo ? '' : 'indexed by productos_propietario_creado'}
-      where p.propietario = 'dolaron' ${codigo ? 'and p.codigo = ?' : ''}
+      where p.propietario = 'dolaron' and p.sin_inventario = 0 and p.destino = 'etiqueta' ${codigo ? 'and p.codigo = ?' : ''}
         ${hoy ? 'and p.creado_en >= ? and p.creado_en < ?' : ''}
         ${cursor ? 'and (p.creado_en, p.rowid) < (?, ?)' : ''}
       order by p.creado_en desc, p.rowid desc limit ?`)
