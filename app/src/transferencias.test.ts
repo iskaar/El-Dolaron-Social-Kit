@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { tienda, PRODUCTO, DUENO, datosTransferencia } from './prueba-d1.ts';
-import { transferenciaDe, claveRastreoDe, CLAVE_DESDE } from '../public/venta.js';
+import { transferenciaDe, claveRastreoDe, importeDeComprobante, CLAVE_DESDE } from '../public/venta.js';
 
 type Tienda = ReturnType<typeof tienda>;
 const claves = (db: DatabaseSync) => db.prepare('select * from transferencias_spei order by id').all() as Record<string, any>[];
@@ -67,6 +67,23 @@ test('el monto: menos de lo debido se rechaza, igual o mas se acepta y el excede
   assert.equal(poco.ok, false);
   assert.match((poco as { error: string }).error, /\$499\.99 y se cobran \$500\.00.*\(\$0\.01\)/);
   for (const raro of [0, -5, NaN, 10.5, Infinity]) assert.equal(transferenciaDe({ clave, transferido: raro, debido: 50000 }).ok, false, String(raro));
+});
+
+test('importe derivado del comprobante (#875): tienda, envío y abono, siempre entre el mínimo y el tope', () => {
+  const clave = 'EJEMPLO123456';
+  // Apartado para recoger: total $250, mínimo $100. El comprobante manda; pasa del total y se topa; menos del mínimo no baja del mínimo.
+  assert.equal(importeDeComprobante(15000, 25000, 10000), 15000);
+  assert.equal(importeDeComprobante(40000, 25000, 10000), 25000);
+  assert.equal(importeDeComprobante(5000, 25000, 10000), 10000);
+  assert.equal(transferenciaDe({ clave, transferido: 5000, debido: importeDeComprobante(5000, 25000, 10000) }).ok, false);   // el aviso de siempre
+  // Envío: el paquete abre con el mínimo aunque el comprobante diga más (tope = mínimo); el excedente se anota.
+  const abre = importeDeComprobante(30000, 10000, 10000);
+  assert.equal(abre, 10000);
+  assert.deepEqual(transferenciaDe({ clave, transferido: 30000, debido: abre }), { ok: true, clave, transferido: 30000, aplicado: 10000, excedente: 20000 });
+  // Abono: lo que dice el comprobante hasta lo que falta; sin comprobante legible no hay importe.
+  assert.equal(importeDeComprobante(6000, 24900), 6000);
+  assert.equal(importeDeComprobante(30000, 24900), 24900);
+  for (const raro of [0, -5, NaN, 10.5, undefined as unknown as number]) assert.equal(importeDeComprobante(raro, 24900), 0, String(raro));
 });
 
 test('caja: bajo $300 no pide clave; desde $300 si, y queda confirmada por cajero con quien la registro', async () => {
