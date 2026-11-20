@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { transferenciaDe } from '../public/venta.js';
+import { transferenciaDe, importeDeComprobante, envioDe, anticipoMinimoDe } from '../public/venta.js';
 
 const fuente = readFileSync('public/pedidos.html', 'utf8').replace(/\r\n/g, '\n');
 
@@ -26,7 +26,7 @@ function pantalla(memoria: Map<string, string>, enviar: (ruta: string, cuerpo: a
   };
   $('caja-nombre').value = 'Caja 1';
   const contexto = {
-    $, crypto, JSON, Number, Math, transferenciaDe,
+    $, crypto, JSON, Number, Math, transferenciaDe, importeDeComprobante,
     localStorage: {
       getItem: (k: string) => memoria.get(k) ?? null,
       setItem: (k: string, v: string) => { if (!permiteGuardar) throw new Error('sin memoria'); memoria.set(k, v); },
@@ -157,14 +157,13 @@ test('abono por transferencia: sin clave o con monto menor el error queda junto 
   const enviados: any[] = [];
   const p = pantalla(memoria, async (_ruta, cuerpo) => { enviados.push(cuerpo); return { ok: true, status: 200, json: async () => ({ faltante: 0, excedente_transferencia: 1000 }) }; });
   p.abrir(17, 'abono');
-  p.$('mover-importe').value = '50';
   p.$('mover-forma').value = 'transferencia';
   await p.guardar();
   assert.match(p.$('mover-clave-error').textContent, /Escribe la clave de rastreo/);
   p.$('mover-clave').value = ' ejemplo 123456 ';
-  p.$('mover-monto').value = '49.99';
   await p.guardar();
-  assert.match(p.$('mover-clave-error').textContent, /Pídele al cliente que transfiera lo que falta/);
+  assert.match(p.$('mover-clave-error').textContent, /Escribe el monto que dice el comprobante/);
+  assert.equal(p.$('mover-monto').enfocado, true);
   assert.equal(enviados.length, 0);
   assert.equal(memoria.size, 0);
   p.$('mover-monto').value = '60';
@@ -179,8 +178,39 @@ test('abono por transferencia: sin clave o con monto menor el error queda junto 
   assert.equal(enviados[0].banco_emisor, '40012');
   assert.equal(enviados[0].clave_rastreo, 'EJEMPLO123456');
   assert.equal(enviados[0].monto_transferido, 6000);
-  assert.equal(enviados[0].importe, 5000);
+  assert.equal(enviados[0].importe, 6000);   // #875: el abono es lo que dice el comprobante, no se captura aparte
   assert.match(p.$('aviso-lista').textContent, /Movimiento de P-17 registrado.*Sobraron \$10/);
+});
+
+test('abono por transferencia (#875): un solo importe, el del comprobante topado a lo que falta, y un renglón que dice qué se registra', async () => {
+  const enviados: any[] = [];
+  const p = pantalla(new Map(), async (_ruta, cuerpo) => { enviados.push(cuerpo); return { ok: true, status: 200, json: async () => ({ faltante: 0 }) }; });
+  p.abrir(17, 'abono');   // falta $249
+  p.$('mover-forma').value = 'transferencia';   // la forma por omisión de la pantalla real
+  p.$('mover-forma').change();
+  assert.equal(p.$('mover-importe-bloque').hidden, true);                 // transferencia es la forma por omisión: no se escribe el abono
+  assert.equal(p.$('mover-transf').hidden, false);
+  p.$('mover-forma').value = 'efectivo';
+  p.$('mover-forma').change();
+  assert.equal(p.$('mover-importe-bloque').hidden, false);               // efectivo y tarjeta: un solo campo, como siempre
+  assert.equal(p.$('mover-transf').hidden, true);
+  assert.equal(p.$('mover-cobro').textContent, '');
+  p.$('mover-forma').value = 'transferencia';
+  p.$('mover-forma').change();
+  assert.match(p.$('mover-cobro').textContent, /Sube la foto del comprobante/);
+  p.$('mover-monto').value = '100';
+  p.$('mover-monto').input();
+  assert.equal(p.$('mover-cobro').textContent, 'Se registra un abono de $100. Faltan $149.');
+  p.$('mover-monto').value = '300';
+  p.$('mover-monto').input();
+  assert.match(p.$('mover-cobro').textContent, /^Se registra un abono de \$249\. No falta nada\. Sobraron \$51 en la transferencia/);
+  p.$('mover-clave').value = 'EJEMPLO123456';
+  p.$('mover-banco').value = '40012';
+  await p.guardar();
+  assert.equal(enviados.length, 1);
+  assert.equal(enviados[0].importe, 24900);
+  assert.equal(enviados[0].monto_transferido, 30000);
+  assert.deepEqual(Object.keys(enviados[0]).sort(), ['banco_emisor', 'caja', 'clave_rastreo', 'forma_pago', 'id', 'importe', 'monto_transferido']);
 });
 
 test('abono: si el servidor rechaza la clave, el cuadro sigue abierto con el error junto al campo y el intento siguiente usa ID nuevo', async () => {
@@ -292,4 +322,42 @@ test('revendedora o portal sin pago no dice «los abonos no lo alargan»; con un
   assert.match(sinPago, /Sin anticipo · Vence el/);
   assert.match(conPago, /\(quedan 6 días; los abonos no lo alargan\)/);
   assert.match(conPago, /data-tipo="abono"/);
+});
+
+test('nuevo apartado por transferencia (#875): el anticipo sale del comprobante; tienda hasta el total, envío abre con el mínimo, efectivo escribe el suyo', () => {
+  const campos = new Map<string, any>();
+  const $ = (id: string) => { if (!campos.has(id)) campos.set(id, { value: '' }); return campos.get(id); };
+  let tipoEntrega = 'tienda';
+  const bloque = fuente.slice(fuente.indexOf('function calcular() {'), fuente.indexOf('function pintar() {'))
+    + fuente.slice(fuente.indexOf('/** Renglón de solo lectura con lo que se va a registrar con transferencia'), fuente.indexOf('function validar() {'));
+  const desde = fuente.indexOf('const centavos =');
+  const ayudas = fuente.slice(desde, fuente.indexOf('\n', desde));
+  const avisoSrc = fuente.slice(fuente.indexOf('const avisoExcedente ='), fuente.indexOf("gerencia.` : '';") + "gerencia.` : '';".length);
+  const piezas = [{ precio: 25000, cantidad: 1 }];
+  const { calcular, textoCobro } = runInNewContext(`${ayudas}\n${avisoSrc}\n${bloque}\n({ calcular, textoCobro })`, {
+    $, piezas, Number, Math, envioDe, anticipoMinimoDe, importeDeComprobante, pesos: (n: number) => `$${n / 100}`,
+    entrega: () => tipoEntrega, telefonoLimpio: () => '4441234567',
+  });
+  $('cliente').value = 'Ana'; $('caja-nombre').value = 'Caja 1'; $('forma').value = 'transferencia';
+  $('monto-transf').value = '150';
+  assert.equal(calcular().anticipo, 15000);
+  assert.equal(calcular().motivo, '');
+  assert.equal(textoCobro(calcular()), 'Se registra anticipo de $150. Faltan $100.');
+  $('monto-transf').value = '400';
+  assert.equal(calcular().anticipo, 25000);                                  // topado al total del apartado
+  assert.match(textoCobro(calcular()), /^Se registra anticipo de \$250\. No falta nada\. Sobraron \$150 en la transferencia/);
+  $('monto-transf').value = '50';
+  assert.equal(calcular().anticipo, 10000);                                  // menos del mínimo: queda el mínimo y transferenciaDe lo rechaza al apartar
+  assert.match(textoCobro(calcular()), /El comprobante dice \$50 y el anticipo mínimo es \$100/);
+  $('monto-transf').value = '';
+  assert.match(textoCobro(calcular()), /Sube la foto del comprobante/);
+  tipoEntrega = 'envio';
+  $('monto-transf').value = '300';
+  assert.equal(calcular().anticipo, 10000);                                  // envío: el paquete abre con el mínimo
+  assert.match(textoCobro(calcular()), /^Se registra anticipo de \$100\. Faltan \$249\. Sobraron \$200/);
+  tipoEntrega = 'tienda';
+  $('forma').value = 'efectivo';
+  $('anticipo').value = '120';
+  assert.equal(calcular().anticipo, 12000);                                  // efectivo: un solo campo, como siempre
+  assert.equal(textoCobro(calcular()), '');
 });

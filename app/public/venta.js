@@ -174,6 +174,14 @@ export function transferenciaDe({ clave, transferido, debido }) {
 }
 
 /**
+ * Con transferencia el comprobante es la unica fuente del importe (#875): se recibe lo que dice, hasta `maximo` (el total del
+ * apartado o lo que falta del pedido) y nunca menos que `minimo`; si el comprobante dice menos que el minimo, `transferenciaDe`
+ * lo rechaza con su aviso de siempre. En envio `maximo` es el minimo: el paquete abre con el minimo. Centavos enteros.
+ */
+export const importeDeComprobante = (transferido, maximo = Infinity, minimo = 0) =>
+  Math.max(minimo, Math.min(maximo, Number.isSafeInteger(transferido) && transferido > 0 ? transferido : 0));
+
+/**
  * Banco de donde sale la transferencia (#603): el CEP de Banxico lo pide. Codigo SPEI de 5 digitos = 40 (banco) o 90
  * (fintech) + el codigo de 3 digitos de la CLABE. La PC de la caja revisa cada codigo contra el catalogo de Banxico
  * (tools/cep_verificar.py --catalogo); uno que Banxico no conozca nunca se consulta. «otro» = no se verifica sola.
