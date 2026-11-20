@@ -137,9 +137,11 @@
           <tr class="fuerte"><td>Total</td><td id="c-total">$0</td></tr>
         </table>
 
-        <label for="anticipo">Anticipo recibido ($)</label>
-        <input id="anticipo" type="number" min="0" step="0.01" inputmode="decimal">
-        <div class="nota" id="anticipo-ayuda"></div>
+        <div id="anticipo-bloque">
+          <label for="anticipo">Anticipo recibido ($)</label>
+          <input id="anticipo" type="number" min="0" step="0.01" inputmode="decimal">
+          <div class="nota" id="anticipo-ayuda"></div>
+        </div>
 
         <label for="forma">Forma de pago del anticipo</label>
         <select id="forma">
@@ -149,17 +151,18 @@
         </select>
 
         <div id="transf-crear" class="transferencia">
+          <label for="comprobante">Foto del comprobante (llena la clave, el monto y el banco)</label>
+          <input id="comprobante" type="file" accept="image/*" aria-describedby="comprobante-aviso">
+          <div class="nota" id="comprobante-aviso" role="status"></div>
           <label for="clave">Clave de rastreo</label>
           <input id="clave" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" aria-describedby="clave-ayuda clave-error">
           <label for="monto-transf">Monto transferido ($)</label>
           <input id="monto-transf" type="number" min="0.01" step="0.01" inputmode="decimal" aria-describedby="clave-ayuda clave-error">
           <label for="banco">Banco de donde sale</label>
           <select id="banco" aria-describedby="clave-error"><option value="">Elige el banco…</option></select>
-          <label for="comprobante">O sube la foto del comprobante (se llenan solos; tú confirmas)</label>
-          <input id="comprobante" type="file" accept="image/*" aria-describedby="comprobante-aviso">
-          <div class="nota" id="comprobante-aviso" role="status"></div>
           <div class="nota" id="clave-ayuda">Viene en el comprobante de tu cliente, igual que el monto. Ejemplo: EJEMPLO1234567890. Cada clave sirve para un solo pago.</div>
           <div class="aviso error" id="clave-error" role="alert"></div>
+          <div class="nota" id="cobro-resumen" aria-live="polite"></div>
         </div>
 
         <button id="apartar" type="submit" disabled>Apartar</button>
@@ -217,22 +220,25 @@
       <input id="mover-cantidad" type="number" min="1" max="999" step="1" value="1">
     </div>
     <div id="mover-abono">
-      <label for="mover-importe">Abono recibido ($)</label>
-      <input id="mover-importe" type="number" min="0.01" step="0.01" inputmode="decimal">
+      <div id="mover-importe-bloque">
+        <label for="mover-importe">Abono recibido ($)</label>
+        <input id="mover-importe" type="number" min="0.01" step="0.01" inputmode="decimal">
+      </div>
       <label for="mover-forma">Forma de pago</label>
       <select id="mover-forma"><option value="transferencia">Transferencia</option><option value="tarjeta">Tarjeta</option><option value="efectivo">Efectivo</option></select>
       <div id="mover-transf" class="transferencia">
+        <label for="mover-comprobante">Foto del comprobante (llena la clave, el monto y el banco)</label>
+        <input id="mover-comprobante" type="file" accept="image/*" aria-describedby="mover-comprobante-aviso">
+        <div class="nota" id="mover-comprobante-aviso" role="status"></div>
         <label for="mover-clave">Clave de rastreo</label>
         <input id="mover-clave" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" aria-describedby="mover-ayuda mover-clave-error">
         <label for="mover-monto">Monto transferido ($)</label>
         <input id="mover-monto" type="number" min="0.01" step="0.01" inputmode="decimal" aria-describedby="mover-ayuda mover-clave-error">
         <label for="mover-banco">Banco de donde sale</label>
         <select id="mover-banco" aria-describedby="mover-clave-error"><option value="">Elige el banco…</option></select>
-        <label for="mover-comprobante">O sube la foto del comprobante (se llenan solos; tú confirmas)</label>
-        <input id="mover-comprobante" type="file" accept="image/*" aria-describedby="mover-comprobante-aviso">
-        <div class="nota" id="mover-comprobante-aviso" role="status"></div>
         <p class="nota" id="mover-ayuda">Viene en el comprobante de tu cliente, igual que el monto. Ejemplo: EJEMPLO1234567890. Cada clave sirve para un solo pago.</p>
         <div class="aviso error" id="mover-clave-error" role="alert"></div>
+        <div class="nota" id="mover-cobro" aria-live="polite"></div>
       </div>
       <p class="nota">Se registra en la caja elegida arriba. En efectivo, guarda el abono y abre el cajón desde /caja.</p>
     </div>
@@ -245,7 +251,7 @@
 </dialog>
 
 <script type="module">
-import { envioDe, anticipoMinimoDe, transferenciaDe, BANCOS } from '/venta.js';
+import { envioDe, anticipoMinimoDe, transferenciaDe, importeDeComprobante, BANCOS } from '/venta.js';
 import { codigoDeDigitos } from '/code128.js';
 
 const $ = (id) => document.getElementById(id);
@@ -277,11 +283,13 @@ const avisoExcedente = (excedente) => excedente > 0
 // Banxico pide el banco emisor para verificar la transferencia despues (#603); «Otro banco» no se verifica sola.
 for (const id of ['banco', 'mover-banco']) $(id).append(...[...BANCOS, ['otro', 'Otro banco (no se verifica sola)']].map(([codigo, nombre]) => new Option(nombre, codigo)));
 // Foto del comprobante (#603): se llena sola la clave, el monto y el banco; quien cobra confirma. Sin red o si falla, a mano como siempre.
-for (const [id, ids] of [['comprobante', { clave: 'clave', monto: 'monto-transf', banco: 'banco', aviso: 'comprobante-aviso' }],
-  ['mover-comprobante', { clave: 'mover-clave', monto: 'mover-monto', banco: 'mover-banco', aviso: 'mover-comprobante-aviso' }]]) {
+// El importe (anticipo o abono) se deriva del monto del comprobante (#875): al llenarse solo, se vuelve a calcular lo que se registra.
+for (const [id, ids, refrescar] of [['comprobante', { clave: 'clave', monto: 'monto-transf', banco: 'banco', aviso: 'comprobante-aviso' }, () => validar()],
+  ['mover-comprobante', { clave: 'mover-clave', monto: 'mover-monto', banco: 'mover-banco', aviso: 'mover-comprobante-aviso' }, () => resumenMover()]]) {
   $(id).addEventListener('change', async () => {
     try { await (await import('/comprobante.js')).adjuntar($(id), ids, $); }
     catch { $(ids.aviso).textContent = 'Sin red: escribe la clave, el monto y el banco a mano.'; }
+    refrescar();
   });
 }
 
@@ -391,7 +399,10 @@ function calcular() {
   const envio = entrega() === 'envio' ? envioDe(subtotal) : 0;
   const total = subtotal + envio;
   const minimo = anticipoMinimoDe(subtotal);
-  const anticipo = entrega() === 'envio' ? minimo : Math.round(Number($('anticipo').value || 0) * 100);
+  // Con transferencia el anticipo sale del comprobante (#875): lo que dice, entre el mínimo y el total; en envío, el mínimo.
+  const anticipo = entrega() === 'envio' ? minimo
+    : $('forma').value === 'transferencia' ? importeDeComprobante(centavos('monto-transf'), total, minimo)
+    : Math.round(Number($('anticipo').value || 0) * 100);
   let motivo = '';
   if (!piezas.length) motivo = 'Agrega al menos una pieza.';
   else if (!($('cliente').value.trim())) motivo = 'Escribe el nombre del cliente.';
@@ -425,14 +436,30 @@ function pintar() {
   $('anticipo-ayuda').textContent = envioElegido ? `${pesos(minimo)} cuentan para el total. Después agrega piezas sin otro anticipo y abona hasta liquidar. Envío $99; gratis desde $1,000 en piezas.` : `Mínimo ${pesos(minimo)} ($100, o el total si la pieza cuesta menos). Puedes recibir más; cuenta para el total.`;
   validar();
 }
+/** Renglón de solo lectura con lo que se va a registrar con transferencia (#875). */
+function textoCobro(c) {
+  if ($('forma').value !== 'transferencia' || !piezas.length) return '';
+  const transferido = centavos('monto-transf');
+  const minimo = anticipoMinimoDe(c.subtotal);
+  if (transferido <= 0) return 'Sube la foto del comprobante o escribe el monto: con eso se calcula el anticipo.';
+  if (transferido < minimo) return `El comprobante dice ${pesos(transferido)} y el anticipo mínimo es ${pesos(minimo)}.`;
+  const falta = c.total - c.anticipo;
+  return `Se registra anticipo de ${pesos(c.anticipo)}. ${falta > 0 ? `Faltan ${pesos(falta)}.` : 'No falta nada.'} ${avisoExcedente(transferido - c.anticipo)}`.trim();
+}
 function validar() {
   const c = calcular();
+  $('cobro-resumen').textContent = textoCobro(c);
   $('apartar').disabled = enviando || !!c.motivo;
   if (!enviando && c.motivo && piezas.length) decir('aviso', c.motivo);
   else if (!enviando && !$('aviso').classList.contains('error')) decir('aviso', '');
 }
-const mostrarTransferencia = () => { $('transf-crear').hidden = $('forma').value !== 'transferencia'; };
-for (const id of ['clave', 'monto-transf', 'banco']) $(id).addEventListener('input', () => decir('clave-error', ''));
+// Con transferencia no se captura el anticipo: se pide lo del comprobante y de ahí sale el importe (#875).
+const mostrarTransferencia = () => {
+  const transf = $('forma').value === 'transferencia';
+  $('transf-crear').hidden = !transf;
+  $('anticipo-bloque').hidden = transf;
+};
+for (const id of ['clave', 'monto-transf', 'banco']) $(id).addEventListener('input', () => { decir('clave-error', ''); validar(); });
 for (const id of ['cliente', 'telefono', 'forma']) $(id).addEventListener('input', () => { quitarError(); mostrarTransferencia(); validar(); });
 $('anticipo').addEventListener('input', () => { anticipoTocado = true; quitarError(); pintar(); });
 for (const r of document.querySelectorAll('input[name="entrega"]')) r.addEventListener('change', pintar);
@@ -744,6 +771,19 @@ try {
 } catch { decir('aviso-lista', 'No se pudo leer el movimiento pendiente. Revisa la memoria del navegador antes de cobrar.', 'error'); }
 $('recuperar-movimiento').hidden = !movimiento;
 
+const faltanteDe = () => pedidos.find((x) => x.folio === movimiento?.folio)?.faltante;
+/** Renglón de solo lectura con el abono que se registra con transferencia (#875): sale del monto del comprobante, hasta lo que falta. */
+function resumenMover() {
+  const el = $('mover-cobro');
+  if (movimiento?.tipo !== 'abono' || $('mover-forma').value !== 'transferencia') { el.textContent = ''; return; }
+  const transferido = centavos('mover-monto');
+  if (transferido <= 0) { el.textContent = 'Sube la foto del comprobante o escribe el monto: con eso se calcula el abono.'; return; }
+  const falta = faltanteDe();
+  const importe = movimiento.cuerpo ? movimiento.cuerpo.importe : importeDeComprobante(transferido, falta);
+  const queda = falta === undefined ? '' : falta - importe > 0 ? `Faltan ${pesos(falta - importe)}.` : 'No falta nada.';
+  el.textContent = `Se registra un abono de ${pesos(importe)}. ${queda} ${avisoExcedente(transferido - importe)}`.replace(/ +/g, ' ').trim();
+}
+
 function abrirMovimiento(folio, tipo, reporte = null) {
   if (moviendo) return;
   const p = pedidos.find((x) => x.folio === folio);
@@ -782,6 +822,7 @@ function abrirMovimiento(folio, tipo, reporte = null) {
     $('mover-clave').value = movimiento.cuerpo.clave_rastreo ?? '';
     $('mover-monto').value = movimiento.cuerpo.monto_transferido ? String(movimiento.cuerpo.monto_transferido / 100) : '';
     $('mover-banco').value = movimiento.cuerpo.banco_emisor ?? '';
+    $('mover-importe').value = String(movimiento.cuerpo.importe / 100);
   }
   mostrarTransferenciaMover();
   decir('mover-aviso', pendiente ? 'El ID y el importe se conservan hasta confirmar; no vuelvas a recibir este dinero.' : '');
@@ -789,9 +830,14 @@ function abrirMovimiento(folio, tipo, reporte = null) {
   $('mover-guardar').disabled = false;
   $('dlg-mover').showModal();
 }
-const mostrarTransferenciaMover = () => { $('mover-transf').hidden = $('mover-forma').value !== 'transferencia'; };
+const mostrarTransferenciaMover = () => {
+  const transf = $('mover-forma').value === 'transferencia';
+  $('mover-transf').hidden = !transf;
+  $('mover-importe-bloque').hidden = transf;   // con transferencia el abono sale del comprobante (#875)
+  resumenMover();
+};
 $('mover-forma').addEventListener('change', () => { mostrarTransferenciaMover(); decir('mover-clave-error', ''); });
-for (const id of ['mover-clave', 'mover-monto', 'mover-banco']) $(id).addEventListener('input', () => decir('mover-clave-error', ''));
+for (const id of ['mover-clave', 'mover-monto', 'mover-banco']) $(id).addEventListener('input', () => { decir('mover-clave-error', ''); resumenMover(); });
 for (const lista of ['lista-envios', 'lista-apartados']) $(lista).addEventListener('click', (e) => {
   const boton = e.target.closest('button[data-mover]');
   if (boton) abrirMovimiento(Number(boton.dataset.mover), boton.dataset.tipo);
@@ -815,14 +861,17 @@ $('form-mover').addEventListener('submit', async (e) => {
         return decir('mover-aviso', 'Revisa el código y la cantidad.', 'error');
       cuerpo = { id: crypto.randomUUID(), producto_id: p.id, cantidad };
     } else {
-      const importe = Math.round(Number($('mover-importe').value) * 100);
       const caja = $('caja-nombre').value;
-      if (!Number.isSafeInteger(importe) || importe <= 0 || !caja)
-        return decir('mover-aviso', 'Escribe el abono y elige la caja arriba.', 'error');
+      const conComprobante = $('mover-forma').value === 'transferencia';
+      // Con transferencia el abono es lo que dice el comprobante, hasta lo que falta (#875); sin ella, lo escrito.
+      const importe = conComprobante ? importeDeComprobante(centavos('mover-monto'), faltanteDe()) : Math.round(Number($('mover-importe').value) * 100);
+      if (!Number.isSafeInteger(importe) || (importe <= 0 && !conComprobante) || !caja)
+        return decir('mover-aviso', conComprobante ? 'Elige la caja arriba.' : 'Escribe el abono y elige la caja arriba.', 'error');
       cuerpo = { id: crypto.randomUUID(), importe, forma_pago: $('mover-forma').value, caja };
       if (cuerpo.forma_pago === 'transferencia') {
         const transf = leerTransferencia('mover-clave', 'mover-monto', importe, 'mover-banco');
         if (!transf.ok) return errorTransferencia('mover-clave-error', 'mover-clave', 'mover-monto', transf, 'mover-banco');
+        if (importe <= 0) return decir('mover-aviso', 'Este pedido ya no tiene nada por pagar.', 'error');
         Object.assign(cuerpo, { clave_rastreo: transf.clave, monto_transferido: transf.transferido, banco_emisor: $('mover-banco').value, ...adjunto('mover-comprobante') });
       }
     }
@@ -874,7 +923,7 @@ $('form-mover').addEventListener('submit', async (e) => {
 
 pintar();
 await cargarCatalogo();
-// Desde /vender: solo prellena; el anticipo y la confirmación siguen siendo manuales.
+// Desde /vender: solo prellena; el comprobante (o el anticipo) y la confirmación siguen siendo manuales.
 const prellenado = new URLSearchParams(location.search);
 if (prellenado.has('codigo')) {
   $('cliente').value = (prellenado.get('cliente') ?? '').slice(0, 80);
@@ -886,7 +935,7 @@ if (prellenado.has('codigo')) {
   history.replaceState(null, '', location.pathname);
 }
 await cargarLista();
-if (prellenado.has('codigo') && piezas.length) ($('telefono').value ? $('anticipo') : $('telefono')).focus();
+if (prellenado.has('codigo') && piezas.length) ($('telefono').value ? ($('forma').value === 'transferencia' ? $('comprobante') : $('anticipo')) : $('telefono')).focus();
 else $('codigo').focus();
 </script>
 </body>
