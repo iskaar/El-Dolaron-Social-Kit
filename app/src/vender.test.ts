@@ -60,6 +60,68 @@ test('varias piezas: una línea por pieza y un solo cierre, hasta diez', () => {
   assert.ok(texto.startsWith('ED-0 · Blusa · $100.01 · https://eldolaron.com/?pieza=ED-0#catalogo\nED-1'));
 });
 
+test('#875: la dirección y el horario solo salen para piezas de Soledad; las otras tiendas dicen su nombre y nada más', () => {
+  const base = { nombre: 'Blusa', talla: 'M', precio: 20000, precio_lista: 20000 };
+  const soledad = { ...base, codigo: 'ED-1', tiendas: ['Soledad'] };
+  const salk = { ...base, codigo: 'ED-2', tiendas: ['Avenida Salk'] };
+  const romero = { ...base, codigo: 'ED-3', tiendas: ['Coronel Romero'] };
+  const ambas = { ...base, codigo: 'ED-4', tiendas: ['Soledad', 'Avenida Salk'] };
+  const viejo = { ...base, codigo: 'ED-5' };   // caché o servidor anterior: sin `tiendas`
+  const DIRECCION = /Jardín Hidalgo 129|11 a 8/;
+  const cierre = (t: string) => t.split('\n').at(-1);
+  // Una pieza.
+  assert.equal(cierre(textoWhatsApp([soledad])), '📍 Jardín Hidalgo 129, Soledad · todos los días de 11 a 8');
+  assert.equal(cierre(textoWhatsApp([viejo])), '📍 Jardín Hidalgo 129, Soledad · todos los días de 11 a 8');
+  assert.equal(textoWhatsApp([viejo]), textoWhatsApp([{ ...viejo, tiendas: [] }]));
+  assert.equal(cierre(textoWhatsApp([ambas])), '📍 Jardín Hidalgo 129, Soledad · todos los días de 11 a 8');
+  for (const [pieza, nombre] of [[salk, 'Avenida Salk'], [romero, 'Coronel Romero']] as const) {
+    const texto = textoWhatsApp([pieza]);
+    assert.equal(cierre(texto), `📍 Está en El Dolarón ${nombre}`);
+    assert.ok(!DIRECCION.test(texto), 'no inventa dirección ni horario');
+    assert.match(texto, /Envíos todos los viernes/);
+  }
+  assert.ok(!DIRECCION.test(textoWhatsApp([salk], true)));
+  // Varias de la misma tienda: igual que hoy, sin renglones extra.
+  const dos = textoWhatsApp([soledad, viejo]);
+  assert.equal(dos.split('\n').length, 5);
+  assert.ok(!dos.includes('📍 Soledad'));
+  // Varias solo de otras tiendas: cada renglón dice la suya y no hay dirección.
+  const fuera = textoWhatsApp([salk, romero]);
+  assert.ok(!DIRECCION.test(fuera));
+  assert.match(fuera, /ED-2 · Blusa · \$200 · \S+ · 📍 Avenida Salk\n/);
+  assert.match(fuera, /ED-3 · Blusa · \$200 · \S+ · 📍 Coronel Romero\n/);
+  assert.ok(!cierre(fuera)!.startsWith('📍'));
+  // Mezcla: cada renglón dice dónde está y la dirección se rotula como la de Soledad.
+  const mezcla = textoWhatsApp([soledad, salk, ambas], true);
+  assert.match(mezcla, /ED-1 · Blusa · \$200 · \S+ · 📍 Soledad\n/);
+  assert.match(mezcla, /ED-2 · Blusa · \$200 · \S+ · 📍 Avenida Salk\n/);
+  assert.match(mezcla, /ED-4 · Blusa · \$200 · \S+ · 📍 Soledad\n/);
+  assert.equal(cierre(mezcla), '📍 Soledad: Jardín Hidalgo 129 · todos los días de 11 a 8');
+  assert.equal(mezcla.match(/Jardín Hidalgo 129/g)?.length, 1);
+  assert.equal(mezcla.match(/Apártala/g)?.length, 1);
+  // Sin `tiendas` junto a una pieza de otra tienda: la vieja se cuenta como Soledad.
+  assert.match(textoWhatsApp([viejo, salk]), /ED-5 .* · 📍 Soledad\n/);
+});
+
+test('#875: /vender da Compartir en un toque al personal y «La quiere» termina en «Ya pagó: apartar» o «Solo anotar»', () => {
+  const html = readFileSync('public/vender.html', 'utf8').replace(/\r\n/g, '\n');
+  // El botón Compartir de cada tarjeta ya no nace oculto ni se muestra solo en modo revendedora.
+  assert.match(html, /<button type="button" class="principal compartir-uno">Compartir<\/button>/);
+  assert.ok(!/compartir-uno'\)\.hidden/.test(html));
+  // Dos salidas; «Ya pagó» solo navega con enlaceApartar y no llama a /api/interesados.
+  assert.match(html, /<button id="apartar-ya" class="principal" type="button">Ya pagó: apartar<\/button><button id="guardar" type="submit">Solo anotar<\/button>/);
+  const apartar = html.match(/\$\('apartar-ya'\)\.addEventListener\('click'[\s\S]*?\n\}\);\n/)![0];
+  assert.match(apartar, /location\.href = enlaceApartar\(\{ codigo: piezaInteresado\.codigo, cliente, telefono \}\)/);
+  assert.ok(!apartar.includes('/api/interesados'));
+  assert.match(apartar, /if \(!telefono\)/);   // /pedidos exige el WhatsApp: vacío o inválido no navega
+  assert.match(html, /\$\('apartar-ya'\)\.hidden = true;/);   // la revendedora no aparta: la tienda registra el pago
+  // El tamaño táctil es de todos: ya no cuelga de body.rev.
+  const reglas = html.match(/<style>([\s\S]*?)<\/style>/)![1];
+  assert.match(reglas, /\n {2}body \{[^}]*font-size: 18px/);
+  assert.match(reglas, /\n {2}button, \.boton \{[^}]*min-height: 56px/);
+  assert.deepEqual([...reglas.matchAll(/body\.rev [^{]+/g)].map((m) => m[0].trim()), ['body.rev .solo-caja', 'body.rev #ver-mias', 'body.rev #ver-interesados']);
+});
+
 test('teléfono opcional: valida, normaliza +52 y rechaza tipos y letras; código pegado o escaneado', () => {
   for (const valor of ['', '  ']) assert.equal(telefonoInteresado(valor), '');
   for (const valor of ['4441234567', '+52 (444) 123-4567', '52 444 123 4567']) assert.equal(telefonoInteresado(valor), '4441234567');
