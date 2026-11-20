@@ -10,42 +10,45 @@
     --rojo-texto:#B3141B; --gris:#5B6478; --fondo-ok:#E4F3EA; --fondo-error:#FDECEC; --fondo-aviso:#FFF6D9; --aviso-texto:#6B5400; --deshab-fondo:#E9EDF4; }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
-  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; }
+  body { margin: 0; background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif; font-size: 18px; }
   header { background: var(--azul); color: #fff; padding: 12px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-  h1 { flex: 1; font-size: 20px; margin: 0; }
+  h1 { flex: 1; font-size: 22px; margin: 0; }
   header a { color: var(--amarillo); display: flex; align-items: center; min-height: 44px; }
-  main { max-width: 980px; margin: auto; padding: 16px 12px 100px; }
+  main { max-width: 980px; margin: auto; padding: 16px 12px 140px; }
   h2 { margin: 0 0 10px; color: var(--azul); font-size: 18px; }
   p { line-height: 1.5; }
-  label { display: block; margin: 10px 0 4px; font-size: 14px; }
-  input, select, textarea { width: 100%; min-width: 0; padding: 12px; font: inherit; font-size: 16px; border: 1px solid #8995aa; border-radius: 8px; background: #fff; }
+  label { display: block; margin: 10px 0 4px; font-size: 16px; font-weight: 700; }
+  input, select, textarea { width: 100%; min-width: 0; padding: 12px; font: inherit; font-size: 18px; border: 2px solid var(--azul); border-radius: 8px; background: #fff; }
   textarea { resize: vertical; }
-  button, .boton { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 12px; border: 1px solid var(--azul); border-radius: 8px; font: inherit; font-weight: 700; text-align: center; color: var(--azul); background: #fff; cursor: pointer; text-decoration: none; }
+  button, .boton { display: inline-flex; align-items: center; justify-content: center; min-height: 56px; padding: 10px 12px; border: 2px solid var(--azul); border-radius: 10px; font: inherit; font-size: 18px; font-weight: 700; text-align: center; color: var(--azul); background: #fff; cursor: pointer; text-decoration: none; }
   button:disabled { opacity: .55; cursor: default; }
   .principal, button[aria-pressed="true"] { background: var(--azul); color: #fff; }
   .texto { border-color: transparent; background: transparent; text-decoration: underline; }
+  button.texto { min-height: 44px; font-size: 16px; }
   :is(button, a, input, select, textarea, summary):focus-visible { outline: 3px solid #d08b00; outline-offset: 3px; }
   .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
   .fila { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .fila input { flex: 1; }
   nav { display: flex; gap: 8px; margin: 16px 0; }
-  nav button { flex: 1; }
+  nav button { flex: 1; flex-direction: column; gap: 2px; min-height: 64px; padding: 6px 4px; font-size: 16px; }
   .dos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .check { display: flex; align-items: center; gap: 8px; min-height: 44px; margin: 0; }
-  .check input { width: 20px; height: 20px; flex: none; }
-  .aviso { min-height: 22px; margin: 8px 0; font-size: 14px; overflow-wrap: anywhere; }
+  .check { display: flex; align-items: center; gap: 12px; min-height: 56px; margin: 0; }
+  .check input { width: 28px; height: 28px; flex: none; }
+  .aviso { min-height: 22px; margin: 8px 0; font-size: 18px; overflow-wrap: anywhere; }
+  .aviso.estado { font-size: 16px; }
   .error { color: #ae1a21; }
   .ok { color: var(--verde); }
-  .nota { font-size: 13px; color: #505d73; }
+  .nota { font-size: 16px; color: var(--gris); }
   /* Resultado de una acción de la usuaria: fijo arriba, se queda hasta «Entendido» (#579, U6). */
   #resultado { position: sticky; top: 0; z-index: 20; display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 16px; font-size: 18px; font-weight: 700; color: var(--azul); background: var(--fondo-ok); border-bottom: 3px solid var(--verde); }
   #resultado.error { color: var(--rojo-texto); background: var(--fondo-error); border-bottom-color: var(--rojo-texto); }
   #resultado p { flex: 1; margin: 0; overflow-wrap: anywhere; }
   .barra { justify-content: space-between; flex-wrap: nowrap; }
   .barra .aviso { flex: 1; margin: 0; }
+  .barra button { min-width: 120px; }
   .estado { color: var(--gris); font-size: 16px; }
-  details.plegable > summary { display: flex; align-items: center; min-height: 44px; font-weight: 700; color: var(--azul); cursor: pointer; }
+  details.plegable > summary { display: flex; align-items: center; min-height: 56px; font-size: 18px; font-weight: 700; color: var(--azul); cursor: pointer; }
   body:not(.rev) details.plegable > summary, body.rev .solo-caja { display: none; }
   details.plegable > summary::after { content: "▾"; margin-left: auto; padding-left: 12px; }
   details.plegable[open] > summary::after { content: "▴"; }
@@ -53,16 +56,17 @@
   .vacio { grid-column: 1 / -1; }
   .pieza { background: #fff; border: 1px solid var(--linea); border-radius: 10px; overflow: hidden; min-width: 0; }
   .pieza img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background: #fff; }
-  .detalle { padding: 10px; }
-  .pieza h2 { font-size: 15px; overflow-wrap: anywhere; margin-bottom: 6px; }
-  .precio { font-size: 24px; font-weight: 800; color: var(--azul); }
-  .codigo { font-family: ui-monospace, monospace; font-size: 14px; }
-  .pieza button { width: 100%; margin-top: 6px; }
-  .cola { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
-  .marca { font-size: 13px; color: var(--verde); min-height: 20px; }
+  .detalle { display: flex; flex-direction: column; padding: 10px; }
+  .detalle .check { order: 9; }
+  .pieza h2 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 18px; font-weight: 700; overflow-wrap: anywhere; margin-bottom: 6px; }
+  .precio { font-size: 28px; font-weight: 800; color: var(--azul); }
+  .codigo { font-family: ui-monospace, monospace; font-size: 16px; }
+  .pieza button { width: 100%; margin-top: 12px; }
+  .cola { font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+  .marca { font-size: 16px; color: var(--verde); }
   .interesado { border-top: 1px solid var(--linea); padding: 16px 0; overflow-wrap: anywhere; }
   .interesado:first-child { border-top: 0; }
-  .interesado h2 { font-size: 17px; }
+  .interesado h2 { font-size: 18px; }
   .interesado p { margin: 6px 0; }
   .pie { position: fixed; bottom: 0; left: 0; width: 100%; padding: 10px 12px; background: #fff; border-top: 2px solid var(--azul); display: flex; gap: 12px; align-items: center; justify-content: center; }
   .pie .principal { flex: 2; }
@@ -70,7 +74,8 @@
   dialog { width: min(520px, 94vw); max-height: 92dvh; border: 2px solid var(--azul); border-radius: 12px; padding: 16px; }
   dialog::backdrop { background: rgba(22, 54, 107, .6); }
   dialog h2:focus { outline: none; }
-  dialog .acciones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  dialog h2 { font-size: 22px; }
+  dialog .acciones { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
   dialog .acciones.columna { flex-direction: column; }
   dialog .acciones.columna > * { width: 100%; }
   .grande { font-size: 18px; }
@@ -81,7 +86,7 @@
   .reglas li::before { content: "✓ "; color: var(--verde); font-weight: 800; }
   .mia { border-top: 1px solid var(--linea); padding: 14px 0; overflow-wrap: anywhere; }
   .mia:first-child { border-top: 0; }
-  .mia h3 { margin: 0 0 4px; font-size: 17px; color: var(--azul); }
+  .mia h3 { margin: 0 0 4px; font-size: 18px; color: var(--azul); }
   .mia p { margin: 4px 0; }
   .acciones-mia { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
   .acciones-mia > * { width: 100%; }
@@ -98,48 +103,22 @@
   #vista-previa { display: flex; overflow-x: auto; gap: 8px; }
   #vista-previa img { width: 135px; height: 169px; }
   #mas-compartir { margin-top: 12px; }
-  .ico { display: none; }
+  .ico { display: block; font-size: 22px; line-height: 1; }
   .guia ol { margin: 8px 0 0; padding-left: 24px; }
   .guia li { margin: 8px 0; }
   .guia .cab { flex-wrap: nowrap; justify-content: space-between; }
   .guia h2 { margin: 0; }
   @media (min-width: 700px) { #piezas { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  /* Una columna y tarjeta horizontal en el teléfono, para todos (#579 para revendedoras, #875 para el personal). */
+  @media (max-width: 599px) {
+    #piezas { grid-template-columns: 1fr; }
+    .pieza { display: grid; grid-template-columns: 38% 1fr; }
+    .pieza img { align-self: start; }
+  }
 
-  /* Revendedora (#579, A2/A7/A11): letra de 18 px, botones de 56 px, casillas de 28 px y una columna.
-     Las cajeras no llevan la clase .rev: conservan tamaños y orden. */
-  body.rev { font-size: 18px; }
-  body.rev main { padding-bottom: 140px; }
-  body.rev h1 { font-size: 22px; }
-  body.rev label { font-size: 16px; font-weight: 700; }
-  body.rev input, body.rev select, body.rev textarea { font-size: 18px; border-width: 2px; border-color: var(--azul); }
-  body.rev .nota { font-size: 16px; color: var(--gris); }
-  body.rev .aviso { font-size: 18px; }
-  body.rev .aviso.estado { font-size: 16px; }
-  body.rev button, body.rev .boton { min-height: 56px; border-width: 2px; border-radius: 10px; font-size: 18px; }
-  body.rev button.texto { min-height: 44px; font-size: 16px; }
-  body.rev .check { gap: 12px; min-height: 56px; }
-  body.rev .check input { width: 28px; height: 28px; }
-  body.rev nav button { flex-direction: column; gap: 2px; min-height: 64px; padding: 6px 4px; font-size: 16px; }
+  /* Solo lo que cambia por rol: la revendedora ve sus ventas primero y no tiene cola de nombres (que oculta el JS). */
   body.rev #ver-mias { order: 1; }
   body.rev #ver-interesados { order: 2; }
-  body.rev .ico { display: block; font-size: 22px; line-height: 1; }
-  body.rev .barra button { min-width: 120px; }
-  body.rev details.plegable > summary { min-height: 56px; font-size: 18px; }
-  body.rev dialog .acciones { gap: 12px; }
-  body.rev dialog h2 { font-size: 22px; }
-  body.rev .pieza h2 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: 18px; font-weight: 700; }
-  body.rev .precio { font-size: 28px; }
-  body.rev .codigo, body.rev .talla { font-size: 16px; }
-  body.rev .detalle { display: flex; flex-direction: column; }
-  body.rev .detalle .check { order: 9; }
-  body.rev .pieza button { margin-top: 12px; }
-  body.rev .marca { min-height: 0; }
-  body.rev .interesado h2, body.rev .mia h3 { font-size: 18px; }
-  @media (max-width: 599px) {
-    body.rev #piezas { grid-template-columns: 1fr; }
-    body.rev .pieza { display: grid; grid-template-columns: 38% 1fr; }
-    body.rev .pieza img { align-self: start; }
-  }
 </style>
 <script src="/cajero.js"></script>
 </head>
@@ -155,7 +134,7 @@
       <label id="etiqueta-codigo" for="codigo">Código de la pieza</label>
       <div class="fila"><input id="codigo" maxlength="160" placeholder="Pega la respuesta o escanea ED-…" autocomplete="off"><button id="buscar-codigo" type="submit">La quiere</button></div>
     </form>
-    <p class="nota solo-caja">Anotar a alguien no aparta la pieza. Sin anticipo, sigue disponible.</p>
+    <p class="nota solo-caja">Después elige «Ya pagó: apartar» o «Solo anotar». Solo anotar no aparta la pieza: sin anticipo, sigue disponible.</p>
   </details>
   <nav aria-label="Vista de ventas">
     <button id="ver-piezas" type="button" aria-pressed="true"><span class="ico" aria-hidden="true">🛍️</span><span>Piezas</span></button>
@@ -211,7 +190,7 @@
     <label for="telefono">WhatsApp (opcional, 10 dígitos)</label><input id="telefono" type="tel" inputmode="tel" maxlength="24" autocomplete="tel">
     <label for="nota">Nota (opcional)</label><textarea id="nota" rows="2" maxlength="500"></textarea>
     <p id="aviso-interesado" class="aviso" role="status" aria-live="polite"></p>
-    <div class="acciones"><button id="guardar" class="principal" type="submit">Anotar interesado</button><button id="cerrar-interesado" type="button">Cerrar</button></div>
+    <div id="acciones-interesado" class="acciones"><button id="apartar-ya" class="principal" type="button">Ya pagó: apartar</button><button id="guardar" type="submit">Solo anotar</button><button id="cerrar-interesado" class="texto" type="button">Cerrar</button></div>
   </form>
 </dialog>
 <dialog id="dlg-vendida" aria-labelledby="titulo-vendida">
@@ -275,7 +254,7 @@
   <img width="320" height="320" loading="lazy" decoding="async"><div class="detalle">
     <h2></h2><div class="precio"></div><div class="codigo"></div><div class="nota talla"></div><div class="nota donde"></div><div class="marca"></div>
     <label class="check"><input type="checkbox"><span class="txt-elegir">Seleccionar</span></label><div class="cola"></div>
-    <button type="button" class="principal compartir-uno" hidden>Compartir</button><button type="button" class="vendida" hidden>Ya la vendí</button><button type="button" class="quiere">La quiere</button>
+    <button type="button" class="principal compartir-uno">Compartir</button><button type="button" class="vendida" hidden>Ya la vendí</button><button type="button" class="quiere">La quiere</button>
   </div>
 </article></template>
 <script type="module">
@@ -321,9 +300,9 @@ function pintarSeleccion() {
   $('preparar').textContent = `Compartir ${seleccion.size} en WhatsApp`;
   $('seleccion').hidden = vista !== 'piezas' || !seleccion.size;
 }
-// La revendedora ve el estado de la pieza como chip (color + ícono + palabra); la caja conserva su texto de siempre.
+// El estado de la pieza se ve como chip (color + ícono + palabra), para la revendedora y para el personal.
 function marcar(marca, clase, texto) {
-  if (revendedora) textoEn(marca, 'span', texto, `chip ${clase}`); else marca.textContent = texto;
+  textoEn(marca, 'span', texto, `chip ${clase}`);
 }
 function pintarPiezas() {
   $('piezas').replaceChildren();
@@ -351,14 +330,14 @@ function pintarPiezas() {
       tarjeta.querySelector('input').setAttribute('aria-label', `Elegir ${p.nombre} ${p.codigo}`);
       tarjeta.querySelector('.txt-elegir').textContent = 'Elegir';
       tarjeta.querySelector('.cola').hidden = true;
-      tarjeta.querySelector('.compartir-uno').hidden = tarjeta.querySelector('.vendida').hidden = false;
+      tarjeta.querySelector('.vendida').hidden = false;
       tarjeta.querySelector('.quiere').textContent = 'Anotar a un cliente';
       tarjeta.querySelector('.quiere').classList.add('texto');
       if (compartidas.has(p.id)) marcar(marca, 'ok', '✓ Ya la compartiste');
       if (p.cola.length) marcar(marca, 'aviso', '⚠ Otra persona también la quiere');
     } else {
       tarjeta.querySelector('input').setAttribute('aria-label', `Seleccionar ${p.nombre} ${p.codigo}`);
-      marca.textContent = compartidas.has(p.id) ? 'Compartida ✓' : '';
+      if (compartidas.has(p.id)) marcar(marca, 'ok', 'Compartida ✓');
     }
     $('piezas').append(fragmento);
   }
@@ -418,8 +397,9 @@ function abrirInteresado(p) {
   } else {
     piezaInteresado = p;
     $('form-interesado').reset();
-    decir('aviso-interesado', 'Solo lo anotas. La pieza sigue en venta.');
+    decir('aviso-interesado', revendedora ? 'Solo lo anotas. La pieza sigue en venta.' : '¿Ya pagó? Apártala. Si solo preguntó, anótalo: la pieza sigue en venta.');
   }
+  $('apartar-ya').disabled = !!intento;   // con una anotación sin confirmar, primero se resuelve esa
   $('pieza-interesado').textContent = `${piezaInteresado.codigo} · ${piezaInteresado.nombre}`;
   $('dlg-interesado').showModal();
 }
@@ -453,6 +433,15 @@ $('form-codigo').addEventListener('submit', async (e) => {
   } catch (e) { resultado(mensaje(e), true); }
 });
 $('cerrar-interesado').addEventListener('click', () => $('dlg-interesado').close());
+// «Ya pagó: apartar» (solo personal, #875): no anota; /pedidos ya recibe pieza, nombre y WhatsApp y el dinero se registra allá.
+$('apartar-ya').addEventListener('click', () => {
+  if (enviando) return;
+  const cliente = $('cliente').value.trim();
+  const telefono = telefonoInteresado($('telefono').value);
+  if (!cliente) { $('cliente').focus(); return decir('aviso-interesado', 'Escribe el nombre del cliente.', true); }
+  if (!telefono) { $('telefono').focus(); return decir('aviso-interesado', 'Para apartar escribe los 10 números del WhatsApp. Ejemplo: 444 123 4567.', true); }
+  location.href = enlaceApartar({ codigo: piezaInteresado.codigo, cliente, telefono });
+});
 $('dlg-interesado').addEventListener('cancel', (e) => { if (enviando) e.preventDefault(); });
 $('form-interesado').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -461,7 +450,7 @@ $('form-interesado').addEventListener('submit', async (e) => {
   if (telefono === null) return decir('aviso-interesado', 'Escribe los 10 números del WhatsApp. Ejemplo: 444 123 4567.', true);
   intento ??= { id: crypto.randomUUID(), producto_id: piezaInteresado.id, cliente: $('cliente').value.trim(), telefono, nota: $('nota').value.trim() };
   enviando = true;
-  for (const id of ['guardar', 'cerrar-interesado', 'cliente', 'telefono', 'nota']) $(id).disabled = true;
+  for (const id of ['apartar-ya', 'guardar', 'cerrar-interesado', 'cliente', 'telefono', 'nota']) $(id).disabled = true;
   try {
     await api('/api/interesados', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(intento) });
     intento = null;
@@ -475,6 +464,7 @@ $('form-interesado').addEventListener('submit', async (e) => {
     enviando = false;
     for (const id of ['guardar', 'cerrar-interesado']) $(id).disabled = false;
     for (const id of ['cliente', 'telefono', 'nota']) $(id).disabled = !!intento;
+    $('apartar-ya').disabled = !!intento;
   }
 });
 
@@ -850,6 +840,9 @@ function modoRevendedora() {
   // Su unica pantalla es esta: sin menu ni /pedidos (la API tampoco se lo permite).
   $('enlace-menu').hidden = $('enlace-pedidos').hidden = true;
   $('ver-mias').hidden = false;
+  $('apartar-ya').hidden = true;   // ella no cobra ni aparta: la tienda registra el pago
+  $('guardar').classList.add('principal');   // con una sola salida, «Guardar» es la principal y «Volver» un botón
+  $('cerrar-interesado').classList.remove('texto');
   for (const [id, texto] of Object.entries({ 'txt-interesados': 'Preguntaron', 'etiqueta-codigo': 'Pega aquí el mensaje de tu cliente',
     'buscar-codigo': 'Buscar la pieza', 'txt-hoy': 'Solo las de hoy', 'nota-interesados': 'Los que preguntaron en los últimos 7 días.',
     'titulo-interesado': 'Anotar a un cliente', guardar: 'Guardar', 'cerrar-interesado': 'Volver' })) $(id).textContent = texto;
@@ -880,7 +873,7 @@ try {
     recoge?.replaceChildren(...yo.tiendas.map((t) => new Option(t.nombre, t.clave)));
     if (recoge && yo.tiendas.some((t) => t.clave === yo.tienda)) recoge.value = yo.tienda;
   }
-  if (revendedora) modoRevendedora();
+  if (revendedora) modoRevendedora(); else $('acciones-interesado').classList.add('columna');
   try { compartidas = new Set(JSON.parse(localStorage.getItem(`vender-compartidas:${correo}`) || '[]')); } catch { /* sin memoria */ }
   $('principal').hidden = false;
   await cargarPiezas();
