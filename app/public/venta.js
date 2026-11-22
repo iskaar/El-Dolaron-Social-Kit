@@ -382,12 +382,15 @@ export function avisoExistencia(nombre, stock, enTicket, cantidad) {
 /**
  * #884: el aviso de «sin existencia aquí» con lo que contesta el servidor (GET /api/existencia): `{ tiendas, bulto, apartada }`, solo nombres de
  * tienda. El primero que aplique; sin nada, ya no hay en ninguna. Reemplaza el aviso inmediato de `avisoExistencia` cuando llega la respuesta.
+ * Una pieza con varias unidades puede estar apartada o en un bulto y además tener otras en una tienda: se dice también.
  */
 export function avisoDondeHay(nombre, { tiendas = [], bulto = null, apartada = null } = {}) {
-  if (apartada) return `${nombre} está apartada en ${apartada}. Si el cliente viene por ella, escanea ese folio.`;
-  if (bulto?.aqui) return `${nombre} viene en el bulto ${bulto.folio}. Recíbelo en «Bultos» y escanéala otra vez.`;
-  if (bulto) return `${nombre} va en el bulto ${bulto.folio} a ${bulto.destino}. No está en esta tienda.`;
-  if (tiendas.length) return `${nombre} no está en esta tienda. Hay en ${tiendas.join(' y ')}. Si el cliente la quiere, apártala en «Apartados».`;
+  const hay = tiendas.join(' y ');
+  const tambien = hay ? ` También hay en ${hay}.` : '';
+  if (apartada) return `${nombre} está apartada en ${apartada}. Si el cliente viene por ella, escanea ese folio.${tambien}`;
+  if (bulto?.aqui) return `${nombre} viene en el bulto ${bulto.folio}. Recíbelo en «Bultos» y escanéala otra vez.${tambien}`;
+  if (bulto) return `${nombre} va en el bulto ${bulto.folio} a ${bulto.destino}. No está en esta tienda.${tambien}`;
+  if (hay) return `${nombre} no está en esta tienda. Hay en ${hay}. Si el cliente la quiere, apártala en «Apartados».`;
   return `${nombre}: ya no hay en ninguna tienda.`;
 }
 

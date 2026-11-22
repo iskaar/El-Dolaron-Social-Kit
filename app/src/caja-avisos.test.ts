@@ -847,9 +847,10 @@ test('#817 agregarCodigo: sin existencia dice qué hacer, baja el catálogo UNA 
 
 test('#884 avisoDondeHay: cada renglón, en orden de prioridad, solo con nombres de tienda', () => {
   assert.equal(avisoDondeHay('Lámpara', { tiendas: ['Soledad'], bulto: { folio: 'BU-7K2MP', destino: 'Avenida Salk', aqui: true }, apartada: 'P-17' }),
-    'Lámpara está apartada en P-17. Si el cliente viene por ella, escanea ese folio.');
+    'Lámpara está apartada en P-17. Si el cliente viene por ella, escanea ese folio. También hay en Soledad.');
+  assert.equal(avisoDondeHay('Lámpara', { tiendas: [], bulto: null, apartada: 'P-17' }), 'Lámpara está apartada en P-17. Si el cliente viene por ella, escanea ese folio.');
   assert.equal(avisoDondeHay('Lámpara', { tiendas: ['Soledad'], bulto: { folio: 'BU-7K2MP', destino: 'Avenida Salk', aqui: true }, apartada: null }),
-    'Lámpara viene en el bulto BU-7K2MP. Recíbelo en «Bultos» y escanéala otra vez.');
+    'Lámpara viene en el bulto BU-7K2MP. Recíbelo en «Bultos» y escanéala otra vez. También hay en Soledad.');
   assert.equal(avisoDondeHay('Lámpara', { tiendas: [], bulto: { folio: 'BU-7K2MP', destino: 'Avenida Salk', aqui: false }, apartada: null }),
     'Lámpara va en el bulto BU-7K2MP a Avenida Salk. No está en esta tienda.');
   assert.equal(avisoDondeHay('Lámpara', { tiendas: ['Soledad', 'Avenida Salk'], bulto: null, apartada: null }),
