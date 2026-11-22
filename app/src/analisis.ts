@@ -229,26 +229,29 @@ export async function conClaude(foto: string | string[], env: Env, instruccion: 
   return JSON.parse(texto);
 }
 
-interface RespuestaGemini {
+export interface RespuestaGemini {
   candidates?: Array<{
-    content?: { parts?: Array<{ text?: string }> };
+    content?: { parts?: Array<{ text?: string; inlineData?: { mimeType?: string; data?: string } }> };
     groundingMetadata?: { groundingChunks?: Array<{ web?: { title?: string; uri?: string } }> };
   }>;
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
 }
 
 // #413: mismo transporte para análisis y búsqueda; las imágenes solo usan grounding.
-async function consultarGemini(env: Env, cuerpo: Record<string, unknown>, limiteMs: number): Promise<RespuestaGemini> {
+// #888: con `modelo` (otro modelo de Vertex, p. ej. el de imagen) exige VERTEX_API_KEY y lanza si falta: nunca cae a AI Studio, que no lo tiene.
+export async function consultarGemini(env: Env, cuerpo: Record<string, unknown>, limiteMs: number, modelo?: string): Promise<RespuestaGemini> {
   // Con VERTEX_API_KEY se cobra al proyecto de Google Cloud (Issue #363), no a
   // la cuota de AI Studio que se acabo en #91. Mismo cuerpo para las dos.
   // Las dos instancias tienen secretos independientes, pero no siempre con el
   // mismo nombre: se acepta cualquiera de los dos en lugar de obligar a
   // recapturar la llave.
   const llave = env.GEMINI_API_KEY || env.GEMINI2_API_KEY;
+  if (modelo && !env.VERTEX_API_KEY) throw new Error(`Falta VERTEX_API_KEY para el modelo ${modelo}.`);
   if (!env.VERTEX_API_KEY && !llave) {
     throw new Error('Falta la llave de Gemini (VERTEX_API_KEY, GEMINI_API_KEY o GEMINI2_API_KEY).');
   }
   const url = env.VERTEX_API_KEY
-    ? `https://aiplatform.googleapis.com/v1/publishers/google/models/${MODELO_VERTEX}:generateContent?key=${env.VERTEX_API_KEY}`
+    ? `https://aiplatform.googleapis.com/v1/publishers/google/models/${modelo ?? MODELO_VERTEX}:generateContent?key=${env.VERTEX_API_KEY}`
     : `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_GEMINI}:generateContent?key=${llave}`;
   const respuesta = await fetch(url, {
     method: 'POST',
