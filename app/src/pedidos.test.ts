@@ -1380,3 +1380,51 @@ test('#838 el abono llega justo entre la lectura del pedido y el batch de la ven
   assert.equal(filaPedido(db, folio).saldo, 15000);
   assert.equal(stockDe(db, PRODUCTO), 49);
 });
+
+/* ---------- #878: «Ver pagos» ---------- */
+
+test('#878 GET /api/pedidos/:folio trae `pagos`: anticipo y abonos en orden, con forma, caja y quién; la lista no los trae', async () => {
+  const { db, pedir } = tienda();
+  const p = await apartar(pedir, { caja: 'Caja 2', forma_pago: 'efectivo' });   // $250, anticipo $100 en efectivo
+  const folio = p.cuerpo.pedido.folio;
+  assert.equal((await abonar(pedir, folio, 5000, { forma_pago: 'tarjeta', caja: 'Caja 1' })).status, 200);
+  assert.equal((await abonar(pedir, folio, 3000, { forma_pago: 'efectivo', caja: 'Caja 2' })).status, 200);
+  // Fechas fijas: el orden sale de creado_en, no de la velocidad de la prueba.
+  db.prepare('update pedidos set creado_en = ? where folio = ?').run('2026-11-10T16:00:00.000Z', folio);
+  db.prepare("update pedido_movimientos set creado_en = ? where importe = 3000").run('2026-11-12T18:30:00.000Z');
+  db.prepare("update pedido_movimientos set creado_en = ? where importe = 5000").run('2026-11-11T17:00:00.000Z');
+  const antes = (await pedir('/api/pedidos', undefined, 'GET')).cuerpo.pedidos[0];
+  const r = await pedir(`/api/pedidos/${folio}`, undefined, 'GET');
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.cuerpo.pedido.pagos, [
+    { tipo: 'anticipo', importe: 10000, forma_pago: 'efectivo', caja: 'Caja 2', quien: 'Isaac', creado_en: '2026-11-10T16:00:00.000Z' },
+    { tipo: 'abono', importe: 5000, forma_pago: 'tarjeta', caja: 'Caja 1', quien: 'Isaac', creado_en: '2026-11-11T17:00:00.000Z' },
+    { tipo: 'abono', importe: 3000, forma_pago: 'efectivo', caja: 'Caja 2', quien: 'Isaac', creado_en: '2026-11-12T18:30:00.000Z' },
+  ]);
+  // Las demás claves siguen: la caja lee esta misma ruta.
+  const { pagos, ...resto } = r.cuerpo.pedido;
+  assert.equal(resto.saldo, 18000);
+  assert.equal(resto.faltante, 7000);
+  assert.equal(resto.anticipo, 10000);
+  assert.equal(resto.lineas.length, 1);
+  assert.deepEqual(Object.keys(resto).sort(), Object.keys(antes).filter((k) => k !== 'reporte').sort());
+  // ponytail: la lista (cada 60 s) no lleva `pagos`.
+  assert.equal('pagos' in antes, false);
+  // Sin nombre en usuarios, «quien» es lo de antes de la @.
+  db.prepare("update pedido_movimientos set autor = 'caja.uno@prueba.mx' where importe = 3000").run();
+  db.prepare("update pedidos set vendedora = 'marta@prueba.mx' where folio = ?").run(folio);
+  const otra = (await pedir(`/api/pedidos/${folio}`, undefined, 'GET')).cuerpo.pedido.pagos.map((g: any) => g.quien);
+  assert.deepEqual(otra, ['marta', 'Isaac', 'caja.uno']);
+});
+
+test('#878 pagos de un apartado del portal sin anticipo: solo los abonos, sin renglón de anticipo', async () => {
+  const t = tienda();
+  const a = vendible(t.db, 25000, 2);
+  const portal = await apartarEnPortal(t, a.codigo);
+  const folio = portal.cuerpo.pedido.folio;
+  assert.deepEqual((await pedidoDe(t.pedir, folio)).pagos, []);
+  assert.equal((await abonar(t.pedir, folio, 10000)).status, 200);
+  const pagos = (await pedidoDe(t.pedir, folio)).pagos;
+  assert.deepEqual(pagos.map((g: any) => [g.tipo, g.importe, g.forma_pago]), [['abono', 10000, 'efectivo']]);
+  assert.equal((await t.pedir('/api/pedidos/999', undefined, 'GET')).status, 404);
+});

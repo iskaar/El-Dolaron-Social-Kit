@@ -12,7 +12,7 @@ test('el módulo de pedidos completo tiene sintaxis válida', () => {
   assert.doesNotThrow(() => new FuncionAsincrona(script));
 });
 
-function pantalla(memoria: Map<string, string>, enviar: (ruta: string, cuerpo: any) => Promise<any>, permiteGuardar = true) {
+function pantalla(memoria: Map<string, string>, enviar: (ruta: string, cuerpo: any) => Promise<any>, permiteGuardar = true, lista: any[] = [{ folio: 17, cliente: 'Ana', faltante: 24900 }]) {
   const elementos = new Map<string, any>();
   const $ = (id: string) => {
     if (!elementos.has(id)) elementos.set(id, {
@@ -32,8 +32,8 @@ function pantalla(memoria: Map<string, string>, enviar: (ruta: string, cuerpo: a
       setItem: (k: string, v: string) => { if (!permiteGuardar) throw new Error('sin memoria'); memoria.set(k, v); },
       removeItem: (k: string) => memoria.delete(k),
     },
-    pedidos: [{ folio: 17, cliente: 'Ana', faltante: 24900 }],
-    buscarPieza: () => ({ id: 'pieza-1' }), pesos: (n: number) => `$${n / 100}`, fecha: String,
+    pedidos: lista, pagosVistos: new Map(),
+    buscarPieza: () => ({ id: 'pieza-1' }), pesos: (n: number) => `$${n / 100}`, fecha: (s: string) => String(s).slice(0, 10),
     decir: (id: string, texto: string) => { $(id).textContent = texto; },
     cargarLista: async () => {}, cargarCatalogo: async () => {},
     fetch: (ruta: string, opciones: any) => enviar(ruta, JSON.parse(opciones.body)),
@@ -41,8 +41,10 @@ function pantalla(memoria: Map<string, string>, enviar: (ruta: string, cuerpo: a
   const bloque = fuente.slice(fuente.indexOf('const CLAVE_MOVIMIENTO ='), fuente.indexOf('\npintar();\nawait cargarCatalogo();'));
   // Las ayudas de clave de rastreo (#593) viven antes del bloque: centavos, leerTransferencia, errorTransferencia, avisoExcedente.
   const ayudas = fuente.slice(fuente.indexOf('const centavos ='), fuente.indexOf("gerencia.` : '';") + "gerencia.` : '';".length);
-  const abrir = runInNewContext(`${ayudas}\n${bloque}\nabrirMovimiento`, contexto);
-  return { $, abrir, guardar: () => $('form-mover').submit({ preventDefault() {} }) };
+  // Los mensajes de WhatsApp (nombreDe, totalDe, mensajeAbono, textoRecibo...) viven antes del bloque (#878).
+  const mensajes = fuente.slice(fuente.indexOf('const enlaceWhatsApp ='), fuente.indexOf('/* ---------- crear'));
+  const abrir = runInNewContext(`${ayudas}\n${mensajes}\n${bloque}\nabrirMovimiento`, contexto);
+  return { $, abrir, lista, guardar: () => $('form-mover').submit({ preventDefault() {} }) };
 }
 
 test('abono con respuesta perdida conserva ID, importe y caja, incluso al recargar la página', async () => {
@@ -61,6 +63,11 @@ test('abono con respuesta perdida conserva ID, importe y caja, incluso al recarg
     return { ok: true, status: 200, json: async () => ({ faltante: 12555 }) };
   });
   segunda.abrir(99, 'pieza'); // un movimiento pendiente manda sobre un nuevo formulario
+  // El reintento sigue igual (#878): conserva su importe, no deja tocarlo y el botón no cambia de nombre.
+  assert.equal(segunda.$('mover-guardar').textContent, 'Reintentar el mismo movimiento');
+  assert.equal(segunda.$('mover-importe').value, '123.45');
+  assert.equal(segunda.$('mover-importe').disabled, true);
+  assert.equal(segunda.$('mover-todo').disabled, true);
   segunda.$('mover-importe').value = '999';
   segunda.$('caja-nombre').value = 'Caja 2';
   await segunda.guardar();
@@ -76,6 +83,7 @@ test('sin memoria durable no se envía un abono; un fallo 500 conserva el intent
   const sinMemoria = pantalla(memoria, async () => { enviados++; }, false);
   sinMemoria.abrir(17, 'abono');
   sinMemoria.$('mover-forma').value = 'efectivo';
+  sinMemoria.$('mover-importe').value = '100';   // #878: el importe ya no abre prellenado
   await sinMemoria.guardar();
   assert.equal(enviados, 0);
   assert.equal(memoria.size, 0);
@@ -83,6 +91,7 @@ test('sin memoria durable no se envía un abono; un fallo 500 conserva el intent
   const p = pantalla(memoria, async () => ({ ok: false, status: 500, json: async () => ({ error: 'fallo' }) }));
   p.abrir(17, 'abono');
   p.$('mover-forma').value = 'efectivo';
+  p.$('mover-importe').value = '100';   // #878: el importe ya no abre prellenado
   await p.guardar();
   assert.equal(memoria.size, 1);
   assert.equal(p.$('recuperar-movimiento').hidden, false);
@@ -360,4 +369,205 @@ test('nuevo apartado por transferencia (#875): el anticipo sale del comprobante;
   $('anticipo').value = '120';
   assert.equal(calcular().anticipo, 12000);                                  // efectivo: un solo campo, como siempre
   assert.equal(textoCobro(calcular()), '');
+});
+
+/* ---------- #878: abonos más sencillos ---------- */
+
+test('abono en efectivo (#878): el importe abre vacío, «Todo lo que falta» lo llena y el botón de guardar dice cuánto se registra', async () => {
+  const enviados: any[] = [];
+  const p = pantalla(new Map(), async (_ruta, cuerpo) => { enviados.push(cuerpo); return { ok: true, status: 200, json: async () => ({ faltante: 0 }) }; });
+  p.$('mover-importe').value = '999';   // un valor de la vez anterior no se arrastra
+  p.abrir(17, 'abono');   // falta $249
+  p.$('mover-forma').value = 'efectivo';
+  p.$('mover-forma').change();
+  assert.equal(p.$('mover-importe').value, '');
+  assert.equal(p.$('mover-todo').textContent, 'Todo lo que falta: $249');
+  assert.equal(p.$('mover-guardar').textContent, 'Guardar');
+  // Un «Guardar» rápido con el campo vacío no registra nada.
+  await p.guardar();
+  assert.equal(enviados.length, 0);
+  assert.match(p.$('mover-aviso').textContent, /Escribe el abono/);
+  p.$('mover-importe').value = '200';
+  p.$('mover-importe').input();
+  assert.equal(p.$('mover-guardar').textContent, 'Guardar abono de $200');
+  p.$('mover-importe').value = '';
+  p.$('mover-importe').input();
+  assert.equal(p.$('mover-guardar').textContent, 'Guardar');
+  p.$('mover-todo').click();
+  assert.equal(p.$('mover-importe').value, '249');
+  assert.equal(p.$('mover-guardar').textContent, 'Guardar abono de $249');
+  // Con transferencia el importe sale del comprobante, y el botón lo dice igual.
+  p.$('mover-forma').value = 'transferencia';
+  p.$('mover-forma').change();
+  assert.equal(p.$('mover-guardar').textContent, 'Guardar');
+  p.$('mover-monto').value = '100';
+  p.$('mover-monto').input();
+  assert.equal(p.$('mover-guardar').textContent, 'Guardar abono de $100');
+  p.$('mover-monto').value = '300';
+  p.$('mover-monto').input();
+  assert.equal(p.$('mover-guardar').textContent, 'Guardar abono de $249');   // topado a lo que falta
+  p.$('mover-forma').value = 'efectivo';
+  p.$('mover-forma').change();
+  await p.guardar();
+  assert.equal(enviados.length, 1);
+  assert.equal(enviados[0].importe, 24900);
+  // Una pieza sigue diciendo «Guardar».
+  p.abrir(17, 'pieza');
+  assert.equal(p.$('mover-guardar').textContent, 'Guardar');
+});
+
+test('tras guardar un abono sale el recibo con lo pagado, lo que falta y su enlace de WhatsApp; abrir otro movimiento lo oculta (#878)', async () => {
+  const pedido = { folio: 17, cliente: 'Ana López', telefono: '4441234567', entrega: 'tienda', estado: 'apartado', subtotal: 25000, envio: 0, anticipo: 10000, saldo: 10000,
+    faltante: 15000, vence_en: '2026-11-25T10:00:00.000Z', liquidado_en: null, viernes_envio: null, lineas: [] };
+  const p = pantalla(new Map(), async () => {
+    Object.assign(p.lista[0], { saldo: 15000, faltante: 10000 });   // la lista ya refrescada
+    return { ok: true, status: 200, json: async () => ({ faltante: 10000 }) };
+  }, true, [pedido]);
+  p.abrir(17, 'abono');
+  p.$('mover-forma').value = 'efectivo';
+  p.$('mover-importe').value = '50';
+  await p.guardar();
+  assert.equal(p.$('recibo').hidden, false);
+  assert.equal(p.$('recibo-texto').textContent, 'Abono de $50 registrado en P-17 · Ana López lleva $150 de $250 · faltan $100');
+  assert.equal(p.$('recibo-wa').hidden, false);
+  const href = p.$('recibo-wa').href as string;
+  assert.ok(href.startsWith('https://wa.me/524441234567?text='));
+  assert.match(decodeURIComponent(href), /Hola Ana, recibimos tu abono de \$50 para tu apartado P-17 en El Dolarón\. Llevas pagado \$150 de \$250; te faltan \$100/);
+  assert.match(p.$('recibo-cajon').textContent, /cajón/);
+  p.abrir(17, 'abono');
+  assert.equal(p.$('recibo').hidden, true);
+});
+
+test('el recibo sin el pedido en la lista es solo texto, sin enlace; por transferencia no habla del cajón (#878)', async () => {
+  const p = pantalla(new Map(), async () => ({ ok: true, status: 200, json: async () => ({}) }));
+  p.abrir(17, 'abono');
+  p.$('mover-forma').value = 'efectivo';
+  p.$('mover-importe').value = '50';
+  p.lista.length = 0;   // el pedido ya no está en la lista (se liquidó y salió, venció...)
+  await p.guardar();
+  assert.equal(p.$('recibo-texto').textContent, 'Abono de $50 registrado en P-17.');
+  assert.equal(p.$('recibo-wa').hidden, true);
+  const q = pantalla(new Map(), async () => ({ ok: true, status: 200, json: async () => ({}) }));
+  q.abrir(17, 'abono');
+  q.$('mover-forma').value = 'transferencia';
+  q.$('mover-clave').value = 'EJEMPLO123456';
+  q.$('mover-banco').value = '40012';
+  q.$('mover-monto').value = '50';
+  await q.guardar();
+  assert.equal(q.$('recibo-cajon').textContent, '');
+});
+
+function mensajes() {
+  const bloque = fuente.slice(fuente.indexOf('const enlaceWhatsApp ='), fuente.indexOf('/* ---------- crear'));
+  return runInNewContext(`${bloque}\n({ mensajeAbono, textoRecibo, mensajeRecordar, mensajeConfirmar, pagadoDe })`, {
+    pesos: (n: number) => `$${n / 100}`, fecha: (s: string) => s.slice(0, 10), encodeURIComponent,
+  });
+}
+const base = { folio: 17, cliente: 'Ana López', telefono: '4441234567', recoge_en: 'soledad', lineas: [{ nombre: 'Lámpara', cantidad: 1 }], anticipo: 10000, estado: 'apartado', liquidado_en: null, viernes_envio: null, envio: 0,
+  subtotal: 25000, saldo: 15000, faltante: 10000, vence_en: '2026-11-25T10:00:00.000Z' };
+
+test('mensajeAbono (#878): recoger con faltante, recoger pagado, envío abierto y envío liquidado', () => {
+  const { mensajeAbono, textoRecibo } = mensajes();
+  assert.equal(mensajeAbono({ ...base, entrega: 'tienda' }, 5000),
+    'Hola Ana, recibimos tu abono de $50 para tu apartado P-17 en El Dolarón. Llevas pagado $150 de $250; te faltan $100, que pagas al recogerlo. Recógelo a más tardar el 2026-11-25.');
+  assert.equal(mensajeAbono({ ...base, entrega: 'tienda', saldo: 25000, faltante: 0 }, 10000),
+    'Hola Ana, recibimos tu abono de $100 para tu apartado P-17 en El Dolarón. Ya está pagado completo. Recógelo a más tardar el 2026-11-25.');
+  const envio = { ...base, entrega: 'envio', envio: 9900, saldo: 15000, faltante: 19900 };
+  assert.equal(mensajeAbono(envio, 5000),
+    'Hola Ana, recibimos tu abono de $50 para tu apartado P-17 en El Dolarón. Llevas pagado $150 de $349 (envío incluido); te faltan $199. Tu paquete vence el 2026-11-25; cada pieza o abono renueva 7 días.');
+  const liquidado = { ...envio, estado: 'vendido', saldo: 0, faltante: 0, liquidado_en: '2026-11-20T12:00:00.000Z', viernes_envio: '2026-11-27' };
+  assert.equal(mensajeAbono(liquidado, 19900),
+    'Hola Ana, recibimos tu abono de $199 para tu apartado P-17 en El Dolarón. Con esto tu paquete quedó liquidado. Sale el viernes 2026-11-27.');
+  // El renglón del aviso: lo pagado sale del pedido refrescado, y un envío liquidado sigue en la lista como vendido.
+  assert.equal(textoRecibo(17, { ...base, entrega: 'tienda' }, 5000), 'Abono de $50 registrado en P-17 · Ana López lleva $150 de $250 · faltan $100');
+  assert.equal(textoRecibo(17, { ...base, entrega: 'tienda', saldo: 25000, faltante: 0 }, 5000), 'Abono de $50 registrado en P-17 · Ana López lleva $250 de $250 · pagado completo');
+  assert.equal(textoRecibo(17, liquidado, 19900), 'Abono de $199 registrado en P-17 · Ana López lleva $349 de $349 · liquidado: sale el viernes 2026-11-27');
+});
+
+test('«recordar» dice lo pagado y lo que falta; «confirmar» dice lo pagado real, no solo el anticipo (#878)', () => {
+  const { mensajeRecordar, mensajeConfirmar, pagadoDe } = mensajes();
+  const tienda = { ...base, entrega: 'tienda' };
+  assert.match(mensajeRecordar(tienda), /vence el 2026-11-25\. Llevas pagado \$150; te faltan \$100\. ¡Te esperamos!$/);
+  assert.match(mensajeRecordar({ ...tienda, saldo: 25000, faltante: 0 }), /Ya está pagado\. ¡Te esperamos!$/);
+  assert.doesNotMatch(mensajeRecordar({ ...tienda, saldo: 0, anticipo: 0, faltante: 25000 }), /pagado/);
+  // Recién apartado: lo pagado es el anticipo. Con abonos, es el saldo; liquidado o vendido, el total.
+  assert.match(mensajeConfirmar({ ...tienda, saldo: 10000 }), /Anticipo recibido: \$100\. Total: \$250\./);
+  assert.match(mensajeConfirmar(tienda), /Pagado hasta ahora: \$150\. Total: \$250\./);
+  const liquidado = { ...tienda, entrega: 'envio', envio: 9900, estado: 'vendido', saldo: 0, faltante: 0, liquidado_en: '2026-11-20T12:00:00.000Z', viernes_envio: '2026-11-27' };
+  assert.equal(pagadoDe(liquidado), 34900);
+  assert.match(mensajeConfirmar(liquidado), /Pagado hasta ahora: \$349\. Total: \$349\. Liquidado\. Sale el viernes/);
+});
+
+const tarjeta = { cliente: 'Ana', telefono: '4441234567', entrega: 'tienda', estado: 'apartado', guia: '', liquidado_en: null, envio: 0, subtotal: 25000, lineas: [],
+  vendedora: 'caja@prueba.mx', vendedora_nombre: 'Marta', anticipo: 10000, saldo: 10000, faltante: 15000, vence_en: '2030-01-01T12:00:00.000Z' };
+
+function listas(pedidos: any[], busca: string) {
+  const html = new Map<string, any>();
+  const $ = (id: string) => { if (!html.has(id)) html.set(id, {}); return html.get(id); };
+  $('buscar-pedido').value = busca;
+  const bloque = fuente.slice(fuente.indexOf('const vendedoraDe ='), fuente.indexOf("$('actualizar').addEventListener"));
+  const { pintarLista, pagosVistos } = runInNewContext(`${bloque}\n({ pintarLista, pagosVistos })`, {
+    $, pedidos, Date, guardadas: new Map(), escapar: String, pesos: (n: number) => `$${n / 100}`, dia: () => '2026-10-22',
+    fecha: (s: string) => s.slice(0, 10), piezasDe: () => 'Prenda', totalDe: () => 25000,
+    enlaceWhatsApp: () => '#', mensajeConfirmar: () => '', mensajeRecordar: () => '', mensajeGuia: () => '', mensajeSaldo: () => '',
+  });
+  return { $, pintarLista, pagosVistos };
+}
+
+test('buscador (#878): sin acentos ni mayúsculas, por folio («17» o «P-17»), nombre o teléfono, en las tres listas; sin coincidencias lo dice', () => {
+  const pedidos = [
+    { ...tarjeta, folio: 17, cliente: 'María Pérez', telefono: '4441112222' },
+    { ...tarjeta, folio: 18, cliente: 'José Díaz', telefono: '4443334444' },
+    { ...tarjeta, folio: 19, cliente: 'Lucía Soto', telefono: '4445556666', entrega: 'envio', envio: 9900, viernes_envio: null },
+    { ...tarjeta, folio: 20, cliente: 'Rosa Gil', telefono: '4447778888', estado: 'vencido', saldo: 5000, saldo_vence_en: '2030-01-01T00:00:00.000Z' },
+  ];
+  const ver = (busca: string) => {
+    const l = listas(pedidos, busca);
+    l.pintarLista();
+    return [...(l.$('lista-apartados').innerHTML + l.$('lista-envios').innerHTML + l.$('lista-saldos').innerHTML).matchAll(/class="folio">P-(\d+)</g)].map((m) => m[1]);
+  };
+  assert.deepEqual(ver(''), ['17', '18', '19', '20']);
+  assert.deepEqual(ver('17'), ['17']);
+  assert.deepEqual(ver('P-17'), ['17']);
+  assert.deepEqual(ver('p17'), ['17']);
+  assert.deepEqual(ver('maria'), ['17']);
+  assert.deepEqual(ver('MARÍA PEREZ'), ['17']);
+  assert.deepEqual(ver('jose'), ['18']);
+  assert.deepEqual(ver('44455'), ['19']);
+  assert.deepEqual(ver('rosa'), ['20']);
+  const nada = listas(pedidos, 'zzz');
+  nada.pintarLista();
+  for (const id of ['lista-apartados', 'lista-envios', 'lista-saldos']) assert.match(nada.$(id).innerHTML, /Ningún pedido coincide\./);
+  const sinFiltro = listas([], '');
+  sinFiltro.pintarLista();
+  assert.match(sinFiltro.$('lista-apartados').innerHTML, /No hay apartados\./);
+});
+
+test('«Ver pagos» (#878): solo en tarjetas con algo pagado; lo abierto sigue abierto con su copia al repintar la lista', () => {
+  const l = listas([{ ...tarjeta, folio: 1 }, { ...tarjeta, folio: 2, anticipo: 0, saldo: 0, faltante: 25000 }, { ...tarjeta, folio: 3, anticipo: 0, saldo: 5000, faltante: 20000 }], '');
+  l.pintarLista();
+  const [uno, dos, tres] = (l.$('lista-apartados').innerHTML as string).split('<div class="pedido">').slice(1);
+  assert.match(uno, /<details class="pagos" data-pagos="1"><summary>Ver pagos<\/summary>/);
+  assert.doesNotMatch(dos, /Ver pagos/);
+  assert.match(tres, /data-pagos="3"/);
+  l.pagosVistos.set(1, '<ul><li>copia</li></ul>');
+  l.pintarLista();   // el refresco de 60 s
+  const abierto = (l.$('lista-apartados').innerHTML as string).split('<div class="pedido">')[1];
+  assert.match(abierto, /data-pagos="1" open><summary>Ver pagos<\/summary><div class="lista-pagos"><ul><li>copia<\/li><\/ul><\/div>/);
+});
+
+test('«Ver pagos» (#878): un renglón por pago con hora de tienda, importe, forma, caja, quién y tipo; el texto del servidor va escapado', () => {
+  const bloque = fuente.slice(fuente.indexOf('const horaTienda ='), fuente.indexOf('function ponerPagos'));
+  const { pagosHtml } = runInNewContext(`${bloque}\n({ pagosHtml })`, {
+    ZONA: 'America/Mexico_City', Date, pesos: (n: number) => `$${n / 100}`, escapar: (t: string) => String(t).replace(/</g, '&lt;'),
+  });
+  const html = pagosHtml([
+    { tipo: 'anticipo', importe: 10000, forma_pago: 'efectivo', caja: 'Caja 2', quien: 'Isaac', creado_en: '2026-11-10T16:00:00.000Z' },
+    { tipo: 'abono', importe: 5000, forma_pago: 'tarjeta', caja: 'Caja <1>', quien: '<b>Marta', creado_en: '2026-11-11T02:30:00.000Z' },
+  ]);
+  const renglones = html.split('<li>').slice(1);
+  assert.equal(renglones.length, 2);
+  assert.match(renglones[0], /^10 nov\.?,? 10:00 a\.? ?m\.? · <b>\$100<\/b> · efectivo · Caja 2 · Isaac · anticipo<\/li>/i);
+  assert.match(renglones[1], /^10 nov\.?,? 8:30 p\.? ?m\.? · <b>\$50<\/b> · tarjeta · Caja &lt;1> · &lt;b>Marta · abono<\/li>/i);   // 02:30 UTC es 20:30 del día anterior en la tienda
+  assert.match(pagosHtml([]), /Sin pagos registrados/);
 });

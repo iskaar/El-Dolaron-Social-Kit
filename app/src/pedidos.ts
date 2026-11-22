@@ -753,6 +753,24 @@ async function guardarGuia(folio: number, request: Request, env: Env): Promise<R
   return json({ pedido: await pedidoPor(env, 'id = ?', pedido.id) });
 }
 
+/** Quien recibió el pago: su nombre en usuarios, o lo que hay antes de la @ del correo. */
+const quienDe = (nombre: unknown, correo: unknown) => String(nombre || String(correo ?? '').split('@')[0]);
+
+/**
+ * #878 «Ver pagos»: el anticipo y los abonos de un pedido, en orden. Solo lo pide `GET /api/pedidos/:folio` al abrir «Ver pagos».
+ * ponytail: NO va en listarPedidos ni en leerPedidos: la lista se consulta cada 60 s y pedido_movimientos no tiene índice por pedido_id.
+ */
+async function pagosDe(env: Env, p: FilaPedido) {
+  const { results } = await env.DB.prepare(
+    `select m.importe, m.forma_pago, m.caja, m.creado_en, m.autor, (select u.nombre from usuarios u where u.correo = m.autor) as nombre
+     from pedido_movimientos m where m.pedido_id = ? and m.tipo = 'abono' order by m.creado_en, m.id`,
+  ).bind(p.id).all<{ importe: number; forma_pago: string; caja: string; creado_en: string; autor: string; nombre: string | null }>();
+  const pagos: { tipo: 'anticipo' | 'abono'; importe: number; forma_pago: string; caja: string; quien: string; creado_en: string }[] = results.map((m) => ({ tipo: 'abono', importe: m.importe, forma_pago: m.forma_pago, caja: m.caja, quien: quienDe(m.nombre, m.autor), creado_en: m.creado_en }));
+  if (p.anticipo > 0) pagos.push({ tipo: 'anticipo', importe: p.anticipo, forma_pago: p.forma_pago, caja: p.caja,
+    quien: p.vendedora === 'portal' ? 'Portal' : quienDe(p.vendedora_nombre, p.vendedora), creado_en: p.creado_en });
+  return pagos.sort((a, b) => a.creado_en.localeCompare(b.creado_en));
+}
+
 /** null = la ruta no es de pedidos. El permiso (CAJA) ya lo cobro cuentas.ts. */
 export async function rutaPedidos(request: Request, env: Env, ctx: ExecutionContext, pathname: string, correo: string, tienda: string): Promise<Response | null> {
   const m = /^\/api\/pedidos(?:\/(\d{1,9})(?:\/(cancelar|guia|piezas|abonos|rechazar-pago))?)?$/.exec(pathname);
@@ -765,7 +783,7 @@ export async function rutaPedidos(request: Request, env: Env, ctx: ExecutionCont
   } else if (m[2] === undefined) {
     if (metodo === 'GET') {
       const pedido = await pedidoPor(env, 'folio = ?', folio);
-      return pedido ? json({ pedido }) : json({ error: 'El pedido no existe.' }, 404);
+      return pedido ? json({ pedido: { ...pedido, pagos: await pagosDe(env, pedido) } }) : json({ error: 'El pedido no existe.' }, 404);
     }
   } else if (m[2] === 'cancelar') {
     if (metodo === 'POST') return cancelarPedido(folio, env, ctx);
