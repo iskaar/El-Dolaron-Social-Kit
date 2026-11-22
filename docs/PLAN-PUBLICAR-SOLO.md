@@ -1,6 +1,7 @@
 # Publicar solo: fotos profesionales, feed de productos y piloto automático de Mercado Libre
 
-Issue #886 · 22/11/2026 · Estado: **diseño en espera de aprobación de Isaac**. Nada de esto está implementado.
+Issue #886 · 22/11/2026 · Estado: **diseño del Proyecto 1 aprobado por Isaac el 22/11/2026**; la implementación va en
+sus Issues hijos. Este documento no demuestra que algo ya esté implementado.
 Este documento detalla el Proyecto 1 (fotos). Los Proyectos 2 a 5 tienen aquí solo su alcance; cada uno
 tendrá su propio diseño antes de construirse.
 
@@ -285,6 +286,11 @@ Pedido de Isaac (22/11): usar los datos de nuestras publicaciones para bajar pre
   Sin ese dato no se pueden fijar umbrales.
 - Toda rebaja automática lleva piso (no bajar de un porcentaje del precio de tienda sin aprobación en `/avisos`)
   y registro.
+- **Decisiones de Isaac (22/11) para este proyecto:**
+  - En tienda, la rebaja se muestra con una **segunda etiqueta** pegada a la pieza; la etiqueta original no se reimprime.
+  - Lo viejo que no se mueve tiene prioridad de venta, pero **antes que liquidarlo** se ofrecen «recompensas»:
+    Dolarones extra a quien lo compre. Queda por definir en el diseño si la recompensa es solo para el socio que
+    compra o también para quien lo vende, y revisar que las bases vigentes de Dolarones lo permitan.
 
 ## Fuera del programa
 
