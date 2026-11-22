@@ -17,6 +17,10 @@
 -- Solo una portada aprobada llega a R2 `extras/{id}/01.jpg` (publicar sube todo `extras/` sin leer estados). Lo generado y no
 -- aprobado vive en `portadas/{id}.jpg`; `portadas/{id}.cruda` es lo que devolvio el modelo, antes de normalizarlo.
 --
+-- `oficial` = la pieza ya usa la imagen de Target: recorte_estado = 'original' Y una referencia confirmada en imagenes_upc para su UPC
+-- (confirmado_en <> '' con su manifiesto, la clave sin ceros iniciales). Un 'original' sin referencia (el boton «original» de /admin sobre
+-- una foto de anaquel) NO es oficial: recibe portada generada como cualquier foto de anaquel.
+--
 -- Aditiva: columnas nuevas e indice. No toca foto_key, precio, stock ni estado_analisis.
 
 alter table productos add column portada_estado text check (portada_estado is null or portada_estado in ('lista','revisar','retomar','oficial','error'));

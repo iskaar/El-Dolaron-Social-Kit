@@ -4,7 +4,9 @@ import { tienda } from './prueba-d1.ts';
 import { procesarPortadas, publicarPortada, reiniciarPortada, generarConGemini, comprobarConClaude, MODELO_IMAGEN,
   SinImagen, type Dependencias, type Veredicto } from './portadas.ts';
 import { hoyTienda } from './reportes.ts';
+import worker from './worker.ts';
 
+const PRODUCTO_PRUEBA = '00000000-0000-4000-8000-0000000000aa';
 const uuid = (i: number) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
 const OK: Veredicto = { ok: true, problemas: [], foto_mala: false };
 const fotos = (t: ReturnType<typeof tienda>) => t.env.FOTOS as any;
@@ -75,18 +77,69 @@ test('portadas: toma las 3 más caras de las pendientes y salta lo que no es ven
   } finally { t.db.close(); }
 });
 
-test('portadas: recorte original pasa a oficial y ya existe extras/01.jpg pasa a lista manual, sin generar', async () => {
-  const t = await preparar(2); const { deps, llamadas } = dependencias();
+test('portadas: ya existe extras/01.jpg pasa a lista manual, sin generar', async () => {
+  const t = await preparar(1); const { deps, llamadas } = dependencias();
   try {
-    t.db.prepare("update productos set recorte_estado='original' where id=?").run(uuid(0));
-    await fotos(t).put(`extras/${uuid(1)}/01.jpg`, new Uint8Array([5]));
-    const antes = fotos(t).objetos.get(`extras/${uuid(1)}/01.jpg`);
+    await fotos(t).put(`extras/${uuid(0)}/01.jpg`, new Uint8Array([5]));
+    const antes = fotos(t).objetos.get(`extras/${uuid(0)}/01.jpg`);
     await procesarPortadas(t.env, deps);
     assert.equal(llamadas.generar.length, 0);
-    assert.equal(fila(t, uuid(0)).portada_estado, 'oficial');
-    assert.deepEqual([fila(t, uuid(1)).portada_estado, fila(t, uuid(1)).portada_origen], ['lista', 'manual']);
-    assert.equal(fotos(t).objetos.get(`extras/${uuid(1)}/01.jpg`), antes);
+    assert.deepEqual([fila(t).portada_estado, fila(t).portada_origen], ['lista', 'manual']);
+    assert.equal(fotos(t).objetos.get(`extras/${uuid(0)}/01.jpg`), antes);
   } finally { t.db.close(); }
+});
+
+/** Una referencia confirmada de Target para `upc` (sin ceros iniciales, como la guarda imagenes_upc). */
+function referencia(t: ReturnType<typeof tienda>, upc: string, confirmada = true) {
+  t.db.prepare("insert into manifiesto (upc, descripcion, precio_usd, tcin, actualizado_en) values (?, 'x', 100, 'T1', '')").run(upc);
+  t.db.prepare("insert into imagenes_upc (upc, tcin, url, nombre, confirmado_por, confirmado_en) values (?, 'T1', 'https://target.scene7.com/x', 'x', 'sistema', ?)")
+    .run(upc, confirmada ? '2026-11-01T00:00:00Z' : '');
+}
+
+test('portadas: original con referencia confirmada de su UPC (aunque la pieza lo traiga con ceros) pasa a oficial sin generar; sin referencia se genera', async () => {
+  const t = await preparar(4); const { deps, llamadas } = dependencias();
+  try {
+    // 0: referencia confirmada. 1: UPC con ceros iniciales y referencia guardada sin ceros. 2: sin referencia (p. ej. el botón «original» de /admin).
+    // 3: referencia sin confirmar.
+    t.db.prepare("update productos set recorte_estado='original', upc=? where id=?").run('840397509904', uuid(0));
+    t.db.prepare("update productos set recorte_estado='original', upc=? where id=?").run('00840397509911', uuid(1));
+    t.db.prepare("update productos set recorte_estado='original', upc=? where id=?").run('840397509928', uuid(2));
+    t.db.prepare("update productos set recorte_estado='original', upc=? where id=?").run('840397509935', uuid(3));
+    referencia(t, '840397509904'); referencia(t, '840397509911'); referencia(t, '840397509935', false);
+    await procesarPortadas(t.env, deps);
+    assert.deepEqual([0, 1, 2, 3].map((i) => fila(t, uuid(i)).portada_estado), ['oficial', 'oficial', 'revisar', 'revisar']);
+    assert.equal(llamadas.generar.length, 2);
+  } finally { t.db.close(); }
+});
+
+test('portadas: reiniciarPortada nunca lanza (D1 sin las columnas de la 087 o R2 caído) y retomar o dar de alta una foto sigue funcionando', async () => {
+  const t = tienda(); const registros: string[] = []; const error = console.error;
+  console.error = (l: string) => { registros.push(l); };
+  try {
+    const base = t.env.DB; const r2 = t.env.FOTOS;
+    // Código desplegado antes que la migración: ninguna sentencia de portadas puede ejecutarse.
+    (t.env as any).DB = { ...base, prepare: (sql: string) => { if (/portada_/.test(sql)) throw new Error('no such column: portada_origen'); return base.prepare(sql); }, batch: base.batch };
+    await reiniciarPortada(t.env, PRODUCTO_PRUEBA);
+    assert.match(registros[0], /"mensaje":"reiniciarPortada fallido"/);
+    const subir = (form: FormData) => worker.fetch!(new Request('https://caja.prueba/api/borradores', { method: 'POST', body: form }) as never, t.env, t.ctx as never);
+    const foto = (id: string, extra: Record<string, string> = {}) => {
+      const f = new FormData(); f.append('id', id); f.append('estado_fisico', 'nuevo');
+      f.append('foto', new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], `${id}.jpg`, { type: 'image/jpeg' }));
+      for (const [k, v] of Object.entries(extra)) f.append(k, v);
+      return f;
+    };
+    // Los dos sitios del Worker: pieza nueva y «Retomar foto».
+    const id = crypto.randomUUID();
+    assert.equal((await subir(foto(id, { cantidad: '2' }))).status, 201);
+    assert.equal((await subir(foto(id, { solo_foto: '1' }))).status, 200);
+    await t.esperar();
+    assert.ok(registros.length >= 3);
+    // R2 caído al borrar.
+    (t.env as any).DB = base;
+    (t.env as any).FOTOS = { ...r2, delete: async () => { throw new Error('R2 caído'); }, get: r2.get.bind(r2), put: r2.put.bind(r2), list: r2.list.bind(r2) };
+    await reiniciarPortada(t.env, id);
+    assert.match(registros.at(-1)!, /R2 caído/);
+  } finally { console.error = error; t.db.close(); }
 });
 
 test('portadas: con aprobación (config ausente) un veredicto ok queda en revisar y NO llega a extras', async (t0) => {

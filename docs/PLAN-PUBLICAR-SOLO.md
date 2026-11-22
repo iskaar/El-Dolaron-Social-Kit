@@ -102,7 +102,8 @@ con datos (Proyecto 5); su primer ladrillo (#637, guardar visitas) puede avanzar
 2. Tomar pocas piezas `VENDIBLE` con `portada_estado is null`, **las más caras primero**. Es el mismo universo
    del feed; incluye piezas que solo están en una sucursal.
 3. Sin generar ni gastar:
-   - `recorte_estado = 'original'` → `oficial`. Ya es una imagen de estudio; no se pasa por IA.
+   - `recorte_estado = 'original'` **y** referencia confirmada en `imagenes_upc` para su UPC → `oficial`. Ya es una imagen de estudio; no se pasa por IA.
+     `original` solo no basta: el botón «original» de `/admin` también lo pone sobre una foto de anaquel (#888, revisión del 22/11/2026).
    - Ya existe `extras/{id}/01.jpg` (las portadas hechas a mano en #628, unas 48) → `lista`, origen `manual`.
 4. Generar: una llamada al modelo de imagen de Gemini por Vertex con la foto original y una instrucción fija:
    foto de estudio sobre blanco puro, cuadrada, mismo producto, sin cambiar texto, logos, color ni forma, sin

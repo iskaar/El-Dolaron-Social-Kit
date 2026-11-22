@@ -6,6 +6,8 @@
  * Solo una portada aprobada llega a R2 `extras/{id}/01.jpg`: `publicar` sube todo `extras/` sin leer estados. Lo demás vive en
  * `portadas/{id}.cruda` (lo que devolvió el modelo, ya pagado) y `portadas/{id}.jpg` (normalizada, en espera).
  * Nunca toca foto_key, precio, stock, estado_analisis, nombre ni marca.
+ * `oficial` = imagen de Target ya confirmada (recorte_estado 'original' Y referencia confirmada en imagenes_upc para su UPC): no pasa por IA.
+ * Un 'original' sin referencia (p. ej. el botón «original» de /admin sobre una foto de anaquel) se genera como cualquier otra.
  */
 import { VENDIBLE } from './catalogo.ts';
 import { base64, conClaude, consultarGemini } from './analisis.ts';
@@ -135,8 +137,20 @@ export async function publicarPortada(env: Env, id: string): Promise<boolean> {
   return promover(env, id, 'revisar');
 }
 
-/** Foto nueva: origen `ia` → borra portada y espera, estado null. Origen `manual` → conserva `extras/` y pasa a `revisar`. */
+/**
+ * Foto nueva: origen `ia` → borra portada y espera, estado null. Origen `manual` → conserva `extras/` y pasa a `revisar`.
+ * Nunca lanza: se espera en la captura y esta tubería no puede detenerla (columnas de la 087 aún sin migrar, R2 caído). Si falla se
+ * registra y la portada vieja queda hasta que el cron o una persona la revise; la comparación de etag descarta lo que esté en vuelo.
+ */
 export async function reiniciarPortada(env: Env, id: string): Promise<void> {
+  try {
+    await reiniciar(env, id);
+  } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'reiniciarPortada fallido', id, error: String(error).slice(0, 200) }));
+  }
+}
+
+async function reiniciar(env: Env, id: string): Promise<void> {
   const pieza = await env.DB.prepare('select portada_origen from productos where id = ?').bind(id).first<{ portada_origen: string | null }>();
   await borrarEspera(env, id);
   if (pieza?.portada_origen === 'manual') {
@@ -203,9 +217,15 @@ export async function procesarPortadas(env: Env, deps: Dependencias = real): Pro
   const topeConfig = claves.get('portadas_tope_diario');
   const tope = topeConfig !== undefined && /^\d+$/.test(topeConfig) ? Number(topeConfig) : TOPE_POR_OMISION;
   const conAprobacion = claves.get('portadas_aprobacion') !== '0';
-  // La imagen oficial ya es de estudio: no pasa por IA ni gasta nada.
-  await env.DB.prepare(`update productos as p set portada_estado = 'oficial', portada_fecha = ? where p.portada_estado is null and p.recorte_estado = 'original' and ${VENDIBLE}`)
-    .bind(ahora()).run();
+  // La imagen oficial de Target ya es de estudio: no pasa por IA ni gasta nada. `original` solo no basta (el botón «original» de /admin
+  // también lo pone sobre una foto de anaquel): hace falta una referencia confirmada para el UPC de la pieza, unida igual que
+  // guardarImagenComoFoto (imagenes_upc con su manifiesto, confirmado_en <> '') y con la misma clave sin ceros (`ltrim(upc, '0')`).
+  // ponytail: sin forzar el índice, SQLite recorre todo lo de la tienda (productos_propietario_precio); con él, solo las pendientes de la cola
+  // (~2,000 filas con `recorte_estado` leído de la tabla) y la referencia por llave primaria. Las `original` sin referencia (hoy ~10) se
+  // reevalúan cada corrida hasta que se generan. Si pesa, sumar `recorte_estado` a un índice parcial propio.
+  await env.DB.prepare(`update productos as p indexed by productos_portadas_pendientes set portada_estado = 'oficial', portada_fecha = ? where p.portada_estado is null and p.recorte_estado = 'original'
+    and exists (select 1 from imagenes_upc i join manifiesto m on m.upc = i.upc and m.tcin = i.tcin where i.upc = ltrim(p.upc, '0') and i.confirmado_en <> '')
+    and ${VENDIBLE}`).bind(ahora()).run();
   // ponytail: una pieza que falla siempre por un motivo transitorio (plazo, 5xx) encabeza la cola y frena a las demás; los 4xx y las
   // respuestas sin imagen sí la marcan `error`. Si el piloto lo muestra, contar fallos por pieza.
   const { results } = await env.DB.prepare(`select p.id, p.foto_key from productos p indexed by productos_portadas_pendientes
