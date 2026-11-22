@@ -21,6 +21,7 @@ function pantalla(memoria: Map<string, string>, enviar: (ruta: string, cuerpo: a
       showModal() { this.open = true; },
       focus() { this.enfocado = true; },
       close() { this.open = false; },
+      removeAttribute(nombre: string) { delete this[nombre]; },
     });
     return elementos.get(id);
   };
@@ -444,9 +445,11 @@ test('el recibo sin el pedido en la lista es solo texto, sin enlace; por transfe
   p.$('mover-forma').value = 'efectivo';
   p.$('mover-importe').value = '50';
   p.lista.length = 0;   // el pedido ya no está en la lista (se liquidó y salió, venció...)
+  p.$('recibo-wa').href = 'https://wa.me/524440000000?text=de%20otro%20cliente';   // el recibo anterior
   await p.guardar();
   assert.equal(p.$('recibo-texto').textContent, 'Abono de $50 registrado en P-17.');
   assert.equal(p.$('recibo-wa').hidden, true);
+  assert.equal(p.$('recibo-wa').href, undefined);   // sin enlace: no se le manda el recibo anterior a otro cliente
   const q = pantalla(new Map(), async () => ({ ok: true, status: 200, json: async () => ({}) }));
   q.abrir(17, 'abono');
   q.$('mover-forma').value = 'transferencia';
@@ -499,7 +502,7 @@ test('«recordar» dice lo pagado y lo que falta; «confirmar» dice lo pagado r
 });
 
 const tarjeta = { cliente: 'Ana', telefono: '4441234567', entrega: 'tienda', estado: 'apartado', guia: '', liquidado_en: null, envio: 0, subtotal: 25000, lineas: [],
-  vendedora: 'caja@prueba.mx', vendedora_nombre: 'Marta', anticipo: 10000, saldo: 10000, faltante: 15000, vence_en: '2030-01-01T12:00:00.000Z' };
+  vendedora: 'caja@prueba.mx', vendedora_nombre: 'Marta', anticipo: 10000, saldo: 10000, faltante: 15000, vence_en: '2030-01-01T12:00:00.000Z', revision: 3 };
 
 function listas(pedidos: any[], busca: string) {
   const html = new Map<string, any>();
@@ -511,7 +514,7 @@ function listas(pedidos: any[], busca: string) {
     fecha: (s: string) => s.slice(0, 10), piezasDe: () => 'Prenda', totalDe: () => 25000,
     enlaceWhatsApp: () => '#', mensajeConfirmar: () => '', mensajeRecordar: () => '', mensajeGuia: () => '', mensajeSaldo: () => '',
   });
-  return { $, pintarLista, pagosVistos };
+  return { $, pintarLista, pagosVistos, pedidos };
 }
 
 test('buscador (#878): sin acentos ni mayúsculas, por folio («17» o «P-17»), nombre o teléfono, en las tres listas; sin coincidencias lo dice', () => {
@@ -550,10 +553,16 @@ test('«Ver pagos» (#878): solo en tarjetas con algo pagado; lo abierto sigue a
   assert.match(uno, /<details class="pagos" data-pagos="1"><summary>Ver pagos<\/summary>/);
   assert.doesNotMatch(dos, /Ver pagos/);
   assert.match(tres, /data-pagos="3"/);
-  l.pagosVistos.set(1, '<ul><li>copia</li></ul>');
+  l.pagosVistos.set(1, { html: '<ul><li>copia</li></ul>', revision: 3 });
   l.pintarLista();   // el refresco de 60 s
   const abierto = (l.$('lista-apartados').innerHTML as string).split('<div class="pedido">')[1];
   assert.match(abierto, /data-pagos="1" open><summary>Ver pagos<\/summary><div class="lista-pagos"><ul><li>copia<\/li><\/ul><\/div>/);
+  // Otra caja registró un abono: la revisión del pedido cambió, la copia se descarta y la tarjeta queda cerrada.
+  l.pedidos[0].revision = 4;
+  l.pintarLista();
+  const cerrado = (l.$('lista-apartados').innerHTML as string).split('<div class="pedido">')[1];
+  assert.match(cerrado, /<details class="pagos" data-pagos="1"><summary>Ver pagos<\/summary><div class="lista-pagos"><\/div>/);
+  assert.equal(l.pagosVistos.has(1), false);
 });
 
 test('«Ver pagos» (#878): un renglón por pago con hora de tienda, importe, forma, caja, quién y tipo; el texto del servidor va escapado', () => {

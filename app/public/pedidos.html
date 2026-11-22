@@ -67,11 +67,11 @@
   .pedido .guia input { padding: 8px 10px; font-size: 15px; }
   .vacio { color: #78839a; font-size: 14px; margin: 4px 0; }
   #recibo { border: 2px solid var(--verde); border-radius: 10px; padding: 10px 12px; margin-top: 8px; font-size: 15px; }
-  #recibo[hidden] { display: none; }
+  #recibo[hidden], #recibo-wa[hidden] { display: none; }
   #recibo p { margin: 0 0 8px; }
   #recibo .nota:empty { display: none; }
   .pedido details.pagos { font-size: 14px; }
-  .pedido details.pagos summary { cursor: pointer; color: var(--azul); font-weight: 700; min-height: 32px; display: flex; align-items: center; }
+  .pedido details.pagos summary { cursor: pointer; color: var(--azul); font-weight: 700; padding: 6px 0; }
   .pedido .lista-pagos ul { margin: 4px 0 0; padding-left: 18px; }
   #mover-todo { margin-top: 8px; }
   dialog { border: 2px solid var(--azul); border-radius: 14px; padding: 18px 20px; width: min(440px, 94vw); }
@@ -651,9 +651,14 @@ function coincide(p, busca) {
   const q = sinAcentos(busca).trim().replace(/^p(?=\d)/, 'p-');
   return !q || sinAcentos(`p-${p.folio} ${p.cliente} ${p.telefono}`).includes(q);
 }
-const pagosVistos = new Map();   // folio -> HTML de «Ver pagos» ya pintado: pintarLista reescribe todo cada 60 s y lo abierto no se cierra
-const pagosAbiertos = (p) => (p.anticipo > 0 || p.saldo > 0)
-  ? `<details class="pagos" data-pagos="${p.folio}"${pagosVistos.has(p.folio) ? ' open' : ''}><summary>Ver pagos</summary><div class="lista-pagos">${pagosVistos.get(p.folio) ?? ''}</div></details>` : '';
+const pagosVistos = new Map();   // folio -> { html, revision } de «Ver pagos» ya pintado: pintarLista reescribe todo cada 60 s y lo abierto no se cierra
+function pagosAbiertos(p) {
+  if (!(p.anticipo > 0 || p.saldo > 0)) return '';
+  // La revisión sube con cada abono o venta, de cualquier caja: una copia pedida con otra revisión ya no sirve y queda cerrada.
+  if (pagosVistos.get(p.folio)?.revision !== p.revision) pagosVistos.delete(p.folio);
+  const copia = pagosVistos.get(p.folio);
+  return `<details class="pagos" data-pagos="${p.folio}"${copia ? ' open' : ''}><summary>Ver pagos</summary><div class="lista-pagos">${copia?.html ?? ''}</div></details>`;
+}
 function filaPedido(p, { botones, vence, saldo = false }) {
   return `<div class="pedido">
     <div class="cabeza"><span class="folio">P-${p.folio}</span><span><b>${escapar(p.cliente)}</b> · ${escapar(p.telefono)}</span></div>
@@ -729,7 +734,7 @@ const pagosHtml = (pagos) => pagos.length
   : '<p class="nota">Sin pagos registrados.</p>';
 function ponerPagos(folio, html) {
   if (!pagosVistos.has(folio)) return;   // lo cerraron mientras cargaba
-  pagosVistos.set(folio, html);
+  pagosVistos.get(folio).html = html;
   const el = document.querySelector(`details[data-pagos="${folio}"] .lista-pagos`);
   if (el) el.innerHTML = html;
 }
@@ -740,8 +745,8 @@ document.querySelector('main').addEventListener('toggle', async (e) => {
   const folio = Number(d.dataset.pagos);
   if (!d.open) { pagosVistos.delete(folio); return; }
   if (pagosVistos.has(folio)) return;   // pintarLista lo reabrió con su copia
-  pagosVistos.set(folio, '<p class="nota">Cargando…</p>');
-  ponerPagos(folio, pagosVistos.get(folio));
+  pagosVistos.set(folio, { html: '', revision: pedidos.find((x) => x.folio === folio)?.revision });
+  ponerPagos(folio, '<p class="nota">Cargando…</p>');
   try {
     const r = await fetch(`/api/pedidos/${folio}`);
     const cuerpo = await r.json();
@@ -1028,7 +1033,9 @@ function mostrarRecibo(folio, importe, forma) {
   const p = pedidos.find((x) => x.folio === folio);
   $('recibo-texto').textContent = textoRecibo(folio, p, importe);
   $('recibo-wa').hidden = !p;
+  // Sin pedido no queda enlace: el href del recibo anterior sería de otro cliente.
   if (p) $('recibo-wa').href = enlaceWhatsApp(p.telefono, mensajeAbono(p, importe));
+  else $('recibo-wa').removeAttribute('href');
   $('recibo-cajon').textContent = forma === 'efectivo' ? 'En efectivo: guarda el abono en el cajón; ábrelo con «Abrir cajón» en la caja.' : '';
   $('recibo').hidden = false;
 }
