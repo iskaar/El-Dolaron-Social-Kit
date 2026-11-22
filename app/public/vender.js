@@ -19,6 +19,19 @@ export function codigoDeRespuesta(texto) {
   return digitos ? `ED-${digitos.padStart(6, '0')}` : null;
 }
 
+/**
+ * #882: lo que dice el título sobre las tarjetas (solo personal). `tienda` y `categoria` son nombres; vacío = todas.
+ * Ejemplos: «Lo nuevo en Avenida Salk», «Recomendados para Avenida Salk», «Juguetes en todas las tiendas».
+ */
+export function tituloLista({ orden = 'nuevo', tienda = '', categoria = '', q = '', hoy = false } = {}) {
+  const donde = tienda || 'todas las tiendas';
+  const resto = categoria && (orden === 'recomendado' || q || hoy) ? ` · ${categoria}` : '';
+  if (orden === 'recomendado') return `Recomendados para ${donde}${resto}`;
+  if (q) return `Resultados de «${q}» en ${donde}${resto}`;
+  if (hoy) return `Ingresadas hoy en ${donde}${resto}`;
+  return `${categoria || 'Lo nuevo'} en ${donde}`;
+}
+
 // Reglas de Isaac (22/10, #434): apartado = 7 días y envíos los viernes; anticipo de $100 fijos desde el 1/11 (#662).
 const APARTAR = 'Apártala con $100 por 7 días: responde con el código.';
 // Revendedora (#575): aparta ella misma y sin anticipo; la tienda cobra después.

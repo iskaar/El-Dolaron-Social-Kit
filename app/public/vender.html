@@ -104,6 +104,12 @@
   #vista-previa img { width: 135px; height: 169px; }
   #mas-compartir { margin-top: 12px; }
   .ico { display: block; font-size: 22px; line-height: 1; }
+  /* #882: la vista de la tienda (solo personal): su barra, el título de lo que se ve y los chips de dónde está cada pieza. */
+  #vista-tienda { display: grid; gap: 10px; }
+  #vista-tienda label { margin: 0 0 4px; }
+  #titulo-lista { margin: 4px 0 8px; font-size: 20px; }
+  .donde .chip { margin-right: 6px; }
+  .motivo { margin-top: 4px; font-size: 16px; }
   .guia ol { margin: 8px 0 0; padding-left: 24px; }
   .guia li { margin: 8px 0; }
   .guia .cab { flex-wrap: nowrap; justify-content: space-between; }
@@ -155,6 +161,11 @@
       <div class="fila cab"><h2 id="titulo-instalar">Ponla en tu pantalla de inicio</h2><button id="cerrar-instalar" class="texto" type="button">✕ Cerrar</button></div>
       <p id="texto-instalar"></p>
     </section>
+    <section id="vista-tienda" class="panel" aria-label="Qué piezas ver" hidden>
+      <div><label for="vista-tienda-sel">Tienda</label><select id="vista-tienda-sel"></select></div>
+      <div><label for="vista-categoria">Categoría</label><select id="vista-categoria"><option value="">Todas</option></select></div>
+      <div class="dos"><button id="orden-nuevo" type="button" aria-pressed="true">Lo nuevo</button><button id="orden-recomendado" type="button" aria-pressed="false">Recomendados</button></div>
+    </section>
     <details id="det-filtros" class="panel plegable" open>
       <summary>Buscar una pieza</summary>
       <form id="filtros">
@@ -166,7 +177,10 @@
         <div class="fila"><button class="principal" type="submit">Buscar</button></div>
       </form>
     </details>
+    <h2 id="titulo-lista" hidden></h2>
+    <p id="nota-base" class="nota" hidden></p>
     <div id="piezas"></div>
+    <div id="vacio-tienda" class="panel" hidden><p id="texto-vacio"></p><button id="ver-todas" type="button">Ver todas las tiendas</button><button id="ver-nuevo" type="button">Ver lo nuevo</button></div>
     <div class="fila"><button id="anterior" type="button" disabled>Anterior</button><button id="siguiente" type="button" disabled>Ver más piezas</button></div>
     <div class="fila"><button id="abrir-bienvenida" class="texto" type="button" hidden>¿Cómo funciona?</button></div>
   </section>
@@ -252,7 +266,7 @@
 </dialog>
 <template id="tarjeta"><article class="pieza">
   <img width="320" height="320" loading="lazy" decoding="async"><div class="detalle">
-    <h2></h2><div class="precio"></div><div class="codigo"></div><div class="nota talla"></div><div class="nota donde"></div><div class="marca"></div>
+    <h2></h2><div class="precio"></div><div class="codigo"></div><div class="nota talla"></div><div class="nota donde"></div><div class="motivo fuerte" hidden></div><div class="marca"></div>
     <label class="check"><input type="checkbox"><span class="txt-elegir">Seleccionar</span></label><div class="cola"></div>
     <button type="button" class="principal compartir-uno">Compartir</button><button type="button" class="vendida" hidden>Ya la vendí</button><button type="button" class="quiere">La quiere</button>
   </div>
@@ -260,7 +274,7 @@
 <script type="module">
 import { CATEGORIAS } from '/categorias.js';
 import { pesos, telefonoInteresado, codigoDeRespuesta, textoWhatsApp, crearTarjeta, compartirTarjetas, descargarTarjetas, enlaceApartar, textoSeguimiento,
-  textoAvisoCliente, enlaceCliente, estadoMia, agruparMias, cobradoMias, gananciaDe, gananciaSemana, fechaLegible, horaLegible } from '/vender.js';
+  textoAvisoCliente, enlaceCliente, estadoMia, agruparMias, cobradoMias, gananciaDe, gananciaSemana, fechaLegible, horaLegible, tituloLista } from '/vender.js';
 
 const $ = (id) => document.getElementById(id);
 const decir = (id, texto, error = false) => { $(id).textContent = texto; $(id).className = `aviso${error ? ' error' : ''}`; };
@@ -285,12 +299,15 @@ function resultado(texto, error = false) {
 $('resultado-ok').addEventListener('click', () => { $('resultado').hidden = true; });
 const sr = (texto) => { $('aviso-sr').textContent = texto; };
 const listaAlDia = () => { decir('aviso', `Actualizado a las ${horaLegible(Date.now())}`); $('aviso').classList.add('estado'); };
-for (const [clave, nombre] of CATEGORIAS) $('categoria').add(new Option(nombre, clave));
+for (const [clave, nombre] of CATEGORIAS) { $('categoria').add(new Option(nombre, clave)); $('vista-categoria').add(new Option(nombre, clave)); }
 let correo = '', compartidas = new Set(), revendedora = false, vista = 'piezas';
 let piezas = [], cola = [], seleccion = new Map();
 let cursores = [null], cursoresInteresados = [null], siguiente = null, siguienteInteresados = null;
 let consulta = new URLSearchParams(), cargando = false, cargandoInteresados = false;
 let piezaInteresado = null, intento = null, enviando = false;
+// #882, solo personal: qué ve la lista. `buscado` es lo que se mandó con «Buscar», no lo que se está escribiendo. Sin `listaTiendas`
+// (servidor anterior) la lista queda como antes. Nada de esto se guarda entre sesiones: siempre se entra a «Lo nuevo» de la tienda propia.
+let listaTiendas = [], miTienda = '', nombreMiTienda = '', orden = 'nuevo', buscado = { q: '', hoy: false }, vistaPendiente = false, baseDe = 'tienda';
 let archivos = [], envio = [], urls = [], preparacion = 0;
 
 function recordarCompartidas() {
@@ -304,9 +321,40 @@ function pintarSeleccion() {
 function marcar(marca, clase, texto) {
   textoEn(marca, 'span', texto, `chip ${clase}`);
 }
+const conVista = () => !revendedora && listaTiendas.length > 0;
+const nombreDe = (clave) => listaTiendas.find((t) => t.clave === clave)?.nombre ?? '';
+const nombreCategoria = (clave) => CATEGORIAS.find(([c]) => c === clave)?.[1] ?? '';
+// Lo que se está viendo sale de `consulta` (lo ya pedido), no de los controles, que pueden haber cambiado mientras cargaba.
+function pintarTitulo() {
+  $('titulo-lista').hidden = !conVista();
+  $('nota-base').hidden = true;
+  if (!conVista()) return;
+  const tienda = nombreDe(consulta.get('tienda'));
+  $('titulo-lista').textContent = tituloLista({ orden: consulta.get('orden') ?? 'nuevo', tienda, categoria: nombreCategoria(consulta.get('categoria')),
+    q: consulta.get('q') ?? '', hoy: consulta.has('hoy') });
+  if (consulta.get('orden') === 'recomendado' && baseDe === 'todas') {
+    $('nota-base').textContent = `En ${tienda} se ha vendido poco con etiqueta: se muestra lo que más se vende en todas las tiendas y que hay en ${tienda}.`;
+    $('nota-base').hidden = false;
+  }
+}
+// Una lista vacía con tienda elegida (o sin recomendados) explica por qué y ofrece la salida. Devuelve si lo explicó.
+function pintarVacio() {
+  const tienda = nombreDe(consulta.get('tienda')), recomendados = consulta.get('orden') === 'recomendado';
+  const explicar = conVista() && !piezas.length && !siguiente && (tienda || recomendados);
+  $('vacio-tienda').hidden = !explicar;
+  if (!explicar) return false;
+  const categoria = nombreCategoria(consulta.get('categoria'));
+  $('texto-vacio').textContent = recomendados
+    ? `Todavía no hay recomendados para ${tienda}${categoria ? ` en ${categoria}` : ''}. Toca «Lo nuevo» para ver lo último en llegar.`
+    : `No hay piezas ${consulta.has('q') || consulta.has('hoy') || categoria ? 'así ' : ''}en ${tienda}.`
+      + (consulta.get('tienda') === 'soledad' ? '' : ` En ${tienda} solo salen las piezas con foto que llegan en bulto desde Soledad.`);
+  $('ver-todas').hidden = recomendados;
+  $('ver-nuevo').hidden = !recomendados;
+  return true;
+}
 function pintarPiezas() {
   $('piezas').replaceChildren();
-  if (!piezas.length) textoEn($('piezas'), 'p', siguiente ? 'No encontré piezas aquí. Toca «Ver más piezas».' : 'No hay más piezas por ahora.', 'vacio');
+  if (!piezas.length && !pintarVacio()) textoEn($('piezas'), 'p', siguiente ? 'No encontré piezas aquí. Toca «Ver más piezas».' : 'No hay más piezas por ahora.', 'vacio');
   for (const p of piezas) {
     const fragmento = $('tarjeta').content.cloneNode(true);
     const tarjeta = fragmento.querySelector('article');
@@ -321,7 +369,17 @@ function pintarPiezas() {
     tarjeta.querySelector('.codigo').textContent = p.codigo;
     tarjeta.querySelector('.talla').textContent = p.talla ? `Talla ${p.talla}` : '';
     // #800: en qué tienda está (nombre; nunca cuántas hay). Una respuesta sin `tiendas` (servidor anterior) no dice nada.
-    tarjeta.querySelector('.donde').textContent = p.tiendas?.length ? `Está en ${p.tiendas.join(' y ')}` : '';
+    const donde = tarjeta.querySelector('.donde');
+    donde.textContent = p.tiendas?.length ? `Está en ${p.tiendas.join(' y ')}` : '';
+    if (conVista() && p.tiendas?.length) {
+      // Personal: una marca por tienda con existencia; la propia dice «aquí». Nombres, nunca cuántas hay.
+      donde.textContent = '';
+      textoEn(donde, 'span', 'Está en ', 'sr-only');
+      for (const nombre of p.tiendas) { textoEn(donde, 'span', nombre === nombreMiTienda ? `${nombre} · aquí` : nombre, `chip ${nombre === nombreMiTienda ? 'ok' : 'cerrada'}`); donde.append(' '); }
+    }
+    const motivo = tarjeta.querySelector('.motivo');
+    motivo.textContent = p.motivo ?? '';
+    motivo.hidden = !p.motivo;
     tarjeta.querySelector('input').checked = seleccion.has(p.id);
     tarjeta.querySelector('.cola').textContent = p.cola.length
       ? p.cola.map((i, n) => `${n + 1}.º ${i.cliente || 'Alguien'} (${i.vendedora_nombre}, ${hora(i.creado_en)})`).join(' · ') : 'Sin interesados';
@@ -343,6 +401,39 @@ function pintarPiezas() {
   }
   pintarSeleccion();
 }
+// Cambió la tienda, la categoría o Lo nuevo / Recomendados: vuelve a la primera página conservando lo buscado.
+function consultaDePersonal() {
+  const params = new URLSearchParams();
+  if (orden === 'nuevo' && buscado.q) params.set('q', buscado.q);
+  if (orden === 'nuevo' && buscado.hoy) params.set('hoy', '1');
+  if ($('vista-tienda-sel').value) params.set('tienda', $('vista-tienda-sel').value);
+  if ($('vista-categoria').value) params.set('categoria', $('vista-categoria').value);
+  if (orden === 'recomendado') params.set('orden', 'recomendado');
+  return params;
+}
+function cambiarVista() {
+  if (cargando) { vistaPendiente = true; return; }   // los controles ya cambiaron: se aplica al terminar la carga
+  $('orden-nuevo').setAttribute('aria-pressed', String(orden === 'nuevo'));
+  $('orden-recomendado').setAttribute('aria-pressed', String(orden === 'recomendado'));
+  consulta = consultaDePersonal();
+  cursores = [null];
+  cargarPiezas();
+}
+$('vista-tienda-sel').addEventListener('change', () => {
+  if (!$('vista-tienda-sel').value) orden = 'nuevo';   // Recomendados es de una tienda
+  cambiarVista();
+});
+$('vista-categoria').addEventListener('change', cambiarVista);
+$('orden-nuevo').addEventListener('click', () => { orden = 'nuevo'; cambiarVista(); });
+$('orden-recomendado').addEventListener('click', () => {
+  orden = 'recomendado';
+  if (!$('vista-tienda-sel').value) $('vista-tienda-sel').value = miTienda || listaTiendas[0].clave;
+  buscado = { q: '', hoy: false };   // Recomendados no se busca por nombre ni por día
+  $('q').value = ''; $('hoy').checked = false;
+  cambiarVista();
+});
+$('ver-todas').addEventListener('click', () => { $('vista-tienda-sel').value = ''; cambiarVista(); });
+$('ver-nuevo').addEventListener('click', () => { orden = 'nuevo'; cambiarVista(); });
 async function cargarPiezas() {
   if (cargando) return;
   cargando = true;
@@ -354,14 +445,17 @@ async function cargarPiezas() {
     const datos = await api(`/api/vender?${params}`);
     piezas = datos.piezas;
     siguiente = datos.siguiente;
+    baseDe = datos.base ?? 'tienda';
+    pintarTitulo();
     pintarPiezas();
     listaAlDia();
-    sr(`${piezas.length} piezas disponibles en esta página.`);
+    sr(`${conVista() ? `${$('titulo-lista').textContent}. ` : ''}${piezas.length} piezas disponibles en esta página.`);
   } catch (e) { decir('aviso', mensaje(e), true); }
   finally {
     cargando = false;
     $('anterior').disabled = cursores.length === 1;
     $('siguiente').disabled = !siguiente;
+    if (vistaPendiente) { vistaPendiente = false; cambiarVista(); }
   }
 }
 $('filtros').addEventListener('submit', (e) => {
@@ -372,6 +466,14 @@ $('filtros').addEventListener('submit', (e) => {
   if ($('q').value.trim()) consulta.set('q', codigoDeRespuesta($('q').value) || $('q').value.trim());
   if ($('categoria').value) consulta.set('categoria', $('categoria').value);
   if ($('hoy').checked) consulta.set('hoy', '1');
+  if (conVista()) {
+    // Buscar regresa a «Lo nuevo»; la tienda y la categoría de arriba se conservan.
+    buscado = { q: consulta.get('q') ?? '', hoy: consulta.has('hoy') };
+    orden = 'nuevo';
+    $('orden-nuevo').setAttribute('aria-pressed', 'true');
+    $('orden-recomendado').setAttribute('aria-pressed', 'false');
+    consulta = consultaDePersonal();
+  }
   cursores = [null];
   cargarPiezas();
 });
@@ -860,6 +962,20 @@ function modoRevendedora() {
   $('texto-instalar').textContent = instalar;
   $('instalar').hidden = !instalar || yaEsApp || leido('vender-instalar') === '1';
 }
+// Al entrar, el personal ve «Lo nuevo» de su tienda (la de su cuenta) sin tocar nada.
+function prepararVista(yo) {
+  listaTiendas = Array.isArray(yo.tiendas) ? yo.tiendas : [];
+  if (!listaTiendas.length) return;
+  miTienda = listaTiendas.some((t) => t.clave === yo.tienda) ? yo.tienda : '';
+  nombreMiTienda = nombreDe(miTienda);
+  const propia = listaTiendas.filter((t) => t.clave === miTienda), otras = listaTiendas.filter((t) => t.clave !== miTienda);
+  $('vista-tienda-sel').replaceChildren(...[...propia, ...otras].map((t) => new Option(t.clave === miTienda ? `${t.nombre} · mi tienda` : t.nombre, t.clave)),
+    new Option('Todas las tiendas', ''));
+  $('vista-tienda-sel').value = miTienda;
+  $('vista-tienda').hidden = false;
+  $('categoria').closest('div').hidden = true;   // la categoría ya está arriba, siempre a la vista
+  consulta = consultaDePersonal();
+}
 $('cerrar-bienvenida').addEventListener('click', () => { $('bienvenida').hidden = true; guardado('vender-bienvenida'); });
 $('cerrar-instalar').addEventListener('click', () => { $('instalar').hidden = true; guardado('vender-instalar'); });
 $('abrir-bienvenida').addEventListener('click', () => { $('bienvenida').hidden = false; $('bienvenida').scrollIntoView({ block: 'start' }); });
@@ -873,7 +989,7 @@ try {
     recoge?.replaceChildren(...yo.tiendas.map((t) => new Option(t.nombre, t.clave)));
     if (recoge && yo.tiendas.some((t) => t.clave === yo.tienda)) recoge.value = yo.tienda;
   }
-  if (revendedora) modoRevendedora(); else $('acciones-interesado').classList.add('columna');
+  if (revendedora) modoRevendedora(); else { $('acciones-interesado').classList.add('columna'); prepararVista(yo); }
   try { compartidas = new Set(JSON.parse(localStorage.getItem(`vender-compartidas:${correo}`) || '[]')); } catch { /* sin memoria */ }
   $('principal').hidden = false;
   await cargarPiezas();
