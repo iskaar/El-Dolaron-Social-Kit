@@ -354,7 +354,8 @@ function pintarVacio() {
 }
 function pintarPiezas() {
   $('piezas').replaceChildren();
-  if (!piezas.length && !pintarVacio()) textoEn($('piezas'), 'p', siguiente ? 'No encontré piezas aquí. Toca «Ver más piezas».' : 'No hay más piezas por ahora.', 'vacio');
+  const explicado = pintarVacio();   // siempre: también esconde la explicación cuando la lista ya trae piezas
+  if (!piezas.length && !explicado) textoEn($('piezas'), 'p', siguiente ? 'No encontré piezas aquí. Toca «Ver más piezas».' : 'No hay más piezas por ahora.', 'vacio');
   for (const p of piezas) {
     const fragmento = $('tarjeta').content.cloneNode(true);
     const tarjeta = fragmento.querySelector('article');
@@ -406,8 +407,10 @@ function consultaDePersonal() {
   const params = new URLSearchParams();
   if (orden === 'nuevo' && buscado.q) params.set('q', buscado.q);
   if (orden === 'nuevo' && buscado.hoy) params.set('hoy', '1');
-  if ($('vista-tienda-sel').value) params.set('tienda', $('vista-tienda-sel').value);
-  if ($('vista-categoria').value) params.set('categoria', $('vista-categoria').value);
+  // Un código exacto se busca en todas las tiendas y categorías (el servidor ya ignora la tienda): así el título no dice otra cosa.
+  const porCodigo = orden === 'nuevo' && /^ED-\d+$/.test(buscado.q);
+  if (!porCodigo && $('vista-tienda-sel').value) params.set('tienda', $('vista-tienda-sel').value);
+  if (!porCodigo && $('vista-categoria').value) params.set('categoria', $('vista-categoria').value);
   if (orden === 'recomendado') params.set('orden', 'recomendado');
   return params;
 }
