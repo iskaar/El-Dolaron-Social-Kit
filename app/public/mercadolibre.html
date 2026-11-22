@@ -134,6 +134,7 @@
           <option value="recientes">Más recientes</option>
           <option value="mas_existencias">Más existencias</option>
           <option value="menos_existencias">Menos existencias</option>
+          <option value="mas_visitas">Más visitas (7 días)</option>
           <option value="codigo">Código</option>
           <option value="nombre">Nombre (A–Z)</option>
         </select></div>
@@ -505,7 +506,11 @@ function filaPieza(item) {
     h('div', { class: 'precios' },
       h('span', {}, `Tienda ${pesos(p.precio)}`),
       h('span', {}, `Existencias: ${p.stock}`),
-      pub?.precio_ml != null ? h('span', {}, `Mercado Libre ${pesos(pub.precio_ml)}`) : null));
+      pub?.precio_ml != null ? h('span', {}, `Mercado Libre ${pesos(pub.precio_ml)}`) : null,
+      // #637: visitas de los últimos 7 días (leídas por el cron una vez al día) y ventas de ML en el mismo lapso.
+      pub?.ml_item_id ? h('span', { title: pub.visitas_actualizado_en ? `Leídas ${new Date(pub.visitas_actualizado_en).toLocaleString('es-MX')}` : 'Aún sin lectura de Mercado Libre' },
+        `Visitas 7 d: ${pub.visitas_7d ?? '—'}`) : null,
+      pub?.ml_item_id ? h('span', {}, `Ventas 7 d: ${pub.ventas_7d ?? 0}`) : null));
   // #724: con menos de 3 existencias solo se publica o reactiva con confirmación física en piso (escanear la etiqueta en Inventario).
   const sinPiso = p.stock < 3 && !item.existencia_confirmada_en;
   const motivoPiso = 'Confirma la pieza en piso escaneando su etiqueta en Inventario';
@@ -517,6 +522,10 @@ function filaPieza(item) {
     const [clase, icono, texto] = infoEstado(pub.estado);
     info.append(h('span', { class: `insignia ${clase}` }, `${icono} ${texto}`));
     if (pub.ultimo_error) info.append(h('div', { class: 'error-texto' }, pub.ultimo_error));
+    // #637: lo que Mercado Libre dice de la publicación (en revisión, miniatura mala...) explica las visitas bajas.
+    // ponytail: solo las etiquetas que explican visitas bajas; las demás (decenas) quedan guardadas en D1 sin mostrarse.
+    const deML = [...(pub.sub_status ?? []), ...(pub.tags ?? []).filter((x) => /poor_quality|moderation|under_review|waiting_for|incomplete|forbidden/i.test(x))];
+    if (deML.length) info.append(h('div', { class: 'meta' }, `Estado en ML: ${deML.join(', ')}`));
     if (pub.permalink) {
       acciones.append(h('a', { class: 'boton', href: pub.permalink, target: '_blank', rel: 'noopener noreferrer' }, 'Ver en ML ↗'));
     }
