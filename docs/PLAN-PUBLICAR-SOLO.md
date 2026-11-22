@@ -1,7 +1,7 @@
 # Publicar solo: fotos profesionales, feed de productos y piloto automático de Mercado Libre
 
 Issue #886 · 22/11/2026 · Estado: **diseño en espera de aprobación de Isaac**. Nada de esto está implementado.
-Este documento detalla el Proyecto 1 (fotos). Los Proyectos 2 a 4 tienen aquí solo su alcance; cada uno
+Este documento detalla el Proyecto 1 (fotos). Los Proyectos 2 a 5 tienen aquí solo su alcance; cada uno
 tendrá su propio diseño antes de construirse.
 
 ## Qué pidió Isaac y por qué
@@ -77,7 +77,8 @@ aquello se hizo a mano con agentes y créditos de Higgsfield.
 | B. Feed de productos | Lista al día que leen Meta, WhatsApp y Google | ~2,800 piezas | Sin comisión ni piso de precio; pide conectar un catálogo de Meta |
 | **C. Los dos** | Comparten la foto y la comprobación de «lista» | Todo | **Elegido por Isaac el 22/11** |
 
-Orden acordado: 1 fotos, 2 feed, 3 piloto automático de ML, 4 precio.
+Orden acordado: 1 fotos, 2 feed, 3 piloto automático de ML, 4 precio. El 22/11 Isaac añadió las reglas de precio
+con datos (Proyecto 5); su primer ladrillo (#637, guardar visitas) puede avanzar en paralelo porque solo lee.
 
 ## Proyecto 1: fotos profesionales
 
@@ -235,11 +236,25 @@ vigentes de cada uno en México. **Conectar un catálogo de Meta o de Google req
 
 ## Proyecto 3: piloto automático de Mercado Libre (alcance; diseño propio después)
 
-`preparar` y `publicar` sin el toque humano para piezas que cumplen todo: portada `lista`, precio sobre el umbral,
-código de barras cuando la categoría lo exige y confirmación en piso (#724, se conserva). El escaneo en piso se
-vuelve el disparador. Lo que no cumple sale en una lista de «qué le falta». Incluye validar antes con
-`POST /items/validate` (#557) y un tope de publicaciones por día. La cuenta tiene pocas ventas y cada cancelación
-pesa en la reputación: publicar sin comprobaciones no es una opción.
+Sustituye al agente que publica desde el navegador (funciona, pero no se sostiene: es lento, depende de una
+sesión abierta y Mercado Libre le pone CAPTCHA). `preparar` y `publicar` corren sin el toque humano para piezas
+que cumplen todo; lo que no cumple sale en una lista de «qué le falta».
+
+- **Confirmación en piso (regla de Isaac, #724): se conserva sin cambios.** Con menos de 3 existencias la pieza
+  no se publica ni se reactiva hasta que alguien escanee su etiqueta en piso. Ese escaneo se vuelve el
+  disparador: escanear publica.
+- **Fotos de productos que ya están en Mercado Libre.** La API solo deja reutilizar fotos de un *producto de
+  catálogo* (`catalog_product_id`); la app ya lo hace, pero una persona busca y elige. El piloto buscará el
+  producto por código de barras exacto y publicará en catálogo solo: fotos y ficha oficiales, sin portada
+  propia. Límite conocido: el 24/10 solo 27 de 337 UPC del inventario estaban en el catálogo de ML. Las fotos
+  de publicaciones de otros vendedores no se copian: la API no las da y copiarlas arriesga una denuncia.
+- **20 % debajo del mejor precio.** Con producto de catálogo ya existe (#871): precio de quien gana la buy box
+  menos `ml_descuento_referencia`. Sin catálogo la API no deja buscar publicaciones ajenas (`/sites/MLM/search`
+  responde 403 y no se usan scrapers, decisión del 6/10). El camino es publicar con el precio de respaldo y,
+  ya viva, leer lo que ML da de esa publicación (`/suggestions/items/{id}/details`: precio sugerido y precio
+  más bajo comparable) para ajustarla en el Proyecto 5. Falta comprobar con la cuenta real que ML responde.
+- Validar antes con `POST /items/validate` (#557), tope de publicaciones por día y portada `lista` (o producto
+  de catálogo) como requisito. La cuenta tiene pocas ventas y cada cancelación pesa en la reputación.
 
 ## Proyecto 4: precio más exacto (alcance; diseño propio después)
 
@@ -247,6 +262,29 @@ Línea base de 30 días: del manifiesto, 4 de 1,359 piezas corregidas a mano. De
 879 sin precio de lista y 330 corregidas (272 a la baja, en promedio 0.77× lo sugerido). Solo foto: 138 de 250
 sin precio de lista y 44 corregidas (0.69×). Meta propuesta: que la pieza fuera del manifiesto necesite a una
 persona en mucho menos del ~60 % de los casos.
+
+## Proyecto 5: reglas de precio con datos (alcance; diseño propio después)
+
+Pedido de Isaac (22/11): usar los datos de nuestras publicaciones para bajar precios con reglas, por ejemplo
+«200 visitas y ninguna compra → descuento» o «tantos días en el portal → baja el precio».
+
+- **Qué se puede leer de ML:** visitas por publicación (`/items/visits`), ventas (ya están en `ml_ventas`),
+  calidad y competencia en catálogo (#563), precio sugerido y más bajo comparable (`/suggestions`). Hoy la app
+  no guarda visitas: es el Issue #637, abierto.
+- **Qué se puede hacer por API:** descuento individual por `seller-promotions` (5 % a menos de 80 %, hasta 14
+  días). Es la vía que ML acepta; bajar el precio editándolo puede pausar la publicación por «cambio inusual».
+- **Tamaño real de los números:** el 30/10 toda la cuenta tuvo 30 visitas únicas en 7 días con 35 publicaciones,
+  y la más vista tuvo 7. Con ese tráfico «200 visitas» tarda meses: los umbrales deben salir de los datos, y
+  una publicación sin visitas necesita mejor foto y ficha, no descuento.
+- **Antigüedad en tienda y portal:** de 2,665 piezas publicables con existencia, 1,333 tienen más de 30 días
+  desde su primera captura (unos $363 mil a precio de etiqueta). La fecha es la de la primera captura, así que
+  exagera en productos que se resurten. Bajar el precio por antigüedad toca la etiqueta impresa: decidir si la
+  rebaja es solo en línea o también en tienda es de Isaac y va en el diseño de este proyecto.
+- **Primer ladrillo, independiente del resto:** #637 (guardar visitas a diario) y una comprobación de solo
+  lectura con la cuenta real de qué devuelven `/items/visits` y `/suggestions` para las 61 publicaciones activas.
+  Sin ese dato no se pueden fijar umbrales.
+- Toda rebaja automática lleva piso (no bajar de un porcentaje del precio de tienda sin aprobación en `/avisos`)
+  y registro.
 
 ## Fuera del programa
 
