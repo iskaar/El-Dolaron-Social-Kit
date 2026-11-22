@@ -29,7 +29,7 @@
     border-radius: 10px; font-family: ui-monospace, monospace; }
   .fila-codigo { display: flex; gap: 8px; }
   .fila-codigo #codigo { flex: 1; min-width: 0; }
-  #abrir-camara { border: 2px solid var(--azul); background: #fff; color: var(--azul); border-radius: 10px;
+  #abrir-camara, #sin-etiqueta { border: 2px solid var(--azul); background: #fff; color: var(--azul); border-radius: 10px;
     padding: 0 16px; min-height: 52px; min-width: 88px; font-size: 16px; font-weight: 700; cursor: pointer; }
   #lector-camara { width: 100%; min-height: 240px; background: #000; border-radius: 10px; overflow: hidden; }
   #camara-info { min-height: 22px; margin-top: 8px; font-size: 16px; font-weight: 700; color: var(--azul); }
@@ -222,6 +222,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     <div class="fila-codigo">
       <input id="codigo" placeholder="Escanea el código, escribe P-17 de un pedido, o busca por descripción" autocomplete="off" autofocus>
       <button id="abrir-camara" type="button">Cámara</button>
+      <button id="sin-etiqueta" type="button" title="Cobrar una pieza que no tiene etiqueta ni banda de precio, escribiendo qué es y cuánto cuesta">Sin etiqueta</button>
     </div>
     <div id="aviso" role="status"></div>
     <div id="en-mano" hidden></div>
@@ -491,6 +492,22 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </div>
 </dialog>
 
+<dialog id="dlg-libre" aria-labelledby="dlg-libre-titulo">
+  <h2 id="dlg-libre-titulo">Cobrar una pieza sin etiqueta</h2>
+  <p class="nota">Para una pieza que no tiene etiqueta ni banda de precio y que no está dada de alta. Escribe qué es y cuánto cuesta.</p>
+  <form id="form-libre" novalidate>
+    <label for="libre-descripcion">¿Qué es la pieza?</label>
+    <input id="libre-descripcion" maxlength="40" autocomplete="off" placeholder="Por ejemplo: Bocina">
+    <label for="libre-precio">Precio en pesos</label>
+    <input id="libre-precio" inputmode="decimal" autocomplete="off" placeholder="Por ejemplo: 600" aria-describedby="libre-error">
+    <p id="libre-error" role="alert" style="min-height:18px;margin:8px 0 0;font-size:14px;color:var(--rojo)"></p>
+    <div class="acciones">
+      <button id="libre-cancelar" type="button" class="secundario">Cancelar</button>
+      <button id="libre-agregar" type="submit">Agregar al ticket</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="dlg-socio" aria-labelledby="dlg-socio-titulo">
   <h2 id="dlg-socio-titulo">¿El cliente es socio?</h2>
   <p id="dlg-socio-texto"></p>
@@ -532,7 +549,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 import { CATEGORIAS_GASTO } from '/categorias.js';
 import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, montoTransferidoRazonable, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, TOPE_DESCUENTO_CAJERO, TICKET_VIGENTE_MS, huellaTicket, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
   esBusquedaPorTexto, avisoExistencia, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo,
-  MOTIVOS_EN_MANO, SIN_RED_EN_MANO, puedeVenderEnMano } from '/venta.js';
+  MOTIVOS_EN_MANO, SIN_RED_EN_MANO, puedeVenderEnMano, LIBRE_ID, LIBRE_PRECIO_MIN, LIBRE_PRECIO_MAX, descripcionLibre } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -1015,7 +1032,7 @@ function pintar() {
   // Con la respuesta de este folio en duda (#817), el código se sigue dando por bueno: el servidor contesta `duplicada` sin validarlo.
   const autorizado = !usados || (codigoSocio && usados <= socio.maximo && ((folioIncierto && folioIncierto === idVenta) || Date.parse(socio.expira_en) > Date.now()));
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
-  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'llegada-pendiente', 'dolarones', 'efectivo', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido', 'banco-emisor', 'comprobante']) $(id).disabled = cobrando;
+  for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'llegada-pendiente', 'dolarones', 'efectivo', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido', 'banco-emisor', 'comprobante', 'sin-etiqueta']) $(id).disabled = cobrando;
   // Transferencia desde $300 (#593): aparecen la clave de rastreo y el monto del comprobante.
   // Los datos aparecen con el primer clic en «Transferencia» (cobrar()); aquí se esconden si ya no hacen falta, y con el ticket vacío no queda nada de la anterior.
   if (t.aPagar < CLAVE_DESDE) $('datos-transferencia').hidden = true;
@@ -1203,6 +1220,37 @@ function agregarEnMano(codigo, motivo) {
   sonar(TONO_PIEZA);
   pintar();
 }
+
+/* ---------- «Sin etiqueta» (#880) ---------- */
+// Una pieza sin etiqueta ni banda: la cajera escribe qué es y cuánto cuesta. Cada vez es un renglón propio (agregar no los junta) y el
+// servidor acepta ese precio solo para este producto. No necesita red: la venta se encola como cualquier otra.
+$('sin-etiqueta').addEventListener('click', () => {
+  if (cobrando || ticketEnDuda()) return;
+  ocultarEnMano();
+  $('libre-descripcion').value = '';
+  $('libre-precio').value = '';
+  $('libre-error').textContent = '';
+  $('dlg-libre').showModal();
+  $('libre-descripcion').focus();
+});
+$('libre-cancelar').addEventListener('click', () => { $('dlg-libre').close(); $('codigo').focus(); });
+$('form-libre').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const error = (texto, campo) => { $('libre-error').textContent = texto; $(campo).focus(); };
+  const descripcion = descripcionLibre($('libre-descripcion').value);
+  if (!descripcion) return error('Escribe qué es la pieza (hasta 40 letras).', 'libre-descripcion');
+  const precio = centavosDeTexto($('libre-precio').value.replace(/^\s*\$/, ''));
+  if (precio === null) return error('Escribe el precio en pesos, por ejemplo 600 o 600.50.', 'libre-precio');
+  if (precio < LIBRE_PRECIO_MIN || precio > LIBRE_PRECIO_MAX) return error('El precio va de $1 a $20,000.', 'libre-precio');
+  if (cobrando || ticketEnDuda()) return $('dlg-libre').close();
+  lineas = agregar(lineas, { codigo: 'LIBRE', nombre: `Sin etiqueta: ${descripcion}`, precio, producto_id: LIBRE_ID, descripcion, libre: true }, 1);
+  idVenta = null;
+  $('aviso').textContent = '';
+  $('dlg-libre').close();
+  sonar(TONO_PIEZA);
+  pintar();
+  $('codigo').focus();
+});
 
 /** Agrega con sonido: agudo si entró la pieza, grave y doble si se rechazó. 'pedido' y 'socio' abren su propio aviso. */
 function escanear(leido, reintento = false) {
@@ -1963,8 +2011,9 @@ async function cobrar(forma) {
   try {
     const venta = {
       id: idVenta,
-      lineas: lineas.map(({ codigo, nombre, precio, precio_lista, cantidad, producto_id, en_mano }) =>
-        ({ codigo, nombre, precio, ...(precio_lista > precio ? { precio_lista } : {}), cantidad, producto_id, ...(en_mano ? { en_mano } : {}) })),
+      lineas: lineas.map(({ codigo, nombre, precio, precio_lista, cantidad, producto_id, en_mano, descripcion }) =>
+        ({ codigo, nombre, precio, ...(precio_lista > precio ? { precio_lista } : {}), cantidad, producto_id, ...(en_mano ? { en_mano } : {}),
+          ...(descripcion === undefined ? {} : { descripcion }) })),   // #880: solo la linea «sin etiqueta» la trae
       forma_pago: forma,
       efectivo: forma === 'efectivo' ? efectivo : 0,
       creado_en: creadoEnVenta,
