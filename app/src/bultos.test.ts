@@ -333,6 +333,49 @@ test('el catálogo de la caja trae la existencia de su tienda, también en el in
   assert.equal(await existencia(soledad), 48);
 });
 
+test('#884 /api/existencia: en qué tienda sí hay la pieza (sin la propia, sin cuántas), el bulto y el apartado; 400, 404 y rol sin caja', async () => {
+  const m = montar();
+  const cap = m.yo(CAPTURISTA), salk = await m.terminal(PC_SALK), soledad = await m.terminal(PC_SOLEDAD), romero = await m.terminal(PC_ROMERO);
+  const donde = async (quien: typeof salk, codigo = 'ED-000001') => {
+    const r = await quien(`/api/existencia?codigo=${codigo}`, undefined, 'GET');
+    assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+    return r.cuerpo;
+  };
+  // Solo en Soledad: Salk la ve ahí; Soledad (la propia) no se nombra a sí misma.
+  assert.deepEqual(await donde(salk), { tiendas: ['Soledad'], bulto: null, apartada: null });
+  assert.deepEqual(await donde(soledad), { tiendas: [], bulto: null, apartada: null });
+  // Solo en otra sucursal, y en dos tiendas a la vez: nombres en el orden de TIENDAS, sin la propia ni cuántas unidades.
+  m.db.prepare("insert into existencia_tienda (producto_id, tienda, unidades, actualizado_en) values (?, 'romero', 7, '')").run(PRODUCTO);
+  assert.deepEqual(await donde(salk), { tiendas: ['Soledad', 'Coronel Romero'], bulto: null, apartada: null });
+  assert.deepEqual(await donde(romero), { tiendas: ['Soledad'], bulto: null, apartada: null });
+  m.db.prepare('update productos set stock = 0 where id = ?').run(PRODUCTO);
+  assert.deepEqual(await donde(salk), { tiendas: ['Coronel Romero'], bulto: null, apartada: null });
+  // Vendida en todas.
+  m.db.prepare('update existencia_tienda set unidades = 0').run();
+  assert.deepEqual(await donde(salk), { tiendas: [], bulto: null, apartada: null });
+  // En un bulto cerrado hacia Salk: aquí (Salk) hay que recibirlo; Romero ve que va a otra tienda.
+  m.db.prepare('update productos set stock = 3 where id = ?').run(PRODUCTO);
+  const folio = await m.nuevoBulto(cap, 'salk');
+  await m.escanear(cap, folio, 'ED-000001');
+  await cap(`/api/bultos/${folio}/cerrar`, {});
+  assert.deepEqual((await donde(salk)).bulto, { folio, destino: 'Avenida Salk', aqui: true });
+  assert.deepEqual((await donde(romero)).bulto, { folio, destino: 'Avenida Salk', aqui: false });
+  // Apartada: gana el folio del apartado vigente; una cancelada no cuenta.
+  m.db.exec(`insert into pedidos (id, folio, cliente, telefono, entrega, vendedora, estado, vence_en, anticipo, saldo, forma_pago, saldo_vence_en, creado_en, actualizado_en)
+      values ('pa', 17, 'X', '4441234567', 'tienda', 'portal', 'apartado', 'z', 0, 0, 'transferencia', 'z', '', ''),
+             ('pc', 18, 'X', '4441234567', 'tienda', 'portal', 'cancelado', 'z', 0, 0, 'transferencia', 'z', '', '')`);
+  m.db.prepare("insert into pedido_lineas (pedido_id, producto_id, cantidad, precio) values ('pc', ?, 1, 100)").run(PRODUCTO);
+  assert.equal((await donde(salk)).apartada, null);
+  m.db.prepare("insert into pedido_lineas (pedido_id, producto_id, cantidad, precio) values ('pa', ?, 1, 100)").run(PRODUCTO);
+  assert.equal((await donde(salk)).apartada, 'P-17');
+  // Pieza sin inventario (banda): todo vacío. Sin código: 400. Código que no existe: 404. Un rol sin caja no entra.
+  m.db.prepare("insert into productos (id, codigo, nombre, precio, stock, sin_inventario, semana_ingreso, creado_en, actualizado_en) values ('b3333333-3333-4333-8333-333333333333', 'ZZ50', 'Banda de prueba', 5000, 0, 1, 'S40', '', '')").run();
+  assert.deepEqual(await donde(salk, 'ZZ50'), { tiendas: [], bulto: null, apartada: null });
+  assert.equal((await salk('/api/existencia', undefined, 'GET')).status, 400);
+  assert.equal((await salk('/api/existencia?codigo=ED-999999', undefined, 'GET')).status, 404);
+  assert.equal((await cap('/api/existencia?codigo=ED-000001', undefined, 'GET')).status, 403);
+});
+
 test('una cuenta de sucursal no captura ni ajusta Soledad; sus pedidos y ventas con pedido llegan a la validación (#800: ya no son solo de Soledad)', async () => {
   const m = montar();
   const salk = await m.terminal(PC_SALK);

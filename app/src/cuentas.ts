@@ -184,6 +184,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (metodo === 'POST' && /^\/api\/piezas\/[^/]+\/solicitud-precio$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/marketplace' || /^\/api\/marketplace\/foto\/[^/]+$/.test(ruta)) return CAPTURA;
   if (ruta === '/api/catalogo') return CAJA;
+  if (ruta === '/api/existencia' && metodo === 'GET') return CAJA; // #884: en qué tienda sí hay la pieza que aquí no hay
   // Bultos (#795): recibir y ver lo que viene en camino lo hace la caja de la sucursal (la computadora con PIN); armar, cerrar y cancelar, dueño y capturista.
   if ((ruta === '/api/bultos/entrantes' && metodo === 'GET') || (ruta === '/api/bultos/recibir' && metodo === 'POST')) return CAJA;
   if (ruta === '/api/bultos' || ruta.startsWith('/api/bultos/')) return CAPTURA;

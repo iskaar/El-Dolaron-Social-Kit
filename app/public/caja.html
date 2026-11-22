@@ -548,7 +548,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
 import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, montoTransferidoRazonable, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, TOPE_DESCUENTO_CAJERO, TICKET_VIGENTE_MS, huellaTicket, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
-  esBusquedaPorTexto, avisoExistencia, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo,
+  esBusquedaPorTexto, avisoExistencia, avisoDondeHay, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo,
   MOTIVOS_EN_MANO, SIN_RED_EN_MANO, puedeVenderEnMano, LIBRE_ID, LIBRE_PRECIO_MIN, LIBRE_PRECIO_MAX, descripcionLibre } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
@@ -1145,6 +1145,8 @@ function agregarCodigo(leido, reintento = false) {
       $('aviso').textContent = sinExistencia;
       $('aviso').style.color = '#D72B32';
       if (puedeVenderEnMano(pieza, enTicket)) ofrecerEnMano(pieza);
+      // #884: el último mensaje de avisoExistencia (0 aquí y fuera del ticket) no dice cuál de las tres cosas pasó: se le pregunta al servidor.
+      if (pieza.stock <= 0 && enTicket === 0 && navigator.onLine) dondeHay(pieza, sinExistencia);
       // La existencia local puede estar vieja (otra caja, una devolución): se baja el catálogo una vez, como con «no encontrado», y si
       // ahora sí hay, entra. El aviso ya está en pantalla: no se retrasa.
       if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (catalogo.get(pieza.codigo)?.stock > pieza.stock) escanear(leido, true); });
@@ -1159,6 +1161,18 @@ function agregarCodigo(leido, reintento = false) {
   $('aviso').textContent = '';
   pintar();
   return true;
+}
+
+/**
+ * #884: dónde sí hay la pieza que aquí no hay. Sin esperar: el aviso de siempre ya está en pantalla y esta respuesta lo reemplaza solo si
+ * sigue ahí (un escaneo posterior, o la pieza que la recarga ya agregó, lo habrían cambiado). Sin red o con error se queda el de siempre.
+ * No toca el foco: el siguiente Enter del lector sigue cayendo en #codigo.
+ */
+function dondeHay(pieza, avisoInmediato) {
+  fetch(`/api/existencia?codigo=${encodeURIComponent(pieza.codigo)}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((datos) => { if (datos && $('aviso').textContent === avisoInmediato) $('aviso').textContent = avisoDondeHay(pieza.nombre, datos); })
+    .catch(() => {});
 }
 
 /* ---------- busqueda a mano ---------- */

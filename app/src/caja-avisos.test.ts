@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import {
   totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio,
-  leerMultiplicador, contadoDe, esBusquedaPorTexto, avisoExistencia, moverSugerencia, cancelarPideConfirmar, nVentas,
+  leerMultiplicador, contadoDe, esBusquedaPorTexto, avisoExistencia, avisoDondeHay, moverSugerencia, cancelarPideConfirmar, nVentas,
   avisoCorteSinEnviar, GASTO_MAXIMO_CAJERO, gastoRequiereDueno, centavosDeTexto, alertaConteo, pesosExactos, PIEZAS_IMPROBABLES,
 } from '../public/venta.js';
 import { LIMITE_GASTO_CAJERO } from './corte.ts';
@@ -786,13 +786,15 @@ test('#817 tonos: las constantes de calibración están arriba del script, el so
   assert.equal(creados.length, 2, 'el tono de rechazo es doble');
 });
 
-function montarAgregar(piezas: any[], { enLinea = true, recarga = [] as any[] } = {}) {
+// `respuesta` es lo que contesta GET /api/existencia (ok y cuerpo); una promesa que nunca llega = el servidor aún no contesta.
+function montarAgregar(piezas: any[], { enLinea = true, recarga = [] as any[], respuesta = new Promise<any>(() => {}) as Promise<any> } = {}) {
+  const consultas: string[] = [];
   const $ = (() => { const el = { textContent: '', style: {} }; return () => el; })();
   const escaneos: [string, boolean][] = [];
   const recargas: number[] = [];
   const catalogo = new Map(piezas.map((p) => [p.codigo, p]));
   const contexto: Record<string, unknown> = {
-    $, catalogo, agregar, leerMultiplicador, codigoDeDigitos, avisoExistencia, precioHoy: (p: any) => p.precio, Map, Date, puedeVenderEnMano, ocultarEnMano() {}, ofrecerEnMano() {}, ticketEnDuda: () => false,
+    $, catalogo, agregar, leerMultiplicador, codigoDeDigitos, avisoExistencia, avisoDondeHay, fetch: (url: string) => { consultas.push(url); return respuesta; }, precioHoy: (p: any) => p.precio, Map, Date, puedeVenderEnMano, ocultarEnMano() {}, ofrecerEnMano() {}, ticketEnDuda: () => false,
     navigator: { onLine: enLinea }, pintar() {}, cargarPedido() {}, buscarSocio() {},
     // El catálogo que baja la recarga: reemplaza lo que había (como cargarCatalogo).
     cargarCatalogo: async () => { recargas.push(1); for (const p of recarga) catalogo.set(p.codigo, p); },
@@ -801,7 +803,7 @@ function montarAgregar(piezas: any[], { enLinea = true, recarga = [] as any[] } 
   const rutina = runInNewContext(`let cobrando = false, idVenta = null, lineas = [];
     ${entre('function buscarPieza(', '/* ---------- busqueda a mano')}
     ({ agregarCodigo, lineas: () => lineas })`, contexto);
-  return { ...rutina, aviso: $(), escaneos, recargas };
+  return { ...rutina, aviso: $(), escaneos, recargas, consultas };
 }
 const pieza = (codigo: string, stock: number, extra: Record<string, unknown> = {}) => ({ codigo, nombre: `Pieza ${codigo}`, precio: 5000, stock, id: `id-${codigo}`, ...extra });
 
@@ -841,6 +843,70 @@ test('#817 agregarCodigo: sin existencia dice qué hacer, baja el catálogo UNA 
   assert.equal(ya.agregarCodigo('ED-000001'), true);
   assert.equal(ya.agregarCodigo('ED-000001'), false);
   assert.equal(ya.aviso.textContent, 'Pieza ED-000001 ya está en este ticket.');
+});
+
+test('#884 avisoDondeHay: cada renglón, en orden de prioridad, solo con nombres de tienda', () => {
+  assert.equal(avisoDondeHay('Lámpara', { tiendas: ['Soledad'], bulto: { folio: 'BU-7K2MP', destino: 'Avenida Salk', aqui: true }, apartada: 'P-17' }),
+    'Lámpara está apartada en P-17. Si el cliente viene por ella, escanea ese folio. También hay en Soledad.');
+  assert.equal(avisoDondeHay('Lámpara', { tiendas: [], bulto: null, apartada: 'P-17' }), 'Lámpara está apartada en P-17. Si el cliente viene por ella, escanea ese folio.');
+  assert.equal(avisoDondeHay('Lámpara', { tiendas: ['Soledad'], bulto: { folio: 'BU-7K2MP', destino: 'Avenida Salk', aqui: true }, apartada: null }),
+    'Lámpara viene en el bulto BU-7K2MP. Recíbelo en «Bultos» y escanéala otra vez. También hay en Soledad.');
+  assert.equal(avisoDondeHay('Lámpara', { tiendas: [], bulto: { folio: 'BU-7K2MP', destino: 'Avenida Salk', aqui: false }, apartada: null }),
+    'Lámpara va en el bulto BU-7K2MP a Avenida Salk. No está en esta tienda.');
+  assert.equal(avisoDondeHay('Lámpara', { tiendas: ['Soledad', 'Avenida Salk'], bulto: null, apartada: null }),
+    'Lámpara no está en esta tienda. Hay en Soledad y Avenida Salk. Si el cliente la quiere, apártala en «Apartados».');
+  assert.equal(avisoDondeHay('Lámpara', { tiendas: ['Soledad'], bulto: null, apartada: null }),
+    'Lámpara no está en esta tienda. Hay en Soledad. Si el cliente la quiere, apártala en «Apartados».');
+  assert.equal(avisoDondeHay('Lámpara', { tiendas: [], bulto: null, apartada: null }), 'Lámpara: ya no hay en ninguna tienda.');
+});
+
+test('#884 agregarCodigo: el aviso de siempre sale sin esperar y la respuesta del servidor lo reemplaza; solo se pregunta en el caso de existencia 0 con red', async () => {
+  const siempre = 'Pieza ED-000001 ya se vendió, está apartada o no está en esta tienda. Si es de un pedido, escanea su folio (P-…).';
+  const cuerpo = { tiendas: ['Soledad', 'Avenida Salk'], bulto: null, apartada: null };
+  let llega!: (r: unknown) => void;
+  const a = montarAgregar([pieza('ED-000001', 0)], { respuesta: new Promise((r) => { llega = r; }) });
+  assert.equal(a.agregarCodigo('ED-000001'), false);
+  assert.equal(a.aviso.textContent, siempre, 'el servidor aún no contesta');
+  assert.deepEqual(a.consultas, ['/api/existencia?codigo=ED-000001']);
+  llega({ ok: true, json: async () => cuerpo });
+  await tick(); await tick();
+  assert.equal(a.aviso.textContent, 'Pieza ED-000001 no está en esta tienda. Hay en Soledad y Avenida Salk. Si el cliente la quiere, apártala en «Apartados».');
+
+  // Error del servidor o de la red: se queda el aviso de siempre.
+  const falla = montarAgregar([pieza('ED-000001', 0)], { respuesta: Promise.resolve({ ok: false, json: async () => ({}) }) });
+  falla.agregarCodigo('ED-000001'); await tick(); await tick();
+  assert.equal(falla.aviso.textContent, siempre);
+  const cae = montarAgregar([pieza('ED-000001', 0)], { respuesta: Promise.reject(new TypeError('sin red')) });
+  cae.agregarCodigo('ED-000001'); await tick(); await tick();
+  assert.equal(cae.aviso.textContent, siempre);
+
+  // Sin red no se pregunta; con la pieza ya en el ticket (otro mensaje) o con existencia parcial tampoco.
+  const sinRed = montarAgregar([pieza('ED-000001', 0)], { enLinea: false });
+  sinRed.agregarCodigo('ED-000001');
+  const enTicket = montarAgregar([pieza('ED-000002', 1)]);
+  enTicket.agregarCodigo('ED-000002'); enTicket.agregarCodigo('ED-000002');
+  const parcial = montarAgregar([pieza('ED-000003', 1)]);
+  parcial.agregarCodigo('2*ED-000003');
+  assert.deepEqual([sinRed.consultas, enTicket.consultas, parcial.consultas], [[], [], []]);
+});
+
+test('#884 agregarCodigo: la respuesta tardía no pisa el aviso de otro escaneo ni la pieza que la recarga ya agregó', async () => {
+  let llega!: (r: unknown) => void;
+  const tarde = new Promise((r) => { llega = r; });
+  const m = montarAgregar([pieza('ED-000001', 0), pieza('ED-000002', 0)], { respuesta: tarde });
+  m.agregarCodigo('ED-000001');
+  m.agregarCodigo('ED-000002'); // un escaneo posterior cambió el aviso
+  llega({ ok: true, json: async () => ({ tiendas: ['Soledad'], bulto: null, apartada: null }) });
+  await tick(); await tick();
+  assert.match(m.aviso.textContent, /^Pieza ED-000002 no está en esta tienda\. Hay en Soledad/);
+  assert.doesNotMatch(m.aviso.textContent, /ED-000001/);
+
+  // La pieza entró (el aviso se limpió): la respuesta no escribe nada.
+  const entro = montarAgregar([pieza('ED-000001', 0)], { respuesta: tarde });
+  entro.agregarCodigo('ED-000001');
+  entro.aviso.textContent = '';
+  await tick(); await tick();
+  assert.equal(entro.aviso.textContent, '');
 });
 
 test('#817 pie del catálogo: sin red el texto se asigna completo, no se acumula cada minuto', async () => {
