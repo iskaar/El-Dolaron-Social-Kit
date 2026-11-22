@@ -5,10 +5,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { runInNewContext } from 'node:vm';
 import { tienda, DUENO, datosTransferencia } from './prueba-d1.ts';
+import { olvidarVentasRecomendadas } from './vender.ts';
 import { permiso, puede, esDeCaja, type Rol } from './cuentas.ts';
 import * as venta from '../public/venta.js';
 import { textoWhatsApp, telefonoInteresado, codigoDeRespuesta, enlaceApartar, textoSeguimiento, compartirTarjetas, crearTarjeta, partirNombre,
-  fechaLegible, horaLegible, textoAvisoCliente, textoBienvenidaSocio, enlaceCliente, estadoMia, agruparMias, cobradoMias } from '../public/vender.js';
+  fechaLegible, horaLegible, tituloLista, textoAvisoCliente, textoBienvenidaSocio, enlaceCliente, estadoMia, agruparMias, cobradoMias } from '../public/vender.js';
 
 function pieza(db: DatabaseSync, cambios: Record<string, unknown> = {}) {
   const id = crypto.randomUUID();
@@ -566,4 +567,260 @@ test('regresión U6: ninguna recarga escribe en la franja #resultado, que solo c
     assert.ok(!/\bresultado\(/.test(cuerpo), `${nombre} no debe escribir en #resultado`);
   }
   assert.match(html, /id="resultado-ok"[^>]*>Entendido</);   // se quita solo con «Entendido»
+});
+
+/* ---------- #882: por tienda y recomendados ---------- */
+
+type Tiendas = ReturnType<typeof tienda>;
+/** Unidades de una pieza en una sucursal, con su fecha de llegada (existencia_tienda.actualizado_en). */
+const enSucursal = (db: DatabaseSync, id: string, sucursal: string, unidades: number, actualizado_en = new Date().toISOString()) =>
+  db.prepare('insert or replace into existencia_tienda (producto_id, tienda, unidades, actualizado_en) values (?, ?, ?, ?)').run(id, sucursal, unidades, actualizado_en);
+/** Una venta de `cantidad` unidades de la pieza, cobrada en `donde`. */
+function vendido(db: DatabaseSync, p: { id: string; codigo: unknown; nombre: unknown }, donde: string, cantidad: number, extra: Record<string, unknown> = {}) {
+  const id = crypto.randomUUID();
+  const fila = { id, total: 1000, forma_pago: 'efectivo', creado_en: new Date().toISOString(), registrado_en: '', tienda: donde, ...extra };
+  db.prepare(`insert into ventas (${Object.keys(fila).join(',')}) values (${Object.keys(fila).map(() => '?').join(',')})`).run(...Object.values(fila) as never[]);
+  db.prepare('insert into venta_lineas (venta_id, producto_id, codigo, nombre, precio, cantidad) values (?, ?, ?, ?, 1000, ?)').run(id, p.id, p.codigo as string, p.nombre as string, cantidad);
+}
+const ids = (r: { cuerpo: Record<string, any> }) => r.cuerpo.piezas.map((p: any) => p.id);
+const comoRevendedora = (t: Tiendas) => { usuario(t.db, 'rev@prueba.mx', 'revendedora', 'Rita'); (t.env as unknown as Record<string, string>).DEV_USUARIO = 'rev@prueba.mx'; };
+
+test('#882: tienda=soledad pide stock en Soledad; tienda=sucursal pide unidades ahí; sin tienda sigue mezclado', async (t) => {
+  const { db, pedir } = tienda(); t.after(() => db.close());
+  const soloSoledad = pieza(db);
+  const soloSalk = pieza(db, { stock: 0 }); enSucursal(db, soloSalk.id, 'salk', 2);
+  const ambas = pieza(db); enSucursal(db, ambas.id, 'salk', 1);
+  const vacia = pieza(db, { stock: 0 }); enSucursal(db, vacia.id, 'salk', 0);   // la sucursal la agotó: no está en ninguna
+  const lista = async (q: string) => new Set(ids(await pedir(`/api/vender${q}`)));
+  assert.deepEqual(await lista(''), new Set([soloSoledad.id, soloSalk.id, ambas.id]));
+  assert.deepEqual(await lista('?tienda=soledad'), new Set([soloSoledad.id, ambas.id]));
+  assert.deepEqual(await lista('?tienda=salk'), new Set([soloSalk.id, ambas.id]));
+  assert.deepEqual(await lista('?tienda=romero'), new Set());
+  // Las tarjetas siguen diciendo dónde está (nombres, nunca unidades) con el filtro puesto.
+  const salk = (await pedir('/api/vender?tienda=salk')).cuerpo.piezas;
+  assert.deepEqual(salk.find((p: any) => p.id === ambas.id).tiendas, ['Soledad', 'Avenida Salk']);
+  assert.deepEqual(salk.find((p: any) => p.id === soloSalk.id).tiendas, ['Avenida Salk']);
+  assert.ok(!JSON.stringify(salk).includes('unidades'));
+  // Una categoría y un nombre se combinan con la tienda.
+  const hogar = pieza(db, { stock: 0, categoria: 'hogar', nombre: 'Jarrón azul' }); enSucursal(db, hogar.id, 'romero', 1);
+  assert.deepEqual(await lista('?tienda=romero&categoria=hogar'), new Set([hogar.id]));
+  assert.deepEqual(await lista('?tienda=romero&q=jarr'), new Set([hogar.id]));
+  assert.deepEqual(await lista('?tienda=salk&categoria=hogar'), new Set());
+});
+
+test('#882: en una sucursal lo último en llegar va primero, 24 por página con empates y sin duplicar ni saltar al agotarse una pieza', async (t) => {
+  const { db, env, pedir } = tienda(); t.after(() => db.close());
+  const base = Date.parse('2026-11-01T12:00:00.000Z');
+  // Tres llegadas: 6 en el día 50, 24 empatadas en el día 40 (el corte de la página cae en medio del empate) y 6 en el día 30.
+  // Se capturaron al revés (creado_en baja con n): el orden es el de llegada a la tienda, no el de alta.
+  const todas = Array.from({ length: 36 }, (_, n) => {
+    const p = pieza(db, { stock: 0, creado_en: new Date(base - n * 1000).toISOString() });
+    enSucursal(db, p.id, 'salk', 1, new Date(base + 86_400_000 * (n < 6 ? 50 : n < 30 ? 40 : 30)).toISOString());
+    return p;
+  });
+  const llegada = (id: string) => (db.prepare("select actualizado_en from existencia_tienda where producto_id = ? and tienda = 'salk'").get(id) as { actualizado_en: string }).actualizado_en;
+  const primera = (await pedir('/api/vender?tienda=salk')).cuerpo;
+  assert.equal(primera.piezas.length, 24);
+  assert.ok(primera.siguiente);
+  const fechas = primera.piezas.map((p: any) => llegada(p.id));
+  assert.deepEqual(fechas, [...fechas].sort().reverse());
+  assert.deepEqual(new Set(primera.piezas.slice(0, 6).map((p: any) => p.id)), new Set(todas.slice(0, 6).map((p) => p.id)));
+  db.prepare('update existencia_tienda set unidades = 0 where producto_id = ?').run(primera.piezas[0].id);   // se agota entre páginas
+  const segunda = (await pedir('/api/vender?' + new URLSearchParams({ tienda: 'salk', cursor: primera.siguiente }))).cuerpo;
+  assert.equal(segunda.siguiente, null);
+  assert.equal(segunda.piezas.length, 12);
+  const vistas = [...primera.piezas, ...segunda.piezas].map((p: any) => p.id);
+  assert.equal(new Set(vistas).size, vistas.length, 'sin duplicados');
+  assert.deepEqual(new Set(vistas), new Set(todas.map((p) => p.id)), 'sin saltos');
+  assert.ok(llegada(segunda.piezas[0].id) <= fechas.at(-1));
+  // El cursor es la llegada a la tienda y la fila de la pieza; uno sin fila sigue siendo 400.
+  assert.match(primera.siguiente, /^2026-.*~\d+$/);
+  assert.equal((await pedir('/api/vender?tienda=salk&cursor=2026-10-01~0')).status, 400);
+  // Con tope y por índice: ninguna consulta recorre existencia_tienda completa ni usa count/offset, y la tienda va ligada.
+  const consultas: string[] = [];
+  const preparar = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = (sql) => { if (sql.includes('from existencia_tienda e')) consultas.push(sql); return preparar(sql); };
+  await pedir('/api/vender?tienda=salk');
+  await pedir('/api/vender?' + new URLSearchParams({ tienda: 'salk', cursor: primera.siguiente }));
+  assert.equal(consultas.length, 2);
+  for (const sql of consultas) {
+    assert.match(sql, /limit \?/);
+    assert.ok(!/count\(|offset /i.test(sql));
+    assert.ok(!sql.includes("'salk'"), 'la tienda va ligada, no escrita en el SQL');
+    const plan = db.prepare('explain query plan ' + sql).all(...(sql.includes('<= ?') ? ['salk', '2026-11-30', '2026-11-30', 999999, 24] : ['salk', 24]));
+    assert.ok(plan.some((p) => String(p.detail).includes('existencia_tienda_cambios')), JSON.stringify(plan));
+    assert.ok(!plan.some((p) => /SCAN e/.test(String(p.detail))), JSON.stringify(plan));
+  }
+});
+
+test('#882: hoy con tienda es «llegó hoy a esa tienda»', async (t) => {
+  const { db, pedir } = tienda(); t.after(() => db.close());
+  const hoy = new Date(Date.now() - 6 * 3_600_000).toISOString().slice(0, 10);
+  const apertura = `${hoy}T06:00:00.000Z`;
+  const llegoHoy = pieza(db, { stock: 0, creado_en: '2026-01-01T00:00:00.000Z' }); enSucursal(db, llegoHoy.id, 'salk', 1, apertura);
+  const llegoAyer = pieza(db, { stock: 0 }); enSucursal(db, llegoAyer.id, 'salk', 1, new Date(Date.parse(apertura) - 1).toISOString());
+  const nuevaEnSoledad = pieza(db, { creado_en: apertura });
+  const vieja = pieza(db, { creado_en: '2026-01-01T00:00:00.000Z' });
+  assert.deepEqual(ids(await pedir('/api/vender?tienda=salk&hoy=1')), [llegoHoy.id]);
+  assert.deepEqual(ids(await pedir('/api/vender?tienda=soledad&hoy=1')), [nuevaEnSoledad.id]);
+  assert.ok(!ids(await pedir('/api/vender?hoy=1')).includes(vieja.id));
+});
+
+test('#882: tienda y orden inválidos dan 400 y el código exacto ignora la tienda', async (t) => {
+  const { db, pedir } = tienda(); t.after(() => db.close());
+  const enSoledad = pieza(db, { nombre: 'Lámpara' });
+  for (const q of ['tienda=foo', 'tienda=', 'tienda=SALK', 'tienda=salk%20', "tienda=salk'%20or%201=1",
+    'orden=recomendado', 'orden=recomendado&tienda=foo', 'orden=nuevo&tienda=salk', 'orden=&tienda=salk',
+    'orden=recomendado&tienda=salk&q=mpara', 'orden=recomendado&tienda=salk&hoy=1', 'orden=recomendado&tienda=salk&cursor=2026-11-01~3'])
+    assert.equal((await pedir(`/api/vender?${q}`)).status, 400, q);
+  // Un código exacto se encuentra aunque se pida otra tienda: la tarjeta dice dónde está.
+  for (const quien of ['soledad', 'salk', 'romero']) assert.deepEqual(ids(await pedir(`/api/vender?q=${enSoledad.codigo}&tienda=${quien}`)), [enSoledad.id], quien);
+  // Por nombre, en cambio, la tienda sí filtra.
+  assert.deepEqual(ids(await pedir('/api/vender?q=mpara&tienda=salk')), []);
+  assert.deepEqual(ids(await pedir('/api/vender?q=mpara&tienda=soledad')), [enSoledad.id]);
+});
+
+/** Salk vende 6 blusas (A) y 5 muñecos (B): 11 unidades. Quedan en Salk A, B, C, C2, D, D2 y una de hogar sin ventas. */
+function mundoRecomendado() {
+  olvidarVentasRecomendadas();
+  const t = tienda();
+  const { db } = t;
+  const nueva = (n: number, cambios: Record<string, unknown>, unidades = 3) => {
+    const p = pieza(db, { stock: 0, creado_en: new Date(Date.parse('2026-11-10T00:00:00.000Z') + n * 60_000).toISOString(), ...cambios });
+    enSucursal(db, p.id, 'salk', unidades, p.creado_en as string);   // llegan en el orden de n
+    return p;
+  };
+  const A = nueva(9, { nombre: 'Blusa A', categoria: 'ropa' });          // la más reciente de ropa y la más vendida: no se repite en el paso 2
+  const B = nueva(1, { nombre: 'Muñeco B', categoria: 'juguetes' });
+  const C = nueva(7, { nombre: 'Blusa C', categoria: 'ropa' });
+  const C2 = nueva(2, { nombre: 'Blusa C2', categoria: 'ropa' });
+  const D = nueva(3, { nombre: 'Carro D', categoria: 'juguetes' });
+  const D2 = nueva(4, { nombre: 'Carro D2', categoria: 'juguetes' });
+  const H = nueva(8, { nombre: 'Jarrón H', categoria: 'hogar' });
+  vendido(db, A, 'salk', 4); vendido(db, A, 'salk', 2);
+  vendido(db, B, 'salk', 5);
+  return { ...t, A, B, C, C2, D, D2, H, nueva };
+}
+
+test('#882: recomendados de una tienda: lo vendido ahí que sigue en existencia y luego categorías que se venden, alternadas y sin repetir', async (t) => {
+  const m = mundoRecomendado(); t.after(() => m.db.close());
+  const { db, pedir, A, B, C, C2, D, D2, H } = m;
+  // Ruido que no cuenta: otra tienda, cancelada, fuera de los 30 días, sin etiqueta ED- y una pieza agotada en Salk.
+  const agotada = m.nueva(5, { nombre: 'Agotada', categoria: 'ropa' }, 0);
+  vendido(db, agotada, 'salk', 9);
+  vendido(db, H, 'soledad', 40);
+  vendido(db, H, 'salk', 40, { cancelada: 1 });
+  vendido(db, H, 'salk', 40, { creado_en: new Date(Date.now() - 31 * 86_400_000).toISOString() });
+  const banda = pieza(db, { stock: 0, codigo: 'ZZ49', nombre: 'Juguetes $49', categoria: 'otros', sin_inventario: 1 }); enSucursal(db, banda.id, 'salk', 9);
+  vendido(db, banda, 'salk', 40);
+  const r = await pedir('/api/vender?tienda=salk&orden=recomendado');
+  assert.equal(r.status, 200, JSON.stringify(r.cuerpo));
+  assert.equal(r.cuerpo.base, 'tienda');
+  assert.equal(r.cuerpo.siguiente, null);
+  // 1) A (6) y B (5); 2) ropa y juguetes alternando, de la más reciente: C, D2, C2, D. Hogar no entra.
+  assert.deepEqual(ids(r), [A.id, B.id, C.id, D2.id, C2.id, D.id]);
+  assert.deepEqual(r.cuerpo.piezas.map((p: any) => p.motivo), ['Aquí se vendieron 6 en 30 días', 'Aquí se vendieron 5 en 30 días',
+    'Ropa y calzado se vende bien aquí', 'Juguetes se vende bien aquí', 'Ropa y calzado se vende bien aquí', 'Juguetes se vende bien aquí']);
+  assert.ok(!ids(r).includes(H.id) && !ids(r).includes(agotada.id) && !ids(r).includes(banda.id));
+  // Misma forma de tarjeta que la lista: tiendas, foto, cola.
+  assert.deepEqual(r.cuerpo.piezas[0].tiendas, ['Avenida Salk']);
+  assert.equal(r.cuerpo.piezas[0].foto, `/api/foto/${A.id}`);
+  assert.deepEqual(r.cuerpo.piezas[0].cola, []);
+  // Con categoría: solo esa.
+  assert.deepEqual(ids(await pedir('/api/vender?tienda=salk&orden=recomendado&categoria=juguetes')), [B.id, D2.id, D.id]);
+  assert.equal((await pedir('/api/vender?tienda=salk&orden=recomendado&categoria=hogar')).cuerpo.piezas.length, 0);
+});
+
+test('#882: con menos de 10 unidades vendidas en la tienda, los recomendados caen a todas las tiendas y no dicen «aquí»', async (t) => {
+  const m = mundoRecomendado(); t.after(() => m.db.close());
+  const { db, pedir, A, B } = m;
+  // Romero casi no ha vendido (3 unidades) pero tiene la pieza A, una de ropa y una de hogar; Salk sí ha vendido.
+  enSucursal(db, A.id, 'romero', 1);
+  const ropaEnRomero = pieza(db, { stock: 0, categoria: 'ropa', nombre: 'Blusa R' }); enSucursal(db, ropaEnRomero.id, 'romero', 1);
+  const hogarEnRomero = pieza(db, { stock: 0, categoria: 'hogar', nombre: 'Jarrón R' }); enSucursal(db, hogarEnRomero.id, 'romero', 1);
+  vendido(db, hogarEnRomero, 'romero', 3);
+  const r = await pedir('/api/vender?tienda=romero&orden=recomendado');
+  assert.equal(r.cuerpo.base, 'todas');
+  // Entre todas se vendieron A (6), B (5) y la de hogar (3); en Romero solo hay A, la de hogar y la de ropa.
+  assert.deepEqual(ids(r), [A.id, hogarEnRomero.id, ropaEnRomero.id]);
+  assert.deepEqual(r.cuerpo.piezas.map((p: any) => p.motivo), ['Se vendieron 6 en 30 días', 'Se vendieron 3 en 30 días', 'Ropa y calzado se vende bien']);
+  assert.ok(!ids(r).includes(B.id), 'B no está en Romero');
+  for (const p of r.cuerpo.piezas) assert.ok(!/aquí/i.test(p.motivo), p.motivo);
+  // Sin nada vendido en ninguna tienda: lista vacía, sin rellenar con otras piezas.
+  olvidarVentasRecomendadas();
+  db.prepare('delete from venta_lineas').run(); db.prepare('delete from ventas').run();
+  assert.deepEqual((await pedir('/api/vender?tienda=romero&orden=recomendado')).cuerpo, { piezas: [], siguiente: null, base: 'todas' });
+});
+
+test('#882: Soledad también tiene recomendados; las ventas se guardan una hora y la existencia se mira en cada carga', async (t) => {
+  const m = mundoRecomendado(); t.after(() => m.db.close());
+  const { db, pedir, A, C } = m;
+  const enCentral = pieza(db, { nombre: 'Playera S', categoria: 'ropa' });
+  for (let n = 0; n < 10; n++) vendido(db, enCentral, 'soledad', 1);
+  const primera = await pedir('/api/vender?tienda=soledad&orden=recomendado');
+  assert.equal(primera.cuerpo.base, 'tienda');
+  assert.deepEqual(ids(primera), [enCentral.id]);
+  assert.equal(primera.cuerpo.piezas[0].motivo, 'Aquí se vendieron 10 en 30 días');
+  // Ventas nuevas durante la hora no cambian el agregado guardado...
+  vendido(db, C, 'salk', 50);
+  assert.equal((await pedir('/api/vender?tienda=salk&orden=recomendado')).cuerpo.piezas[0].id, A.id);
+  // ...pero una pieza que se agota sale en seguida.
+  db.prepare('update existencia_tienda set unidades = 0 where producto_id = ?').run(A.id);
+  assert.ok(!ids(await pedir('/api/vender?tienda=salk&orden=recomendado')).includes(A.id));
+  // Al olvidar lo guardado (o pasar la hora) se recalcula.
+  olvidarVentasRecomendadas();
+  assert.equal((await pedir('/api/vender?tienda=salk&orden=recomendado')).cuerpo.piezas[0].id, C.id);
+});
+
+test('#882: la revendedora no ve recomendados (403) y sigue viendo la lista de siempre', async (t) => {
+  const m = mundoRecomendado(); t.after(() => m.db.close());
+  comoRevendedora(m);
+  for (const q of ['tienda=salk&orden=recomendado', 'orden=recomendado', 'tienda=foo&orden=recomendado']) assert.equal((await m.pedir(`/api/vender?${q}`)).status, 403, q);
+  const lista = await m.pedir('/api/vender');
+  assert.equal(lista.status, 200);
+  assert.equal(lista.cuerpo.piezas.length, 7);
+  assert.ok(!('base' in lista.cuerpo));
+  assert.ok(lista.cuerpo.piezas.every((p: any) => !('motivo' in p)));
+});
+
+test('#882: el título dice qué se ve, con la tienda y la categoría por nombre', () => {
+  assert.equal(tituloLista({ tienda: 'Avenida Salk' }), 'Lo nuevo en Avenida Salk');
+  assert.equal(tituloLista({ orden: 'recomendado', tienda: 'Avenida Salk' }), 'Recomendados para Avenida Salk');
+  assert.equal(tituloLista({ categoria: 'Juguetes' }), 'Juguetes en todas las tiendas');
+  assert.equal(tituloLista({ tienda: 'Soledad', categoria: 'Juguetes' }), 'Juguetes en Soledad');
+  assert.equal(tituloLista({ orden: 'recomendado', tienda: 'Coronel Romero', categoria: 'Ropa y calzado' }), 'Recomendados para Coronel Romero · Ropa y calzado');
+  assert.equal(tituloLista({ tienda: 'Soledad', q: 'blusa', categoria: 'Ropa y calzado' }), 'Resultados de «blusa» en Soledad · Ropa y calzado');
+  assert.equal(tituloLista({ hoy: true }), 'Ingresadas hoy en todas las tiendas');
+  assert.equal(tituloLista(), 'Lo nuevo en todas las tiendas');
+});
+
+test('#882: la barra de tienda es solo del personal, conserva su estado al volver a la pestaña y no se guarda entre sesiones', () => {
+  const html = readFileSync('public/vender.html', 'utf8').replace(/\r\n/g, '\n');
+  // Nace oculta: la revendedora (y /manual, que no la usa) no la ven nunca; solo prepararVista la muestra y solo se llama fuera del modo revendedora.
+  assert.match(html, /<section id="vista-tienda" class="panel" aria-label="Qué piezas ver" hidden>/);
+  assert.equal(html.match(/\$\('vista-tienda'\)\.hidden = false/g)?.length, 1);
+  assert.match(html, /if \(revendedora\) modoRevendedora\(\); else \{ \$\('acciones-interesado'\)\.classList\.add\('columna'\); prepararVista\(yo\); \}/);
+  assert.equal(html.match(/prepararVista\(/g)?.length, 2);   // la definición y esa llamada
+  const modo = html.match(/function modoRevendedora\(\) \{[\s\S]*?\n\}\n/)![0];
+  assert.ok(!/vista-tienda|orden-|titulo-lista/.test(modo), 'el modo revendedora no toca la barra');
+  // Controles nativos con su etiqueta, y los dos botones con aria-pressed.
+  assert.match(html, /<label for="vista-tienda-sel">Tienda<\/label><select id="vista-tienda-sel">/);
+  assert.match(html, /<label for="vista-categoria">Categoría<\/label><select id="vista-categoria">/);
+  assert.match(html, /<button id="orden-nuevo" type="button" aria-pressed="true">Lo nuevo<\/button><button id="orden-recomendado" type="button" aria-pressed="false">Recomendados<\/button>/);
+  // La tienda de la cuenta va primero y marcada; la lista parte de ella.
+  assert.match(html, /\$\('vista-tienda-sel'\)\.value = miTienda;/);
+  assert.match(html, /`\$\{t\.nombre\} · mi tienda`/);
+  // El refresco al volver a la pestaña vuelve a pedir `consulta` y la página, que ya traen tienda, categoría y orden.
+  const cargar = html.match(/async function cargarPiezas\(\) \{[\s\S]*?\n\}\n/)![0];
+  assert.match(cargar, /new URLSearchParams\(consulta\)/);
+  assert.match(cargar, /cursores\.at\(-1\)/);
+  assert.match(html, /function refrescar\(\) \{[\s\S]*?recargar\(\);/);
+  assert.match(html, /function consultaDePersonal\(\) \{[\s\S]*?'tienda'[\s\S]*?'categoria'[\s\S]*?'orden', 'recomendado'/);
+  // Ni la tienda, ni la categoría, ni el orden van a localStorage.
+  for (const memoria of html.matchAll(/localStorage\.\w+\([^)]*\)/g)) assert.ok(!/tienda|categoria|orden/.test(memoria[0]), memoria[0]);
+  // Una lista vacía con tienda explica por qué y ofrece el botón.
+  assert.match(html, /<button id="ver-todas" type="button">Ver todas las tiendas<\/button>/);
+  assert.match(html, /solo salen las piezas con foto que llegan en bulto desde Soledad/);
+  // La compartición pide cada pieza por código exacto, que ignora la tienda.
+  assert.match(html, /api\('\/api\/vender\?' \+ new URLSearchParams\(\{ q: seleccionada\.codigo \}\)\)/);
 });
