@@ -17,6 +17,7 @@
 import { correoADuenos } from './avisos.ts';
 import { sugerirAtributos, base64 } from './analisis.ts';
 import { tallaUs } from '../public/tallas.js';
+import { hoyTienda } from './reportes.ts';
 
 const API = 'https://api.mercadolibre.com';
 const AUTORIZACION = 'https://auth.mercadolibre.com.mx/authorization';
@@ -636,6 +637,7 @@ const ORDENES: Record<string, string> = {
   menos_existencias: 'p.stock asc',
   codigo: 'p.codigo asc',
   nombre: 'lower(p.nombre) asc',
+  mas_visitas: 'coalesce(m.visitas_7d, -1) desc',   // #637: sin dato (null) al final
 };
 
 async function listarPiezas(env: Env, url: URL): Promise<Response> {
@@ -655,12 +657,15 @@ async function listarPiezas(env: Env, url: URL): Promise<Response> {
   const orden = ORDENES[url.searchParams.get('orden') ?? ''] ?? ORDENES.recientes;
   const { results } = await env.DB.prepare(
     `select p.id, p.codigo, p.nombre, p.categoria, p.marca, p.precio, p.estado_fisico, p.stock, p.existencia_confirmada_en,
-            m.producto_id as m_id, m.ml_item_id, m.estado, m.precio_ml, m.permalink, m.ultimo_error, m.actualizado_en
+            m.producto_id as m_id, m.ml_item_id, m.estado, m.precio_ml, m.permalink, m.ultimo_error, m.actualizado_en,
+            m.visitas_7d, m.visitas_actualizado_en, m.sub_status, m.tags,
+            (select coalesce(sum(v.cantidad), 0) from ml_ventas v
+              where v.ml_item_id = m.ml_item_id and v.estado <> 'cancelada' and v.recibido_en >= ?) as ventas_7d
      from productos p left join ml_publicaciones m on m.producto_id = p.id
      where (${donde})${busca}${min ? ' and p.stock >= ?' : ''}
      order by ${orden}, p.id
      limit 51 offset ?`,
-  ).bind(...palabras, ...(min ? [min] : []), (pagina - 1) * 50).all<Record<string, any>>();
+  ).bind(new Date(Date.now() - DIAS_VISITAS * 86_400_000).toISOString(), ...palabras, ...(min ? [min] : []), (pagina - 1) * 50).all<Record<string, any>>();
   return json({
     piezas: results.slice(0, 50).map((f) => ({
       producto: {
@@ -672,6 +677,9 @@ async function listarPiezas(env: Env, url: URL): Promise<Response> {
       publicacion: f.m_id === null ? null : {
         ml_item_id: f.ml_item_id, estado: f.estado, precio_ml: f.precio_ml, permalink: f.permalink,
         ultimo_error: f.ultimo_error, actualizado_en: f.actualizado_en,
+        // #637: null = aun sin lectura de ML (distinto de 0 visitas).
+        visitas_7d: f.visitas_7d, visitas_actualizado_en: f.visitas_actualizado_en, ventas_7d: f.ventas_7d,
+        sub_status: f.sub_status ? String(f.sub_status).split(',') : [], tags: tagsDe(f.tags),
       },
     })),
     hay_mas: results.length > 50,
@@ -1381,9 +1389,9 @@ export async function conciliarPublicaciones(env: Env, filtro: Filtro = {}): Pro
   if (filtro.itemIds) { condiciones.push(`m.ml_item_id in (${unidos(filtro.itemIds)})`); valores.push(...filtro.itemIds); }
   if ((filtro.productoIds && !filtro.productoIds.length) || (filtro.itemIds && !filtro.itemIds.length)) return;
   const { results: filas } = await env.DB.prepare(
-    `select m.producto_id, m.ml_item_id, m.estado, p.stock, p.existencia_confirmada_en, p.estado_fisico
+    `select m.producto_id, m.ml_item_id, m.estado, m.sub_status, m.tags, p.stock, p.existencia_confirmada_en, p.estado_fisico
      from ml_publicaciones m join productos p on p.id = m.producto_id where ${condiciones.join(' and ')}`,
-  ).bind(...valores).all<{ producto_id: string; ml_item_id: string; estado: string; stock: number; existencia_confirmada_en: string | null; estado_fisico: string }>();
+  ).bind(...valores).all<{ producto_id: string; ml_item_id: string; estado: string; sub_status: string | null; tags: string | null; stock: number; existencia_confirmada_en: string | null; estado_fisico: string }>();
   if (filas.length === 0) return;   // nada publicado: ni siquiera se pide token
 
   const poner = (productoId: string, estado: string, error = '') => env.DB.prepare(
@@ -1392,8 +1400,8 @@ export async function conciliarPublicaciones(env: Env, filtro: Filtro = {}): Pro
 
   for (let desde = 0; desde < filas.length; desde += 20) {
     const lote = filas.slice(desde, desde + 20);
-    const respuesta = await mlFetch(env, `/items?ids=${lote.map((f) => f.ml_item_id).join(',')}&attributes=id,status,available_quantity`);
-    const enML = new Map<string, { status: string; available_quantity: number }>();
+    const respuesta = await mlFetch(env, `/items?ids=${lote.map((f) => f.ml_item_id).join(',')}&attributes=id,status,available_quantity,sub_status,tags`);
+    const enML = new Map<string, { status: string; available_quantity: number; sub_status?: unknown; tags?: unknown }>();
     for (const r of Array.isArray(respuesta) ? respuesta : []) {
       const cuerpo = r?.body ?? r;
       if ((r?.code ?? 200) === 200 && cuerpo?.id) enML.set(String(cuerpo.id), cuerpo);
@@ -1404,6 +1412,13 @@ export async function conciliarPublicaciones(env: Env, filtro: Filtro = {}): Pro
       const poner_ml = (cambios: Record<string, unknown>) => mlFetch(env, `/items/${f.ml_item_id}`, { method: 'PUT', json: cambios });
       const piso = faltaPiso(f.stock, f.existencia_confirmada_en, 'reactivarla');
       try {
+        // #637: lo que ML dice del articulo (en revision, miniatura mala...) explica las visitas bajas. Solo si ML lo trae: nunca se borra.
+        const sub = Array.isArray(ml.sub_status) ? ml.sub_status.map(String).join(',') : null;
+        const etiquetas = Array.isArray(ml.tags) ? JSON.stringify(ml.tags.map(String)) : null;
+        if ((sub !== null && sub !== (f.sub_status ?? '')) || (etiquetas !== null && etiquetas !== (f.tags ?? ''))) {
+          await env.DB.prepare('update ml_publicaciones set sub_status = coalesce(?, sub_status), tags = coalesce(?, tags) where producto_id = ?')
+            .bind(sub, etiquetas, f.producto_id).run();
+        }
         if (ml.status === 'closed') {
           if (f.estado !== 'vendida') await poner(f.producto_id, 'cerrada');
         } else if (f.estado_fisico === 'caducado') {
@@ -1617,6 +1632,104 @@ export async function rellenarPrecios(env: Env): Promise<number> {
   return completas;
 }
 
+/* ---------- visitas (#637) ---------- */
+
+// Solo lee de ML: guarda las visitas de los ultimos 7 dias de cada publicacion, una vez al dia, para fijar reglas de precio con datos.
+const DIAS_VISITAS = 7;
+const LOTE_VISITAS = 20;          // ids por llamada
+const LLAMADAS_VISITAS = 10;      // tope por corrida del cron (lotes y reintentos de uno en uno); lo que no alcanza sigue en la siguiente
+
+/** Las etiquetas (`tags`) de una publicacion como arreglo; vacio si no hay o no se leen. */
+const tagsDe = (texto: unknown): string[] => {
+  try { const t = JSON.parse(String(texto ?? '[]')); return Array.isArray(t) ? t.map(String) : []; } catch { return []; }
+};
+
+/**
+ * Visitas por articulo en la respuesta de `/items/visits`. La doc de ML se contradice (un id o varios) y no
+ * mostro la forma de varios, asi que se acepta lo plausible: un objeto `{item_id, total_visits}`, un arreglo de
+ * ellos, o un mapa `{MLM1: 3}` / `{MLM1: {total_visits}}`. Lo que no se reconoce no aparece (nunca se inventa un 0).
+ */
+export function parsearVisitas(cuerpo: unknown, ids: string[]): Map<string, number> {
+  const salida = new Map<string, number>();
+  const total = (x: any) => Number.isInteger(x?.total_visits) && x.total_visits >= 0 ? (x.total_visits as number) : null;
+  const filas = Array.isArray(cuerpo) ? cuerpo : [cuerpo];
+  for (const fila of filas as any[]) {
+    const id = String(fila?.item_id ?? fila?.id ?? (ids.length === 1 && filas.length === 1 ? ids[0] : ''));
+    const n = total(fila);
+    if (ids.includes(id) && n !== null) salida.set(id, n);
+  }
+  if (cuerpo && typeof cuerpo === 'object' && !Array.isArray(cuerpo)) {
+    for (const id of ids) {
+      const v = (cuerpo as any)[id];
+      const n = Number.isInteger(v) && v >= 0 ? (v as number) : total(v);
+      if (n !== null) salida.set(id, n);
+    }
+  }
+  return salida;
+}
+
+const llavesDe = (cuerpo: unknown) => cuerpo && typeof cuerpo === 'object' ? Object.keys(cuerpo).slice(0, 12) : typeof cuerpo;
+
+/**
+ * Cron (dentro de `sincronizar`): una lectura por publicacion y dia de tienda. `visitas_intento_en` es la guardia
+ * (se marca con cada intento, bueno o malo, para que una publicacion que ML no contesta no se repita cada 15 min
+ * ni tape a las demas); `visitas_7d` y `visitas_actualizado_en` solo cambian con una lectura buena. Un fallo de una
+ * publicacion o un lote no toca las demas ni lo ya guardado y deja una linea `console.warn` con el status y las
+ * llaves de la respuesta, porque la forma real de ML no se pudo probar fuera de produccion. 429, 5xx o un fallo de
+ * red detienen la corrida sin marcar nada: se reintenta en la siguiente. Nunca lanza. Devuelve cuantas se guardaron.
+ */
+export async function actualizarVisitas(env: Env, ahora = Date.now()): Promise<number> {
+  const avisar = (mensaje: string, datos: Record<string, unknown>) => console.warn(JSON.stringify({ mensaje: `visitas ML: ${mensaje}`, ...datos }));
+  try {
+    const hoy = hoyTienda(ahora);
+    const desde = new Date(Date.parse(`${hoy}T00:00:00Z`) - DIAS_VISITAS * 86_400_000).toISOString().slice(0, 10);
+    // ponytail: la tienda vive en UTC-6 todo el año (como hoyTienda); si cambiara el huso, ajustar aqui tambien.
+    const rango = `date_from=${encodeURIComponent(`${desde}T00:00:00.000-06:00`)}&date_to=${encodeURIComponent(`${hoy}T00:00:00.000-06:00`)}`;
+    const { results } = await env.DB.prepare(
+      `select ml_item_id from ml_publicaciones
+       where ml_item_id is not null and estado in ('activa', 'pausada', 'pausada_por_venta') and visitas_intento_en < ?
+       order by visitas_intento_en, ml_item_id limit ?`,
+    ).bind(`${hoy}T06:00:00.000Z`, LOTE_VISITAS * LLAMADAS_VISITAS).all<{ ml_item_id: string }>();
+    const cola: string[][] = [];
+    for (let i = 0; i < results.length; i += LOTE_VISITAS) cola.push(results.slice(i, i + LOTE_VISITAS).map((r) => r.ml_item_id));
+
+    const marca = new Date(ahora).toISOString();
+    const marcar = (ids: string[], visitas: Map<string, number>) => env.DB.batch(ids.map((id) => visitas.has(id)
+      ? env.DB.prepare('update ml_publicaciones set visitas_7d = ?, visitas_actualizado_en = ?, visitas_intento_en = ? where ml_item_id = ?')
+        .bind(visitas.get(id), marca, marca, id)
+      : env.DB.prepare('update ml_publicaciones set visitas_intento_en = ? where ml_item_id = ?').bind(marca, id)));
+
+    let guardadas = 0;
+    for (let llamadas = 0; cola.length && llamadas < LLAMADAS_VISITAS; llamadas++) {
+      const lote = cola.shift()!;
+      let respuesta: Response;
+      try { respuesta = await mlCrudo(env, `/items/visits?ids=${lote.join(',')}&${rango}`); }
+      catch (error) { avisar('sin conexión con ML, se detiene la corrida', { error: String(error).slice(0, 200) }); break; }
+      const texto = await respuesta.text();
+      let cuerpo: unknown = null;
+      try { cuerpo = texto ? JSON.parse(texto) : null; } catch { /* no era JSON */ }
+      if (respuesta.status === 429 || respuesta.status >= 500) { avisar('ML pide esperar, se detiene la corrida', { status: respuesta.status, llaves: llavesDe(cuerpo) }); break; }
+      if (respuesta.status === 400 && lote.length > 1) {
+        // La doc de ML dice «maximo 1 id» en un lugar y varios en otro: si el lote se rechaza, se pide de uno en uno.
+        avisar('lote rechazado, se reintenta de uno en uno', { status: 400, ids: lote.length, llaves: llavesDe(cuerpo) });
+        cola.unshift(...lote.map((id) => [id]));
+        continue;
+      }
+      const visitas = respuesta.ok ? parsearVisitas(cuerpo, lote) : new Map<string, number>();
+      if (!respuesta.ok || visitas.size < lote.length) {
+        avisar(respuesta.ok ? 'respuesta no reconocida o incompleta' : 'ML rechazó la consulta',
+          { status: respuesta.status, ids: lote.length, leidas: visitas.size, llaves: llavesDe(cuerpo), ...(lote.length === 1 ? { id: lote[0] } : {}) });
+      }
+      await marcar(lote, visitas);
+      guardadas += visitas.size;
+    }
+    return guardadas;
+  } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'visitas ML fallidas', error: String(error).slice(0, 200) }));
+    return 0;
+  }
+}
+
 /**
  * Correo a los duenos por cada articulo vendido en ML (Issue #427). Sin existencias
  * en D1 (se vendio en tienda en la misma ventana) el asunto lo dice: hay que cancelar en ML.
@@ -1702,6 +1815,7 @@ export async function sincronizar(env: Env): Promise<void> {
   catch (error) { console.error(JSON.stringify({ mensaje: 'ordenes recientes de ML', error: String(error) })); }
   await rellenarPrecios(env).catch((error) => console.error(JSON.stringify({ mensaje: 'relleno de precios ML', error: String(error) })));
   await conciliarSeguro(env);
+  await actualizarVisitas(env);   // una vez al dia por publicacion; no lanza
 }
 
 /* ---------- notificaciones (publicas) ---------- */

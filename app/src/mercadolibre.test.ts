@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.ts';
 import { tienda, DUENO } from './prueba-d1.ts';
-import { guardarTokens, mlFetch, rellenarPrecios, centavos, precioML, tituloML, dimensionesJpeg, idProductoML, gtinDe, modeloDe, descripcionPorDefecto, precioDesdeReferencia } from './mercadolibre.ts';
+import { guardarTokens, mlFetch, rellenarPrecios, parsearVisitas, actualizarVisitas, conciliarPublicaciones, centavos, precioML, tituloML, dimensionesJpeg, idProductoML, gtinDe, modeloDe, descripcionPorDefecto, precioDesdeReferencia } from './mercadolibre.ts';
 
 const LLAVE = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
 const RUTA = 'ruta-secreta-de-prueba';
@@ -42,10 +42,12 @@ class SimML {
   /** Se corre antes de contestar cada peticion (para simular que pasa algo en medio). */
   antesDe: ((l: Llamada) => Promise<void>) | null = null;
   rechazarItem: unknown = null;
-  items = new Map<string, { id: string; status: string; available_quantity: number }>();
+  items = new Map<string, { id: string; status: string; available_quantity: number; sub_status?: string[]; tags?: string[] }>();
   ordenes = new Map<string, unknown>();
   /** Lo que contesta GET /orders/{id} si difiere de lo que trae la busqueda (#621). */
   detalle = new Map<string, unknown>();
+  /** #637: lo que contesta GET /items/visits segun los ids pedidos; null = ML no lo contesta (404). */
+  visitas: ((ids: string[], consulta: URLSearchParams) => { status?: number; cuerpo: unknown }) | null = null;
   /** Costos de envio por shipment (GET /shipments/{id}/costs); `fallarEnvios` los hace responder 500; `fallarOrdenes` hace lo mismo con GET /orders/{id}. */
   envios = new Map<string, unknown>();
   fallarEnvios = false;
@@ -136,6 +138,10 @@ class SimML {
     if (metodo === 'GET' && ruta.startsWith('/items?ids=')) {
       const ids = new URL(`https://x${ruta}`).searchParams.get('ids')!.split(',');
       return { cuerpo: ids.map((id) => this.items.has(id) ? { code: 200, body: this.items.get(id) } : { code: 404, body: {} }) };
+    }
+    if (metodo === 'GET' && ruta.startsWith('/items/visits?') && this.visitas) {
+      const consulta = new URL(`https://x${ruta}`).searchParams;
+      return this.visitas(consulta.get('ids')!.split(','), consulta);
     }
     if (metodo === 'GET' && ruta.startsWith('/orders/search')) return { cuerpo: { results: [...this.ordenes.values()] } };
     const envio = /^\/shipments\/([^/]+)\/costs$/.exec(ruta);
@@ -887,7 +893,7 @@ test('piezas: pendientes, publicadas y todas; 50 por página', async () => {
     assert.equal((await t.pedir('/api/ml/piezas?filtro=pendientes')).cuerpo.piezas.length, 0);
     r = (await t.pedir('/api/ml/piezas?filtro=publicadas')).cuerpo;
     assert.equal(r.piezas.length, 1);
-    assert.deepEqual(Object.keys(r.piezas[0].publicacion).sort(), ['actualizado_en', 'estado', 'ml_item_id', 'permalink', 'precio_ml', 'ultimo_error']);
+    assert.deepEqual(Object.keys(r.piezas[0].publicacion).sort(), ['actualizado_en', 'estado', 'ml_item_id', 'permalink', 'precio_ml', 'sub_status', 'tags', 'ultimo_error', 'ventas_7d', 'visitas_7d', 'visitas_actualizado_en']);   // #637: visitas, ventas de 7 dias y estado de ML
     assert.equal(r.piezas[0].publicacion.estado, 'activa');
     assert.deepEqual((await t.pedir('/api/ml/piezas?filtro=todas')).cuerpo.piezas.map((x: any) => x.producto.id), [a]);
     assert.ok(!(await t.pedir('/api/ml/piezas?filtro=todas')).cuerpo.piezas.some((x: any) => x.producto.id === dañada));
@@ -1964,5 +1970,187 @@ test('#733: el cron de conciliación no reactiva una pieza D (pausada por venta 
     await worker.scheduled!({} as never, t.env, t.ctx as never);
     await t.esperar();
     assert.equal(estadoDe(t, a.id), 'activa');
+  });
+});
+
+/* ---------- visitas por publicacion (#637) ---------- */
+
+test('visitas: se lee un objeto, un arreglo o un mapa por id; lo que no se reconoce no aparece', () => {
+  assert.deepEqual([...parsearVisitas({ item_id: 'MLM1', total_visits: 7, results: [] }, ['MLM1'])], [['MLM1', 7]]);
+  assert.deepEqual([...parsearVisitas({ total_visits: 3 }, ['MLM1'])], [['MLM1', 3]]);          // un solo id: sin item_id
+  assert.deepEqual([...parsearVisitas({ total_visits: 3 }, ['MLM1', 'MLM2'])], []);             // varios sin id: no se adivina
+  assert.deepEqual([...parsearVisitas([{ item_id: 'MLM1', total_visits: 0 }, { item_id: 'MLM2', total_visits: 4 }, { item_id: 'MLM9', total_visits: 8 }], ['MLM1', 'MLM2'])], [['MLM1', 0], ['MLM2', 4]]);
+  assert.deepEqual([...parsearVisitas({ MLM1: 5, MLM2: { total_visits: 1 } }, ['MLM1', 'MLM2'])], [['MLM1', 5], ['MLM2', 1]]);
+  for (const raro of [null, 'x', 5, [], {}, { item_id: 'MLM1', total_visits: -1 }, { item_id: 'MLM1', total_visits: '7' }, { message: 'no', status: 400 }]) {
+    assert.equal(parsearVisitas(raro, ['MLM1']).size, 0, JSON.stringify(raro));
+  }
+});
+
+const AHORA = Date.parse('2026-11-23T15:00:00Z');   // 09:00 del 23/11 en la tienda
+const DIA = 86_400_000;
+/** n publicaciones con ids MLM-V1..MLM-Vn. */
+const publicadas = (t: Tienda, n: number, estado = 'activa', desde = 1) => Array.from({ length: n }, (_, i) => {
+  const id = pieza(t);
+  t.db.prepare(`insert into ml_publicaciones (producto_id, ml_item_id, estado, actualizado_en) values (?, ?, ?, '')`).run(id, `MLM-V${desde + i}`, estado);
+  return id;
+});
+const vistas = (t: Tienda) => t.db.prepare(`select ml_item_id i, visitas_7d v, visitas_actualizado_en a, visitas_intento_en x from ml_publicaciones
+  order by cast(substr(ml_item_id, 6) as integer)`).all() as { i: string; v: number | null; a: string | null; x: string }[];
+const llamadasVisitas = (t: Tienda) => t.sim.de('GET', /^\/items\/visits\?/);
+/** Captura lo que sale por console.warn mientras corre `f`. */
+async function conAvisos<T>(f: () => Promise<T>): Promise<{ r: T; avisos: any[] }> {
+  const real = console.warn;
+  const avisos: any[] = [];
+  console.warn = (x: unknown) => { try { avisos.push(JSON.parse(String(x))); } catch { avisos.push(x); } };
+  try { return { r: await f(), avisos }; } finally { console.warn = real; }
+}
+const porId = (ids: string[]) => ({ cuerpo: ids.map((id, i) => ({ item_id: id, total_visits: i + 1 })) });
+
+test('visitas: una vez al día, en lotes de 20, con rango de 7 días completos de la tienda', async () => {
+  await conML(async (t) => {
+    publicadas(t, 25);
+    publicadas(t, 1, 'cerrada', 26);       // una cerrada no se pide
+    t.sim.visitas = porId;
+    assert.equal(await actualizarVisitas(t.env, AHORA), 25);
+    const llamadas = llamadasVisitas(t);
+    assert.deepEqual(llamadas.map((l) => new URL(`https://x${l.ruta}`).searchParams.get('ids')!.split(',').length), [20, 5]);
+    const q = new URL(`https://x${llamadas[0].ruta}`).searchParams;
+    assert.equal(q.get('date_from'), '2026-11-16T00:00:00.000-06:00');
+    assert.equal(q.get('date_to'), '2026-11-23T00:00:00.000-06:00');
+    const filas = vistas(t).filter((f) => f.v !== null);
+    assert.equal(filas.length, 25);
+    assert.ok(filas.every((f) => f.a === new Date(AHORA).toISOString()));
+    // El cron corre cada 15 min: el mismo dia no vuelve a preguntar.
+    assert.equal(await actualizarVisitas(t.env, AHORA + 15 * 60_000), 0);
+    assert.equal(await actualizarVisitas(t.env, AHORA + 10 * 3_600_000), 0);   // 19:00 de la tienda, mismo dia
+    assert.equal(llamadasVisitas(t).length, 2);
+    // Al dia siguiente (despues de medianoche de la tienda) si.
+    assert.equal(await actualizarVisitas(t.env, AHORA + DIA), 25);
+    assert.equal(llamadasVisitas(t).length, 4);
+  });
+});
+
+test('visitas: sincronizar (el cron) las guarda y un fallo de visitas no frena la conciliación', async () => {
+  await conML(async (t) => {
+    const { id } = await publicarPieza(t);
+    t.sim.visitas = (ids) => ({ cuerpo: ids.map((i) => ({ item_id: i, total_visits: 9 })) });
+    await worker.scheduled!({} as never, t.env, t.ctx as never);
+    await t.esperar();
+    const visitas = () => (t.db.prepare('select visitas_7d v from ml_publicaciones where producto_id = ?').get(id) as any).v;
+    assert.equal(visitas(), 9);
+    // Al dia siguiente ML rompe visitas: la conciliacion sigue su camino y lo guardado no se borra.
+    t.db.prepare("update ml_publicaciones set visitas_intento_en = ''").run();
+    t.sim.visitas = () => ({ status: 500, cuerpo: { message: 'boom' } });
+    t.db.prepare('update productos set stock = 0 where id = ?').run(id);
+    const { avisos } = await conAvisos(async () => { await worker.scheduled!({} as never, t.env, t.ctx as never); await t.esperar(); });
+    assert.equal(estadoDe(t, id), 'pausada_por_venta');
+    assert.equal(visitas(), 9);
+    assert.ok(avisos.some((a) => /visitas ML/.test(a.mensaje) && a.status === 500), JSON.stringify(avisos));
+  });
+});
+
+test('visitas: un fallo o una respuesta rara no borra lo guardado, se registra con status y llaves y no se repite el mismo día', async () => {
+  await conML(async (t) => {
+    publicadas(t, 3);
+    t.db.prepare("update ml_publicaciones set visitas_7d = 42, visitas_actualizado_en = '2026-11-20T00:00:00.000Z' where ml_item_id = 'MLM-V2'").run();
+    // 403 con un cuerpo de error al lote entero: ninguna se lee.
+    t.sim.visitas = () => ({ status: 403, cuerpo: { message: 'forbidden', error: 'forbidden', status: 403 } });
+    let r = await conAvisos(() => actualizarVisitas(t.env, AHORA));
+    assert.equal(r.r, 0);
+    assert.equal(r.avisos.length, 1);
+    assert.deepEqual([r.avisos[0].status, r.avisos[0].llaves], [403, ['message', 'error', 'status']]);
+    assert.equal(vistas(t)[1].v, 42);
+    assert.equal(vistas(t)[1].a, '2026-11-20T00:00:00.000Z');
+    assert.equal(llamadasVisitas(t).length, 1);
+    await actualizarVisitas(t.env, AHORA + 60_000);
+    assert.equal(llamadasVisitas(t).length, 1);                  // ya se intento hoy
+    // Al dia siguiente, una forma desconocida (200): se avisa, se queda el 42 y las demas siguen sin dato.
+    t.sim.visitas = () => ({ cuerpo: { resultado: { raro: true } } });
+    r = await conAvisos(() => actualizarVisitas(t.env, AHORA + DIA));
+    assert.equal(r.r, 0);
+    assert.deepEqual([r.avisos[0].status, r.avisos[0].llaves, r.avisos[0].leidas], [200, ['resultado'], 0]);
+    assert.deepEqual(vistas(t).map((f) => f.v), [null, 42, null]);
+    // Y cuando ML ya contesta bien, se guarda.
+    t.sim.visitas = porId;
+    assert.equal(await actualizarVisitas(t.env, AHORA + 2 * DIA), 3);
+    assert.deepEqual(vistas(t).map((f) => f.v), [1, 2, 3]);
+  });
+});
+
+test('visitas: si ML rechaza el lote con 400 (un solo id por llamada) se pide de uno en uno; un 404 de una no frena a las demás', async () => {
+  await conML(async (t) => {
+    publicadas(t, 3);
+    t.sim.visitas = (ids) => ids.length > 1
+      ? { status: 400, cuerpo: { message: 'validation_parameters: max ids is 1', error: 'validation_parameters', status: 400 } }
+      : ids[0] === 'MLM-V2' ? { status: 404, cuerpo: { message: 'not found', error: 'not_found', status: 404 } }
+        : { cuerpo: { item_id: ids[0], total_visits: ids[0] === 'MLM-V1' ? 6 : 2, results: [] } };
+    const { r, avisos } = await conAvisos(() => actualizarVisitas(t.env, AHORA));
+    assert.equal(r, 2);
+    assert.deepEqual(vistas(t).map((f) => f.v), [6, null, 2]);
+    assert.equal(llamadasVisitas(t).length, 4);                  // el lote y cada una
+    assert.ok(avisos.some((a) => a.status === 404 && a.id === 'MLM-V2'));
+    // Hoy no se repite ninguna, ni la que fallo.
+    await actualizarVisitas(t.env, AHORA + 60_000);
+    assert.equal(llamadasVisitas(t).length, 4);
+  });
+});
+
+test('visitas: un 429 detiene la corrida sin marcar nada y la siguiente la retoma; el tope por corrida son 10 llamadas', async () => {
+  await conML(async (t) => {
+    publicadas(t, 45);
+    t.sim.visitas = () => ({ status: 429, cuerpo: { message: 'too many requests', error: 'too_many_requests', status: 429 } });
+    const { r, avisos } = await conAvisos(() => actualizarVisitas(t.env, AHORA));
+    assert.equal(r, 0);
+    assert.equal(llamadasVisitas(t).length, 1);
+    assert.equal(avisos[0].status, 429);
+    assert.ok(vistas(t).every((f) => f.x === ''));
+    t.sim.visitas = porId;
+    assert.equal(await actualizarVisitas(t.env, AHORA + 15 * 60_000), 45);
+    assert.equal(llamadasVisitas(t).length, 1 + 3);
+    // Con lotes que ML rechaza en 400, el tope de 10 llamadas deja lo demas para la siguiente corrida.
+    publicadas(t, 30, 'activa', 46);
+    t.sim.visitas = (ids) => ids.length > 1 ? { status: 400, cuerpo: { message: 'max 1' } } : porId(ids);
+    const antes = llamadasVisitas(t).length;
+    const { r: hechas } = await conAvisos(() => actualizarVisitas(t.env, AHORA + 15 * 60_000 + DIA));   // 45 viejas y 30 nuevas: 75 ids, 4 lotes
+    assert.equal(llamadasVisitas(t).length - antes, 10);
+    assert.ok(hechas > 0 && hechas < 75, String(hechas));
+  });
+});
+
+test('tags y sub_status de ML se guardan al conciliar, solo cuando cambian, y si ML no los trae no se borran', async () => {
+  await conML(async (t) => {
+    const { id, itemId } = await publicarPieza(t);
+    const fila = () => ({ ...(t.db.prepare('select sub_status s, tags t from ml_publicaciones where producto_id = ?').get(id) as { s: string | null; t: string | null }) });
+    assert.deepEqual(fila(), { s: null, t: null });
+    Object.assign(t.sim.items.get(itemId)!, { sub_status: ['waiting_for_patch', 'under_review'], tags: ['poor_quality_thumbnail', 'good_quality_picture'] });
+    await conciliarPublicaciones(t.env);
+    assert.deepEqual(fila(), { s: 'waiting_for_patch,under_review', t: '["poor_quality_thumbnail","good_quality_picture"]' });
+    assert.match(t.sim.de('GET', /^\/items\?ids=/).at(-1)!.ruta, /attributes=id,status,available_quantity,sub_status,tags/);
+    // ML deja de mandarlos (campo ausente): se conservan. Mandados vacios: se vacian.
+    delete t.sim.items.get(itemId)!.sub_status; delete t.sim.items.get(itemId)!.tags;
+    await conciliarPublicaciones(t.env);
+    assert.equal(fila().s, 'waiting_for_patch,under_review');
+    Object.assign(t.sim.items.get(itemId)!, { sub_status: [], tags: [] });
+    await conciliarPublicaciones(t.env);
+    assert.deepEqual(fila(), { s: '', t: '[]' });
+  });
+});
+
+test('/api/ml/piezas: trae visitas, ventas de 7 días (sin canceladas) y estado de ML, y ordena por visitas con las sin dato al final', async () => {
+  await conML(async (t) => {
+    const [a, b, c] = publicadas(t, 3);
+    t.db.prepare(`update ml_publicaciones set visitas_7d = 5, visitas_actualizado_en = '2026-11-22T06:00:00.000Z', sub_status = 'under_review',
+                  tags = '["poor_quality_thumbnail"]' where producto_id = ?`).run(a);
+    t.db.prepare('update ml_publicaciones set visitas_7d = 12 where producto_id = ?').run(b);
+    const venta = t.db.prepare(`insert into ml_ventas (order_id, ml_item_id, producto_id, cantidad, estado, recibido_en) values (?, ?, ?, ?, ?, ?)`);
+    const hace = (dias: number) => new Date(Date.now() - dias * DIA).toISOString();
+    venta.run('1', 'MLM-V1', a, 2, 'descontada', hace(1));
+    venta.run('2', 'MLM-V1', a, 1, 'cancelada', hace(1));
+    venta.run('3', 'MLM-V1', a, 4, 'descontada', hace(9));      // fuera de los 7 dias
+    const lista = (await t.pedir('/api/ml/piezas?filtro=publicadas&orden=mas_visitas')).cuerpo.piezas;
+    assert.deepEqual(lista.map((x: any) => x.producto.id), [b, a, c]);
+    const pa = lista[1].publicacion;
+    assert.deepEqual([pa.visitas_7d, pa.ventas_7d, pa.sub_status, pa.tags], [5, 2, ['under_review'], ['poor_quality_thumbnail']]);
+    assert.deepEqual([lista[2].publicacion.visitas_7d, lista[2].publicacion.ventas_7d, lista[2].publicacion.sub_status], [null, 0, []]);
   });
 });

@@ -320,7 +320,7 @@ Fuente: https://developers.mercadolibre.com.mx/es_ar/realiza-pruebas (act. 30/12
 ### Rate limits [OFICIAL parcial]
 Fuente: https://developers.mercadolibre.com.mx/es_ar/rate-limit-error-429 (act. 05/05/2026)
 - Límite principal **por Client ID** y por endpoint; no cuenta el tamaño del payload. **No hay cifra publicada** en las páginas leídas ([NO CONFIRMADO] el RPM). Aumento: contactar a integraciones comerciales con evidencia de uso.
-- 429 (`too_many_requests` / `local_rate_limited`): backoff exponencial con jitter, menor concurrencia, agrupar llamadas; el `scroll_id` caduca y no se mezcla con `offset/limit`. `items/visits` solo acepta un id.
+- 429 (`too_many_requests` / `local_rate_limited`): backoff exponencial con jitter, menor concurrencia, agrupar llamadas; el `scroll_id` caduca y no se mezcla con `offset/limit`. `items/visits`: la doc de ML se contradice (algunas páginas dicen «máximo 1 id» con 400 `validation_parameters`; la de métricas muestra varios ids separados por coma). **[NO CONFIRMADO]** hasta la primera corrida en producción: la app (#637, `actualizarVisitas`) pide lotes de 20, y si ML responde 400 repite de uno en uno; cada respuesta rara deja un `console.warn` `visitas ML: …` con status y llaves.
 - Imágenes: límite de RPM por `app_id` aparte.
 - Recomendación de ML: limitar las IPs que usan el token de la app (hay "Gestionar IPs de una aplicación" en el DevCenter). Cloudflare Workers sale por IPs variables; **[NO CONFIRMADO]** cómo encaja con esa opción; no activarla sin probar.
 
