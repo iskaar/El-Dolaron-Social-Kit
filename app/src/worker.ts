@@ -14,7 +14,7 @@ import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, procesa
 import { PRENDAS_ROPA, PRECIOS_ROPA, nombreRopa, partesDeNombre, paqueteValido } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
-import { efectivoAlcanza, promoInauguracion, CLAVE_DESDE, claveRastreoDe, precioBuenFin, ENVIO_ID, huellaTicket } from '../public/venta.js';
+import { efectivoAlcanza, promoInauguracion, CLAVE_DESDE, claveRastreoDe, precioBuenFin, ENVIO_ID, huellaTicket, LIBRE_ID, LIBRE_PRECIO_MIN, LIBRE_PRECIO_MAX, descripcionLibre } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
 import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon, retirarSolicitud, listarSolicitudes } from './devoluciones.ts';
 import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
@@ -1808,6 +1808,8 @@ interface LineaVenta {
   producto_id?: unknown;
   // «La tengo en la mano» (#832): { motivo, esperado }. Solo si la trae.
   en_mano?: unknown;
+  // «Sin etiqueta» (#880): lo que es la pieza. Solo cuenta en la linea del producto LIBRE_ID, junto con su `precio`.
+  descripcion?: unknown;
 }
 
 interface ProductoVenta {
@@ -1867,6 +1869,17 @@ export function prepararLineas(
     const producto = productos.get(productoId);
     if (!producto) {
       return { ok: false, error: 'Producto inexistente.' };
+    }
+    // «Sin etiqueta» (#880): el unico producto cuyo precio y descripcion salen de la caja. Sin Buen Fin: lo escrito es lo final.
+    if (producto.id === LIBRE_ID) {
+      const precio = l.precio;
+      if (typeof precio !== 'number' || !Number.isInteger(precio) || precio < LIBRE_PRECIO_MIN || precio > LIBRE_PRECIO_MAX)
+        return { ok: false, error: 'Pieza sin etiqueta: el precio debe ir de $1 a $20,000.' };
+      const descripcion = descripcionLibre(l.descripcion);
+      if (!descripcion) return { ok: false, error: 'Pieza sin etiqueta: escribe qué es (de 1 a 40 letras).' };
+      lineas.push({ producto_id: producto.id, codigo: producto.codigo ?? '', nombre: `Sin etiqueta: ${descripcion}`, precio, cantidad,
+        sinInventario: true, propietario: producto.propietario ?? 'dolaron' });
+      continue;
     }
     // Grado D (#733): merma caducada. El servidor la rechaza aunque la caja la haya dejado pasar.
     if (producto.estado_fisico === 'caducado') {
@@ -1937,7 +1950,9 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const vendedora = typeof venta.vendedora === 'string' ? venta.vendedora : '';
   const pedido = JSON.stringify({
     // La marca «en la mano» (#832) entra al hash solo si la trae: una venta sin ella conserva el suyo.
-    lineas:(venta.lineas as LineaVenta[]).map((l) => [String(l.producto_id ?? ''), l.cantidad, ...(l.en_mano === undefined ? [] : [l.en_mano])]),
+    // Igual la pieza «sin etiqueta» (#880): su precio y descripcion entran al hash solo en la linea de LIBRE_ID; ninguna otra venta cambia.
+    lineas:(venta.lineas as LineaVenta[]).map((l) => [String(l.producto_id ?? ''), l.cantidad, ...(l.en_mano === undefined ? [] : [l.en_mano]),
+      ...(l.producto_id === LIBRE_ID ? [l.precio, l.descripcion] : [])]),
     forma_pago:formaPago, efectivo:venta.efectivo ?? 0, creado_en:venta.creado_en ?? null,
     cliente_id:venta.cliente_id ?? null, dolarones:venta.dolarones ?? 0,
     codigo_socio:venta.codigo_socio ?? '', codigo_vale:venta.codigo_vale ?? '',

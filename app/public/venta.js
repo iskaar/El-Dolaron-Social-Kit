@@ -72,6 +72,21 @@ export const BUENFIN_PORCENTAJE_ROPA = 20;
 // Producto del envio: nunca lleva descuento.
 export const ENVIO_ID = '00000000-0000-4000-8000-000000000099';
 
+/**
+ * «Sin etiqueta» (Issue #880): producto fijo (migracion 086) para cobrar una pieza que no tiene etiqueta ni banda. Es la UNICA
+ * linea cuyo precio y descripcion escribe la caja y el servidor acepta (prepararLineas): de $1 a $20,000, centavos enteros.
+ */
+export const LIBRE_ID = '00000000-0000-4000-8000-000000000098';
+export const LIBRE_PRECIO_MIN = 100;
+export const LIBRE_PRECIO_MAX = 2_000_000;
+export const LIBRE_DESCRIPCION_MAX = 40;
+/** Lo que es la pieza, en una linea de 1 a 40 letras sin saltos ni comillas raras; null si no sirve. La usan la caja y el servidor. */
+export function descripcionLibre(texto) {
+  if (typeof texto !== 'string') return null;
+  const t = texto.replace(/[\u0000-\u001f\u007f<>"`]/g, ' ').replace(/\s+/g, ' ').trim();
+  return t.length >= 1 && t.length <= LIBRE_DESCRIPCION_MAX ? t : null;
+}
+
 export function precioBuenFin(precio, categoria, momento, ventana) {
   if (!ventana || !Number.isInteger(precio) || precio <= 0) return precio;
   if (!(momento >= Date.parse(ventana.desde) && momento < Date.parse(ventana.hasta))) return precio;
@@ -272,7 +287,8 @@ export function guiaVale(vales, ahora = Date.now()) {
 
 /** Agrega una pieza al ticket, juntando lineas repetidas del mismo codigo. */
 export function agregar(lineas, pieza, cantidad = 1) {
-  const existente = lineas.find((l) => l.codigo === pieza.codigo && l.precio === pieza.precio);
+  // «Sin etiqueta» (#880): cada una es su propio renglon aunque coincidan codigo y precio (la descripcion distingue la pieza).
+  const existente = pieza.libre ? undefined : lineas.find((l) => l.codigo === pieza.codigo && l.precio === pieza.precio);
   if (existente) {
     return lineas.map((l) => (l === existente ? { ...l, cantidad: l.cantidad + cantidad } : l));
   }
