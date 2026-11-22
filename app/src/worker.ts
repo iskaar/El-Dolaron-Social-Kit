@@ -37,7 +37,7 @@ import { verFotoReportada } from './pagos-reportados.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe, CajaAjena, CLAVE_TOPE_RETIRO } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
-import { sentenciasMover, esExistenciaInsuficiente, piezasSinExistencia, fueraDeSoledad, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD, sucursales, enCaminoSql, enTiendaSql, existenciaTotalSql } from './existencias.ts';
+import { sentenciasMover, esExistenciaInsuficiente, piezasSinExistencia, fueraDeSoledad, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD, sucursales, enCaminoSql, enTiendaSql, existenciaTotalSql, folioEnCaminoSql } from './existencias.ts';
 import { rutaBultos } from './bultos.ts';
 import { rutaPiezas, buscarPiezas, escribirExistencia, autorizarPrecio } from './piezas.ts';
 import { rutaSolicitudesPrecio, crearSolicitud } from './solicitudes-precio.ts';
@@ -67,7 +67,7 @@ import { portal, llegada } from './portal.ts';
 import { mensajesApi, responderApi } from './mensajes.ts';
 import { rutaAsistente } from './asistente.ts';
 import { sentenciasVale, buscarVale, valeDeVenta, usadosEnVenta, reimprimirVale, valesAbiertos, emitirCuponManual, porcentajeCupon } from './vales.ts';
-import { catalogoPublico, revisionCatalogo } from './catalogo.ts';
+import { catalogoPublico, revisionCatalogo, COLUMNAS_UBICACION, tiendasDe } from './catalogo.ts';
 import { rescatarPendientes, esCorridaSemanal, reportarHuerfanosR2 } from './huerfanos.ts';
 import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva, avisosPendientes, atenderVentaML } from './mercadolibre.ts';
@@ -1763,6 +1763,30 @@ async function crearFamilia(request: Request, env: Env, propietario: string): Pr
 }
 
 /**
+ * #884: dónde sí hay la pieza que la caja vio con existencia 0 aquí. Solo nombres de tienda, nunca cuántas unidades. La tienda es la de la
+ * sesión (como en catalogo()); el bulto y el apartado se leen con las mismas reglas que «La tengo en la mano» (folioEnCaminoSql, validarEnMano).
+ */
+async function existenciaEnOtras(env: Env, url: URL, tienda: string): Promise<Response> {
+  const codigo = (url.searchParams.get('codigo') ?? '').trim();
+  if (!codigo) return json({ error: 'Falta el codigo.' }, 400);
+  const p = await env.DB.prepare(
+    `select p.id, p.sin_inventario, ${COLUMNAS_UBICACION}, ${folioEnCaminoSql('p.id')} as bulto,
+       (select b.destino from bultos b where b.folio = ${folioEnCaminoSql('p.id')}) as destino,
+       (select pe.folio from pedido_lineas pl join pedidos pe on pe.id = pl.pedido_id
+         where pl.producto_id = p.id and pe.estado = 'apartado' order by pe.folio limit 1) as apartada
+     from productos p where p.codigo = ?`,
+  ).bind(codigo).first<Record<string, any>>();
+  if (!p) return json({ error: 'Codigo no encontrado.' }, 404);
+  if (p.sin_inventario) return json({ tiendas: [], bulto: null, apartada: null });
+  const propia = esTienda(tienda) ? TIENDAS[tienda].nombre : '';
+  return json({
+    tiendas: tiendasDe(p).filter((n) => n !== propia),
+    bulto: p.bulto ? { folio: p.bulto, destino: esTienda(p.destino) ? TIENDAS[p.destino].nombre : String(p.destino), aqui: p.destino === tienda } : null,
+    apartada: p.apartada ? `P-${p.apartada}` : null,
+  });
+}
+
+/**
  * Catalogo para la caja: se guarda en el navegador y se cobra sin red.
  * Con `?desde=` solo lo que cambio despues (indice de la migracion 038), incluidas
  * las piezas que ya no se venden (precio 0) para que la caja las quite. Traer las
@@ -2917,6 +2941,9 @@ export default {
 
       if (pathname === '/api/catalogo') {
         return await catalogo(env, url, tienda);
+      }
+      if (pathname === '/api/existencia' && request.method === 'GET') {
+        return await existenciaEnOtras(env, url, tienda);
       }
       // Issue #220: piezas que no pueden salir en el sitio, para corregir en /admin. Solo el dueno (cuentas.ts).
       if (pathname === '/api/catalogo/revision' && request.method === 'GET') {
