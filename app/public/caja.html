@@ -335,7 +335,6 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     <div id="impresiones-aviso" role="alert"></div>
     <button id="abrir-impresion-fallida" type="button" hidden>Abrir venta para reimprimir</button>
     <div id="rechazadas"></div>
-    <div id="vales-conciliados" role="status"></div>
 
     <details id="tickets">
       <summary>Ventas de hoy (toca un ticket para ver el desglose)</summary>
@@ -2222,10 +2221,6 @@ async function sincronizar() {
       if (venta.vale_pendiente || venta.recompensa_pendiente) {
         if (!Object.hasOwn(cuerpo, venta.vale_pendiente ? 'vale_emitido' : 'ganados')) break;
         const emitido = !!cuerpo.vale_emitido;
-        if (!venta.imprimir_en) await store('vales_resultados', 'readwrite', (s) => s.put({
-          id:venta.id, emitido, importe:venta.vale_pendiente ? cuerpo.vale_emitido?.importe ?? 0 : cuerpo.ganados,
-          tipo:venta.vale_pendiente ? 'vale' : 'socio',
-        }));
         $('aviso').textContent = venta.recompensa_pendiente
           ? `Venta ${venta.id} sincronizada. Dolarones ganados: ${dolares(cuerpo.ganados)}.`
             + (cuerpo.referido_liberado > 0 ? ` ${avisoReferido(cuerpo.referido_liberado)}.` : '')
@@ -2233,7 +2228,6 @@ async function sincronizar() {
           : emitido ? `Venta ${venta.id} sincronizada. El vale fue emitido; imprímelo con el folio del ticket.`
           : `Venta ${venta.id} sincronizada. El servidor confirmó que no se emitió vale.`;
         if (venta.imprimir_en) $('aviso').textContent = `Venta ${venta.id} sincronizada. Ticket enviado a ${cuerpo.imprimir_en || venta.imprimir_en}.`;
-        await pintarResultadosVales();
       }
       await store('ventas', 'readwrite', (s) => s.delete(venta.id));
     }
@@ -2384,24 +2378,6 @@ $('emitir-cupon').addEventListener('click', async () => {
     $('cupon-pin').value = '';
     aviso.textContent = error.message || 'Sin red: no se pudo emitir el cupón.';
   } finally { $('emitir-cupon').disabled = false; }
-});
-
-async function pintarResultadosVales() {
-  const resultados = await store('vales_resultados', 'readonly', (s) => s.getAll());
-  $('vales-conciliados').innerHTML = resultados.map((r) => `<div class="ticket">
-    <span>Venta ${escapar(r.id)}: ${r.tipo === 'socio' ? `ganó ${dolares(r.importe)} por compra` : r.emitido ? 'vale emitido' : 'sin vale'}</span>
-    <div>${r.emitido ? `<button type="button" data-imprimir-vale="${escapar(r.id)}">Imprimir</button>` : ''}
-      <button type="button" data-cerrar-vale="${escapar(r.id)}">Enterado</button></div>
-  </div>`).join('');
-}
-$('vales-conciliados').addEventListener('click', async (e) => {
-  const id = e.target.dataset.imprimirVale;
-  if (id) await reimprimirValeDeVenta(id, e.target);
-  const cerrar = e.target.dataset.cerrarVale;
-  if (cerrar) {
-    await store('vales_resultados', 'readwrite', (s) => s.delete(cerrar));
-    await pintarResultadosVales();
-  }
 });
 
 /** Devoluciones y errores de cobro. Necesita red: deshacer no puede quedar encolado. */
@@ -3587,7 +3563,6 @@ if (ticketRecuperado) {
 }
 pintar();
 await pintarRechazadas();
-await pintarResultadosVales();
 await sincronizar();
 await reconectarImpresora();
 pintarImpresora();
