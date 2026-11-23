@@ -88,8 +88,23 @@ async function normalizar(env: Env, cruda: ArrayBuffer): Promise<ArrayBuffer> {
 
 /** Estado HTTP del error: el de Anthropic (`status`) o el de consultarGemini («Gemini 429: …»). 0 = red, plazo o error nuestro. */
 const estadoDe = (e: unknown) => Number((e as { status?: number })?.status ?? /^Error: Gemini (\d{3})/.exec(String(e))?.[1] ?? 0);
-/** Cuota de IMAGES, 429, 5xx, red o plazo: no es culpa de la pieza; se sale sin marcar y la siguiente corrida retoma. */
-const pasajero = (e: unknown) => !(e instanceof SinImagen) && (/9422/.test(String(e)) || estadoDe(e) === 429 || estadoDe(e) >= 500 || estadoDe(e) === 0);
+/** 401/403: la cuenta o la llave del proveedor (p. ej. «requires billing to be enabled», #898), nunca la pieza. */
+const credencial = (e: unknown) => [401, 403].includes(estadoDe(e));
+/** Cuota de IMAGES, 401/403, 429, 5xx, red o plazo: no es culpa de la pieza; se sale sin marcar y la siguiente corrida retoma. */
+const pasajero = (e: unknown) => !(e instanceof SinImagen) && (/9422/.test(String(e)) || credencial(e) || estadoDe(e) === 429 || estadoDe(e) >= 500 || estadoDe(e) === 0);
+
+/**
+ * Deja en `config` el último motivo por el que el proveedor detuvo la corrida (#898): el log no lo leen los agentes. Una sola fila,
+ * sobrescrita. Nunca lanza. El mensaje sale del cuerpo de la respuesta o del error, no de la petición; aun así se quita todo `key=…`
+ * porque la llave de Vertex viaja en la URL.
+ */
+async function avisarProveedor(env: Env, id: string, error: unknown): Promise<void> {
+  try {
+    const mensaje = (error instanceof Error ? error.message : String(error)).replace(/key=[^&\s"']*/gi, 'key=…').slice(0, 300);
+    await env.DB.prepare("insert into config (clave, valor) values ('portadas_ultimo_aviso', ?) on conflict (clave) do update set valor = excluded.valor")
+      .bind(JSON.stringify({ en: ahora(), id, status: estadoDe(error) || null, mensaje })).run();
+  } catch (e) { console.error(JSON.stringify({ mensaje: 'portadas: no se pudo guardar el último aviso', error: String(e).slice(0, 200) })); }
+}
 
 /** Gasta una generación del día en D1 (atómico, como gastarConsultaUpcitemdb); false si el tope se agotó. */
 async function gastarGeneracion(env: Env, tope: number): Promise<boolean> {
@@ -100,6 +115,13 @@ async function gastarGeneracion(env: Env, tope: number): Promise<boolean> {
   if (!meta.changes) return false;
   await env.DB.prepare("delete from config where clave like 'portadas_generadas_%' and clave < ?").bind(clave).run();
   return true;
+}
+
+/** Devuelve un lugar del tope: una sola sentencia, así que dos corridas a la vez no se pisan. */
+// ponytail: usa el día de ahora; si la llamada cruzó la medianoche de la tienda (límite 90 s) el lugar vuelve al día nuevo.
+async function devolverGeneracion(env: Env): Promise<void> {
+  await env.DB.prepare("update config set valor = cast(cast(valor as integer) - 1 as text) where clave = ? and cast(valor as integer) > 0")
+    .bind(`portadas_generadas_${hoyTienda()}`).run();
 }
 
 async function borrarEspera(env: Env, id: string): Promise<void> {
@@ -272,7 +294,8 @@ async function trabajar(env: Env, deps: Dependencias, pieza: Pieza, tope: number
     if (!cruda) {
       if (!await gastarGeneracion(env, tope)) { if (intento === 1) return 'alto'; break; }
       const inicio = Date.now();
-      const generada = await deps.generar(env, original, veredicto.problemas);
+      // Un 401/403 no generó nada: el lugar del tope se devuelve (el resto de errores pasajeros conserva el comportamiento de siempre).
+      const generada = await deps.generar(env, original, veredicto.problemas).catch(async (e) => { if (credencial(e)) await devolverGeneracion(env).catch(() => {}); throw e; });
       medidas.ms_generar += Date.now() - inicio;
       medidas.tokens.entrada += generada.tokens.entrada; medidas.tokens.salida += generada.tokens.salida;
       console.log(JSON.stringify({ mensaje: 'portada generada', id, modelo: MODELO_IMAGEN, intento, tokens_entrada: generada.tokens.entrada, tokens_salida: generada.tokens.salida, ms: Date.now() - inicio }));
@@ -342,6 +365,7 @@ export async function procesarPortadas(env: Env, deps: Dependencias = real): Pro
     } catch (error) {
       if (pasajero(error)) {
         console.error(JSON.stringify({ mensaje: 'portada pendiente', id: pieza.id, error: String(error).slice(0, 200) }));
+        await avisarProveedor(env, pieza.id, error);
         return;
       }
       const motivo = error instanceof Error ? error.message : String(error);

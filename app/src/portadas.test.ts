@@ -256,6 +256,8 @@ test('portadas: si generar falla por el proveedor (429, 5xx, red) la pieza sigue
       assert.equal(d.llamadas.generar.length, 1, 'se detiene: el proveedor está mal');
       assert.deepEqual([0, 1].map((i) => fila(t, uuid(i)).portada_estado), [null, null]);
       assert.deepEqual(llaves(t), []);
+      assert.equal(aviso(t).id, uuid(0), mensaje);   // #898: lo que los agentes pueden leer desde D1
+      assert.match(aviso(t).mensaje, new RegExp(mensaje.slice(0, 12)));
     } finally { t.db.close(); }
   }
   const t = await preparar(1); const d = dependencias([OK], async () => { throw new Error('Gemini 400: imagen inválida'); });
@@ -263,7 +265,86 @@ test('portadas: si generar falla por el proveedor (429, 5xx, red) la pieza sigue
     await procesarPortadas(t.env, d.deps);
     assert.equal(fila(t).portada_estado, 'error');
     assert.match(revision(t).problemas[0], /400/);
+    assert.equal(aviso(t), null, 'un 4xx es culpa de la pieza, no del proveedor');
   } finally { t.db.close(); }
+});
+
+const aviso = (t: ReturnType<typeof tienda>) => { const f = t.db.prepare("select valor from config where clave='portadas_ultimo_aviso'").get(); return f ? JSON.parse(f.valor) : null; };
+const generadas = (t: ReturnType<typeof tienda>) => t.db.prepare('select valor from config where clave=?').get(`portadas_generadas_${hoyTienda()}`)?.valor;
+
+test('portadas: un 401/403 del generador detiene la corrida sin marcar la pieza ni gastar el tope, y deja el aviso en config (#898)', async () => {
+  const HTTP = (status: number) => Object.assign(new Error(`${status} {"error":"x"}`), { status });   // como los errores del SDK de Anthropic
+  for (const error of [new Error('Gemini 403: This API method requires billing to be enabled'), new Error('Gemini 401: API key not valid'), HTTP(401), HTTP(403)]) {
+    const t = await preparar(3, { portadas_activo: '1' });
+    t.db.prepare('insert into config (clave,valor) values (?,?)').run(`portadas_generadas_${hoyTienda()}`, '5');
+    const d = dependencias([OK], async () => { throw error; });
+    try {
+      await procesarPortadas(t.env, d.deps);
+      assert.equal(d.llamadas.generar.length, 1, 'las demás piezas no se intentan');
+      assert.deepEqual([0, 1, 2].map((i) => fila(t, uuid(i)).portada_estado), [null, null, null]);
+      assert.equal(generadas(t), '5', 'el lugar gastado se devolvió');
+      assert.deepEqual(llaves(t), []);
+      const a = aviso(t);
+      assert.deepEqual(Object.keys(a).sort(), ['en', 'id', 'mensaje', 'status']);
+      assert.ok(!Number.isNaN(Date.parse(a.en)));
+      assert.equal(a.id, uuid(0));
+      assert.equal(a.status, Number(/\d{3}/.exec(error.message)![0]));
+      assert.equal(a.mensaje, error.message.slice(0, 300));
+    } finally { t.db.close(); }
+  }
+});
+
+test('portadas: el aviso no guarda la llave ni la URL de la petición y recorta el mensaje a 300 caracteres (#898)', async () => {
+  const t = await preparar(1); const d = dependencias([OK], async () => { throw new Error(`Gemini 403: ${'x'.repeat(400)} https://aiplatform.googleapis.com/v1/x:generateContent?key=SECRETA`); });
+  try {
+    await procesarPortadas(t.env, d.deps);
+    assert.equal(aviso(t).mensaje.length, 300);
+    const e = dependencias([OK], async () => { throw new Error('fetch failed https://aiplatform.googleapis.com/v1/x:generateContent?key=SECRETA&alt=json'); });
+    await procesarPortadas(t.env, e.deps);
+    assert.doesNotMatch(t.db.prepare("select valor from config where clave='portadas_ultimo_aviso'").get()!.valor, /SECRETA/);
+  } finally { t.db.close(); }
+});
+
+test('portadas: un 403 del comprobador con la imagen ya pagada deja la pieza pendiente con la cruda, y la siguiente corrida no vuelve a generar (#898)', async () => {
+  const t = await preparar(1); const d = dependencias(); let cerrado = true;
+  const comprobar = d.deps.comprobar;
+  d.deps.comprobar = async (...args) => { if (cerrado) throw Object.assign(new Error('403 forbidden'), { status: 403 }); return comprobar(...args); };
+  try {
+    await procesarPortadas(t.env, d.deps);
+    assert.equal(fila(t).portada_estado, null);
+    assert.deepEqual(llaves(t), [`portadas/${uuid(0)}.cruda`]);
+    assert.equal(generadas(t), '1', 'la imagen ya se pagó: el lugar no se devuelve');
+    assert.deepEqual([aviso(t).id, aviso(t).status], [uuid(0), 403]);
+    cerrado = false;
+    await procesarPortadas(t.env, d.deps);
+    assert.equal(d.llamadas.generar.length, 1);
+    assert.equal(fila(t).portada_estado, 'revisar');
+    assert.equal(generadas(t), '1');
+  } finally { t.db.close(); }
+});
+
+test('portadas: la cuota de IMAGES (9422) también deja el aviso, con status null (#898)', async () => {
+  const t = await preparar(1); const { deps } = dependencias();
+  try {
+    (t.env as any).IMAGES = imagenes(() => new Error('9422 quota exceeded'));
+    await procesarPortadas(t.env, deps);
+    assert.deepEqual({ ...aviso(t), en: 0 }, { en: 0, id: uuid(0), status: null, mensaje: '9422 quota exceeded' });
+  } finally { t.db.close(); }
+});
+
+test('portadas: si no se puede escribir el aviso, la corrida hace lo mismo de siempre y no lanza (#898)', async () => {
+  const t = await preparar(2); const d = dependencias([OK], async () => { throw new Error('Gemini 403: billing'); });
+  const registros: string[] = []; const error = console.error;
+  console.error = (l: string) => { registros.push(l); };
+  try {
+    const base = t.env.DB;
+    (t.env as any).DB = { ...base, prepare: (sql: string) => { if (/portadas_ultimo_aviso/.test(sql)) throw new Error('D1 caída'); return base.prepare(sql); }, batch: base.batch };
+    await procesarPortadas(t.env, d.deps);
+    assert.equal(d.llamadas.generar.length, 1);
+    assert.deepEqual([0, 1].map((i) => fila(t, uuid(i)).portada_estado), [null, null]);
+    assert.equal(generadas(t), '0');
+    assert.ok(registros.some((l) => l.includes('D1 caída')));
+  } finally { console.error = error; t.db.close(); }
 });
 
 test('portadas: si IMAGES falla con 9422 después de generar, lo pagado queda en cruda y la siguiente corrida no genera otra vez', async () => {
