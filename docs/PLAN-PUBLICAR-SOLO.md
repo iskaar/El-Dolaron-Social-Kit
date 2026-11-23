@@ -139,6 +139,12 @@ que publicará sin que nadie mire. Si el error es alto, se cambia a un modelo m�
   UPCitemdb (`gastarConsultaUpcitemdb`).
 - Encender, apagar, cambiar el tope y quitar la aprobación son filas de `config` que Isaac cambia con una línea
   de SQL documentada en la migración, igual que `recortes_activo`. Sin pantalla por ahora.
+- Modelo y tamaño de la generación (#906), con la llave de AI Studio; ausentes = `gemini-3.1-flash-image` a 1K. Un valor
+  fuera de lista cae a lo de siempre y deja el motivo en `config.portadas_ultimo_aviso`. Cada portada guarda cuál usó en
+  `portada_revision` (`modelo`, `tamano`). `gemini-nano-banana-2.1` va por la API Interactions.
+  - modelo: `insert into config (clave, valor) values ('portadas_modelo', 'gemini-nano-banana-2.1') on conflict (clave) do update set valor = excluded.valor;`
+  - tamaño (`1K` o `2K`, con mayúscula): `insert into config (clave, valor) values ('portadas_tamano', '2K') on conflict (clave) do update set valor = excluded.valor;`
+  - volver a lo de siempre: `delete from config where clave in ('portadas_modelo', 'portadas_tamano');`
 - Estimación (fuentes de terceros, sin verificar en la página de Google): US$0.03 a US$0.10 por imagen según
   modelo y tamaño; con comprobación y ~25 % de reintentos, US$0.07 a US$0.15 por portada. Las piezas caras:
   menos de US$20. Las 2,004 con foto propia: US$140 a US$300, una vez. Con tope de 100 al día, a lo más ~US$15 diarios.
