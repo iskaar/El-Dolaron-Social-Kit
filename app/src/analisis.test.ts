@@ -266,3 +266,42 @@ test('consultarGemini: con modelo la URL de Vertex lleva ese modelo, sin VERTEX_
   await consultarGemini(env, {}, 1000);
   assert.match(urls[2], /generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-flash-latest:generateContent\?key=ai-studio$/);
 });
+
+test('consultarGemini: sin el aviso de AI Studio la URL es la misma en toda combinación de llaves; con él y un modelo va a AI Studio (#900)', async (t) => {
+  const { env } = tienda();
+  const fetchOriginal = globalThis.fetch;
+  t.after(() => { globalThis.fetch = fetchOriginal; });
+  const urls: string[] = [];
+  globalThis.fetch = (async (destino: string) => { urls.push(destino); return new Response('{}'); }) as typeof fetch;
+  const llaves = env as { VERTEX_API_KEY?: string; GEMINI_API_KEY?: string; GEMINI2_API_KEY?: string };
+  const VERTEX = (m: string) => `https://aiplatform.googleapis.com/v1/publishers/google/models/${m}:generateContent?key=v`;
+  const STUDIO = (m: string, k: string) => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${k}`;
+  // Quien ya llamaba (análisis, precio, UPC, «Buscar imagen») no pasa `aiStudio`: Vertex si hay VERTEX_API_KEY, aunque haya otra llave.
+  for (const [gemini, gemini2] of [[undefined, undefined], ['g', undefined], [undefined, 'g2'], ['g', 'g2']] as const) {
+    Object.assign(llaves, { VERTEX_API_KEY: 'v', GEMINI_API_KEY: gemini, GEMINI2_API_KEY: gemini2 });
+    urls.length = 0;
+    await consultarGemini(env, {}, 1000);
+    await consultarGemini(env, {}, 1000, 'modelo-x');
+    assert.deepEqual(urls, [VERTEX('gemini-3.8-flash'), VERTEX('modelo-x')]);
+  }
+  // Sin VERTEX_API_KEY: AI Studio sin modelo (como hoy); con modelo y sin `aiStudio` sigue lanzando.
+  for (const [gemini, gemini2, llave] of [['g', undefined, 'g'], [undefined, 'g2', 'g2'], ['g', 'g2', 'g']] as const) {
+    Object.assign(llaves, { VERTEX_API_KEY: undefined, GEMINI_API_KEY: gemini, GEMINI2_API_KEY: gemini2 });
+    urls.length = 0;
+    await consultarGemini(env, {}, 1000);
+    assert.deepEqual(urls, [STUDIO('gemini-flash-latest', llave)]);
+    await assert.rejects(consultarGemini(env, {}, 1000, 'modelo-x'), /VERTEX_API_KEY/);
+    assert.equal(urls.length, 1);
+    // Con `aiStudio` y modelo: AI Studio con ese modelo.
+    await consultarGemini(env, {}, 1000, 'modelo-x', true);
+    assert.equal(urls[1], STUDIO('modelo-x', llave));
+  }
+  // `aiStudio` gana a VERTEX_API_KEY; sin llave de AI Studio lanza sin llamar.
+  Object.assign(llaves, { VERTEX_API_KEY: 'v', GEMINI_API_KEY: 'g', GEMINI2_API_KEY: undefined });
+  urls.length = 0;
+  await consultarGemini(env, {}, 1000, 'modelo-x', true);
+  assert.deepEqual(urls, [STUDIO('modelo-x', 'g')]);
+  Object.assign(llaves, { GEMINI_API_KEY: undefined });
+  await assert.rejects(consultarGemini(env, {}, 1000, 'modelo-x', true), /GEMINI_API_KEY/);
+  assert.equal(urls.length, 1);
+});

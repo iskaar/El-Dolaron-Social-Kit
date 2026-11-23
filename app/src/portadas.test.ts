@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda } from './prueba-d1.ts';
-import { procesarPortadas, publicarPortada, reiniciarPortada, generarConGemini, comprobarConClaude, MODELO_IMAGEN,
+import { procesarPortadas, publicarPortada, reiniciarPortada, generarConGemini, comprobarConClaude, MODELO_IMAGEN, MODELO_IMAGEN_AI_STUDIO,
   SinImagen, type Dependencias, type Veredicto } from './portadas.ts';
 import { hoyTienda } from './reportes.ts';
 import worker from './worker.ts';
@@ -497,6 +497,73 @@ test('generarConGemini: pide la imagen cuadrada al modelo de Vertex con la foto 
     globalThis.fetch = (async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'No puedo.' }] } }] }))) as typeof fetch;
     await assert.rejects(generarConGemini(t.env, new ArrayBuffer(1), []), (e: unknown) => e instanceof SinImagen && /No puedo/.test((e as Error).message));
   } finally { t.db.close(); }
+});
+
+/** Pone las llaves de Gemini de la prueba (undefined = ausente) y simula fetch: devuelve las URLs a las que se llamó. */
+function conLlaves(t0: { after: (f: () => void) => void }, t: ReturnType<typeof tienda>, llaves: Record<string, string | undefined>, respuesta: () => Response) {
+  const original = globalThis.fetch; const urls: string[] = [];
+  t0.after(() => { globalThis.fetch = original; });
+  Object.assign(t.env, { VERTEX_API_KEY: undefined, GEMINI_API_KEY: undefined, GEMINI2_API_KEY: undefined }, llaves);
+  globalThis.fetch = (async (destino: string) => { urls.push(destino); return respuesta(); }) as typeof fetch;
+  return urls;
+}
+const IMAGEN_OK = () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: btoa('PNG') } }] } }], usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 6 } }));
+
+test('generarConGemini: con GEMINI_API_KEY (o GEMINI2_API_KEY) va a AI Studio con su modelo aunque haya VERTEX_API_KEY; sin ella, a Vertex; sin ninguna lanza (#900)', async (t0) => {
+  const t = tienda();
+  try {
+    const urls = conLlaves(t0, t, { VERTEX_API_KEY: 'llave-vertex', GEMINI_API_KEY: 'llave-studio' }, IMAGEN_OK);
+    await generarConGemini(t.env, new ArrayBuffer(1), []);
+    Object.assign(t.env, { GEMINI_API_KEY: undefined, GEMINI2_API_KEY: 'llave-2' });
+    await generarConGemini(t.env, new ArrayBuffer(1), []);
+    Object.assign(t.env, { GEMINI2_API_KEY: undefined });
+    await generarConGemini(t.env, new ArrayBuffer(1), []);
+    assert.deepEqual(urls, [
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_IMAGEN_AI_STUDIO}:generateContent?key=llave-studio`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODELO_IMAGEN_AI_STUDIO}:generateContent?key=llave-2`,
+      `https://aiplatform.googleapis.com/v1/publishers/google/models/${MODELO_IMAGEN}:generateContent?key=llave-vertex`,
+    ]);
+    Object.assign(t.env, { VERTEX_API_KEY: undefined });
+    await assert.rejects(generarConGemini(t.env, new ArrayBuffer(1), []), /GEMINI_API_KEY.*VERTEX_API_KEY/);
+    assert.equal(urls.length, 3, 'sin llave no se llama a nadie');
+  } finally { t.db.close(); }
+});
+
+test('portadas: la revisión y el log guardan el modelo del transporte usado (#900)', async (t0) => {
+  for (const [llaves, esperado, host] of [
+    [{ GEMINI_API_KEY: 'llave-studio', VERTEX_API_KEY: 'llave-vertex' }, MODELO_IMAGEN_AI_STUDIO, 'generativelanguage.googleapis.com'],
+    [{ VERTEX_API_KEY: 'llave-vertex' }, MODELO_IMAGEN, 'aiplatform.googleapis.com'],
+  ] as const) {
+    const t = await preparar(1);
+    const urls = conLlaves(t0, t, llaves, IMAGEN_OK);
+    const registros: any[] = []; const log = console.log;
+    console.log = (m: string) => { try { registros.push(JSON.parse(m)); } catch { /* otro log */ } };
+    try {
+      await procesarPortadas(t.env, { generar: generarConGemini, comprobar: async () => OK });
+      assert.equal(new URL(urls[0]).host, host);
+      assert.equal(revision(t).modelo, esperado);
+      assert.equal(registros.find((r) => r.mensaje === 'portada generada').modelo, esperado);
+    } finally { console.log = log; t.db.close(); }
+  }
+});
+
+test('portadas: un 403 de AI Studio detiene la corrida sin marcar ni gastar tope, y ni el aviso ni el log llevan la URL ni la llave (#900)', async (t0) => {
+  const t = await preparar(3);
+  const urls = conLlaves(t0, t, { GEMINI_API_KEY: 'LLAVE-SECRETA' }, () => new Response('{"error":{"code":403,"message":"billing"}}', { status: 403 }));
+  t.db.prepare('insert into config (clave,valor) values (?,?)').run(`portadas_generadas_${hoyTienda()}`, '5');
+  const errores: string[] = []; const consola = console.error;
+  console.error = (m: string) => { errores.push(String(m)); };
+  try {
+    await procesarPortadas(t.env, { generar: generarConGemini, comprobar: async () => OK });
+    assert.equal(urls.length, 1, 'las demás piezas no se intentan');
+    assert.match(urls[0], /^https:\/\/generativelanguage\.googleapis\.com\//);
+    assert.deepEqual([0, 1, 2].map((i) => fila(t, uuid(i)).portada_estado), [null, null, null]);
+    assert.equal(generadas(t), '5');
+    assert.equal(aviso(t).status, 403);
+    assert.match(aviso(t).mensaje, /^Gemini 403: /);
+    for (const texto of [JSON.stringify(aviso(t)), ...errores]) assert.doesNotMatch(texto, /LLAVE-SECRETA|googleapis|key=/);
+    assert.equal(errores.length, 1);
+  } finally { console.error = consola; t.db.close(); }
 });
 
 test('comprobarConClaude: manda las dos imágenes completas y normaliza el veredicto', async () => {
