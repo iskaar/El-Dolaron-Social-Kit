@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — dinero</title>
+<style>
+  :root { --azul:#16366B; --rojo:#D72B32; --verde:#1b7a3a; --linea:#dfe3ea; --suave:#5b6478; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:#f4f6f9; color:#1a1f2b; font-family:system-ui,-apple-system,sans-serif; }
+  header { background:var(--azul); color:white; padding:14px 20px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:19px; flex:1; }
+  header a { color:#FFD447; }
+  main { width:min(900px,100%); margin:auto; padding:16px; display:grid; gap:16px; }
+  section { background:white; border:1px solid var(--linea); border-radius:12px; padding:16px; }
+  h2 { margin:0 0 12px; color:var(--azul); font-size:17px; }
+  label { display:grid; gap:5px; color:var(--suave); font-size:13px; }
+  input,select,textarea,button { font:inherit; }
+  input,select,textarea { width:100%; min-height:44px; padding:10px; border:1px solid var(--linea); border-radius:8px; color:#1a1f2b; background:white; }
+  textarea { resize:vertical; }
+  button { min-height:44px; padding:9px 14px; border:0; border-radius:8px; background:var(--azul); color:white; font-weight:650; cursor:pointer; }
+  button.claro { background:white; border:1px solid var(--azul); color:var(--azul); }
+  button:disabled { opacity:.6; }
+  #estado { min-height:20px; color:var(--suave); font-size:14px; }
+  #estado.error { color:var(--rojo); }
+  .tienda { border:1px solid var(--linea); border-radius:10px; padding:12px; display:grid; gap:10px; }
+  .tienda + .tienda { margin-top:10px; }
+  .resumen { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+  .resumen b { font-size:17px; color:var(--azul); }
+  .total { font-size:24px; font-weight:750; font-variant-numeric:tabular-nums; }
+  .suave { color:var(--suave); font-size:13px; }
+  .panel { display:grid; gap:10px; border-top:1px solid var(--linea); padding-top:10px; }
+  .corte { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--linea); }
+  .corte input { width:24px; min-height:24px; flex:none; }
+  .corte span { flex:1; font-size:14px; }
+  .corte b { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .falta { color:var(--rojo); }
+  .sobra { color:var(--verde); }
+  .campos { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 12px; }
+  .ancho { grid-column:1/-1; }
+  .tabla { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th,td { padding:10px 8px; border-bottom:1px solid var(--linea); text-align:left; vertical-align:top; }
+  th { color:var(--suave); font-size:12px; }
+  td.importe { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  @media(max-width:560px) {
+    main { padding:10px; gap:10px; }
+    section { padding:13px; }
+    .campos { grid-template-columns:1fr; }
+    .ancho { grid-column:auto; }
+    table,tbody,tr,td { display:block; width:100%; }
+    thead { display:none; }
+    tr { padding:9px 0; border-bottom:1px solid var(--linea); }
+    td { display:flex; justify-content:space-between; gap:12px; border:0; padding:4px 2px; }
+    td::before { content:attr(data-label); color:var(--suave); font-size:12px; }
+    td.importe { text-align:left; }
+  }
+</style>
+</head>
+<body>
+<header><h1>Dinero</h1><a href="/">Inicio</a></header>
+<main>
+  <section>
+    <h2>Pendiente de recoger</h2>
+    <p id="estado" role="status" aria-live="polite"></p>
+    <div id="tiendas"></div>
+  </section>
+  <section>
+    <h2>Contar desde</h2>
+    <p class="suave">Los cortes anteriores a esta fecha no se consideran pendientes.</p>
+    <div class="campos">
+      <label>Fecha<input id="desde" type="date"></label>
+      <button id="guardar-desde" type="button" style="align-self:end">Guardar fecha</button>
+    </div>
+  </section>
+  <section>
+    <h2>Recolecciones</h2>
+    <div class="tabla"><table><thead><tr><th>Fecha</th><th>Tienda</th><th>Recibió</th><th>Entregó</th><th class="importe">Esperado</th><th class="importe">Contado</th><th class="importe">Diferencia</th><th>Nota</th></tr></thead><tbody id="historial"></tbody></table></div>
+  </section>
+</main>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const pesos = (centavos) => (centavos / 100).toLocaleString('es-MX', { style:'currency', currency:'MXN' });
+const escapar = (texto) => String(texto).replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
+const fechaHora = (iso) => new Date(iso).toLocaleString('es-MX', { timeZone:'America/Mexico_City', dateStyle:'short', timeStyle:'short' });
+const dia = (iso) => new Intl.DateTimeFormat('en-CA', { timeZone:'America/Mexico_City' }).format(new Date(iso));
+const aviso = (texto, error = false) => { $('estado').textContent = texto; $('estado').classList.toggle('error', error); };
+const signo = (n) => (n > 0 ? '+' : '') + pesos(n);
+const clase = (n) => (n < 0 ? 'falta' : n > 0 ? 'sobra' : '');
+let datos = null;
+// Un identificador por tienda hasta que se guarde: reintentar con mala señal no registra la recolección dos veces.
+const ids = {};
+const abiertas = new Set();
+
+function pintar() {
+  $('desde').value = dia(datos.desde);
+  $('tiendas').innerHTML = datos.tiendas.map((t) => {
+    const viejo = t.cortes[0] ? Math.max(0, Math.floor((Date.now() - new Date(t.cortes[0].hasta)) / 86400000)) : 0;
+    return `<div class="tienda" data-tienda="${t.clave}">
+      <div class="resumen"><div><b>${escapar(t.nombre)}</b><div class="suave">${t.cortes.length ? `${t.cortes.length} corte${t.cortes.length === 1 ? '' : 's'} · el más viejo, hace ${viejo} día${viejo === 1 ? '' : 's'}` : 'Nada por recoger'}</div></div>
+      <div class="total">${pesos(t.total)}</div></div>
+      ${t.cortes.length ? `<button type="button" data-recoger="${t.clave}">${abiertas.has(t.clave) ? 'Cerrar' : 'Recoger'}</button>` : ''}
+      ${abiertas.has(t.clave) ? panel(t) : ''}</div>`;
+  }).join('');
+  $('historial').innerHTML = datos.recolecciones.map((r) => `<tr>
+    <td data-label="Fecha">${escapar(fechaHora(r.creado_en))}</td><td data-label="Tienda">${escapar(r.tienda_nombre)}</td>
+    <td data-label="Recibió">${escapar(r.recibio_nombre || r.recibio)}</td><td data-label="Entregó">${r.entrego ? escapar(r.entrego_nombre || r.entrego) : 'Sin firma'}</td>
+    <td class="importe" data-label="Esperado">${pesos(r.esperado)}</td><td class="importe" data-label="Contado">${pesos(r.contado)}</td>
+    <td class="importe ${clase(r.diferencia)}" data-label="Diferencia">${signo(r.diferencia)}</td><td data-label="Nota">${escapar(r.nota || '—')}</td></tr>`).join('')
+    || '<tr><td>Todavía no hay recolecciones.</td></tr>';
+}
+
+function panel(t) {
+  return `<form class="panel" data-form="${t.clave}">
+    <div>${t.cortes.map((c) => `<label class="corte"><input type="checkbox" value="${c.id}" data-monto="${c.entregado}" checked>
+      <span>${escapar(fechaHora(c.hasta))} · ${escapar(c.caja)} · ${escapar(c.cajero_nombre || c.cajero)}${c.diferencia ? `<br><span class="suave ${clase(c.diferencia)}">diferencia del corte ${signo(c.diferencia)}</span>` : ''}</span>
+      <b>${pesos(c.entregado)}</b></label>`).join('')}</div>
+    <div class="resumen"><span>Esperado</span><b class="total" data-esperado>${pesos(t.total)}</b></div>
+    <div class="campos">
+      <label>Contado ($)<input name="contado" type="number" min="0" step="0.01" inputmode="decimal" required></label>
+      <label>Diferencia<b data-diferencia style="font-size:20px;min-height:44px;display:flex;align-items:center">—</b></label>
+      <label class="ancho">Nota (obligatoria si hay diferencia)<textarea name="nota" maxlength="300" rows="2"></textarea></label>
+      <label>Quien entrega<select name="entrego"><option value="">Sin firma</option>${t.personal.map((p) => `<option value="${escapar(p.correo)}">${escapar(p.nombre)}</option>`).join('')}</select></label>
+      <label data-pin hidden>PIN de quien entrega<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off"></label>
+      <button class="ancho" type="submit">Confirmar recolección</button>
+    </div></form>`;
+}
+
+function recalcular(form) {
+  const esperado = [...form.querySelectorAll('input[type=checkbox]:checked')].reduce((s, c) => s + Number(c.dataset.monto), 0);
+  form.querySelector('[data-esperado]').textContent = pesos(esperado);
+  const contado = form.elements.contado.value === '' ? null : Math.round(Number(form.elements.contado.value) * 100);
+  const salida = form.querySelector('[data-diferencia]');
+  salida.textContent = contado === null ? '—' : signo(contado - esperado);
+  salida.className = contado === null ? '' : clase(contado - esperado);
+}
+
+async function cargar() {
+  const r = await fetch('/api/dinero', { cache:'no-store' });
+  const cuerpo = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(cuerpo.error || 'No se pudo cargar el dinero pendiente.');
+  datos = cuerpo;
+  pintar();
+}
+
+$('tiendas').addEventListener('click', (e) => {
+  const boton = e.target.closest('[data-recoger]');
+  if (!boton) return;
+  const clave = boton.dataset.recoger;
+  abiertas.has(clave) ? abiertas.delete(clave) : abiertas.add(clave);
+  pintar();
+});
+$('tiendas').addEventListener('input', (e) => {
+  const form = e.target.closest('form');
+  if (!form) return;
+  if (e.target.name === 'entrego') form.querySelector('[data-pin]').hidden = !e.target.value;
+  recalcular(form);
+});
+$('tiendas').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = e.target, clave = form.dataset.form, boton = form.querySelector('button[type=submit]');
+  const cortes = [...form.querySelectorAll('input[type=checkbox]:checked')].map((c) => c.value);
+  if (!cortes.length) { aviso('Marca al menos un corte.', true); return; }
+  boton.disabled = true; aviso('');
+  try {
+    ids[clave] ||= crypto.randomUUID();
+    const entrego = form.elements.entrego.value;
+    const r = await fetch('/api/dinero/recolecciones', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify({
+      id:ids[clave], tienda:clave, cortes, contado:Math.round(Number(form.elements.contado.value) * 100), nota:form.elements.nota.value,
+      ...(entrego ? { entrego, pin:form.elements.pin.value } : {}),
+    }) });
+    const cuerpo = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(cuerpo.error || 'No se pudo registrar la recolección.');
+    delete ids[clave]; abiertas.delete(clave);
+    await cargar();
+    aviso(cuerpo.parcial
+      ? `Recolección registrada con ${cuerpo.tomados} de ${cuerpo.pedidos} cortes: otro dispositivo ya había recogido el resto. Esperado ${pesos(cuerpo.esperado)}.`
+      : 'Recolección registrada.');
+  } catch (error) { aviso(error.message, true); boton.disabled = false; }
+});
+$('guardar-desde').addEventListener('click', async () => {
+  if (!$('desde').value) return;
+  try {
+    const r = await fetch('/api/dinero/desde', { method:'PUT', headers:{ 'content-type':'application/json' }, body:JSON.stringify({ desde:$('desde').value }) });
+    const cuerpo = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(cuerpo.error || 'No se pudo guardar la fecha.');
+    await cargar(); aviso('Fecha guardada.');
+  } catch (error) { aviso(error.message, true); }
+});
+cargar().catch((e) => aviso(e.message, true));
+</script>
+</body>
+</html>

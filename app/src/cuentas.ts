@@ -128,6 +128,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   // Issue #287: mensajes de clientes por WhatsApp; datos personales, solo el dueño.
   '/mensajes': DUENO,
   '/gastos': AUXILIAR,
+  '/dinero': DUENO,   // #909: recoger el efectivo de los cortes por tienda
   '/nomina': AUXILIAR,
 };
 
@@ -156,6 +157,7 @@ export function permiso(pathname: string, metodo: string): Regla {
 
   if (ruta === '/api/tablero') return metodo === 'GET' ? INVERSIONISTA : DUENO;
   if (ruta === '/api/mensajes' || ruta === '/api/mensajes/responder') return DUENO;
+  if (ruta === '/api/dinero' || ruta.startsWith('/api/dinero/')) return DUENO;   // #909: solo gerencia, explícito aunque sea el valor por omisión
   if (ruta === '/api/gastos' || /^\/api\/gastos\/[^/]+(\/comprobante)?$/.test(ruta)) return AUXILIAR;
   if (ruta === '/api/nomina/entrada' || ruta === '/api/nomina/checador') return CAJA;
   if (ruta === '/api/nomina' || ruta.startsWith('/api/nomina/')) return AUXILIAR;
