@@ -290,6 +290,8 @@ async function conGemini(foto: string | null, env: Env, instruccion: string, bus
     generationConfig: {
       // gemini-3.8-flash piensa en MEDIUM por omision y, con busqueda, paso
       // de los 22 s en sandbox (#363). LOW basta para leer una foto.
+      // #904: en AI Studio no se manda: la documentación no dice a qué modelo apunta `gemini-flash-latest` y thinkingLevel
+      // da error en modelos anteriores a Gemini 3. Medir con el aviso `gemini_ultimo_aviso` antes de cambiarlo.
       ...(env.VERTEX_API_KEY ? { thinkingConfig: { thinkingLevel: 'LOW' } } : {}),
       ...(buscar ? {} : { responseMimeType: 'application/json', responseSchema: esquema }),
     },
@@ -308,15 +310,38 @@ async function conGemini(foto: string | null, env: Env, instruccion: string, bus
   return { ...extraerJson(texto), fuentes };
 }
 
+/** La llave de Gemini viaja en la URL (`?key=…`): ningún mensaje que se guarde o se muestre la lleva. */
+export const sinLlave = (texto: string) => texto.replace(/key=[^&\s"']*/gi, 'key=…');
+
+/**
+ * #904: deja en D1 el último fallo de Gemini en el análisis (los logs del Worker no los leen los agentes). Una sola fila,
+ * `config.gemini_ultimo_aviso`, sobrescrita: `{en, que, status, mensaje}`; status = el HTTP de «Gemini 429: …» o null (red, plazo).
+ * Nunca lanza ni cambia lo que recibe quien llamó.
+ */
+// ponytail: solo el último fallo; si hace falta frecuencia o historial, una tabla con fecha y contador.
+async function avisarGemini(env: Env, que: string, error: unknown): Promise<void> {
+  try {
+    const mensaje = sinLlave(error instanceof Error ? error.message : String(error)).slice(0, 300);
+    const status = Number(/^Gemini (\d{3})\b/.exec(mensaje)?.[1]) || null;
+    await env.DB.prepare("insert into config (clave, valor) values ('gemini_ultimo_aviso', ?) on conflict (clave) do update set valor = excluded.valor")
+      .bind(JSON.stringify({ en: new Date().toISOString(), que, status, mensaje })).run();
+  } catch (e) { console.error(JSON.stringify({ mensaje: 'no se pudo guardar gemini_ultimo_aviso', error: sinLlave(String(e)).slice(0, 200) })); }
+}
+
+async function conAviso<T>(env: Env, que: string, llamada: () => Promise<T>): Promise<T> {
+  try { return await llamada(); } catch (error) { await avisarGemini(env, que, error); throw error; }
+}
+
 /** #413: una llamada por clic; nunca se leen URLs escritas en el texto del modelo. */
+// #904: con VERTEX_API_KEY igual que siempre; sin ella, AI Studio (consultarGemini elige) y sin ajuste de pensamiento,
+// como conGemini. Sin ninguna llave consultarGemini lanza.
 export async function paginasParaImagen(consulta: string, env: Env): Promise<string[]> {
-  if (!env.VERTEX_API_KEY) throw new Error('Falta VERTEX_API_KEY para buscar imágenes.');
-  const cuerpo = await consultarGemini(env, {
+  const cuerpo = await conAviso(env, 'buscar_imagen', () => consultarGemini(env, {
     systemInstruction: { parts: [{ text: 'Busca páginas de producto de tiendas o del fabricante para este artículo. Usa Google con la marca, el nombre y el código si lo hay.' }] },
     contents: [{ role: 'user', parts: [{ text: consulta }] }],
     tools: [{ googleSearch: {} }],
-    generationConfig: { thinkingConfig: { thinkingLevel: 'LOW' } },
-  }, LIMITES_MS.gemini);
+    ...(env.VERTEX_API_KEY ? { generationConfig: { thinkingConfig: { thinkingLevel: 'LOW' } } } : {}),
+  }, LIMITES_MS.gemini));
   return [...new Set((cuerpo.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [])
     .map((pedazo) => pedazo.web?.uri).filter((uri): uri is string => typeof uri === 'string'))].slice(0, 6);
 }
@@ -346,7 +371,7 @@ const PIDE_JSON_UPC = [
 export type HallazgoUpc = Ficha & { precio_usd: number; fuente: string; fuentes?: string[] };
 
 export async function identificarUpc(upc: string, env: Env, limiteMs = LIMITES_MS.gemini): Promise<HallazgoUpc> {
-  const cruda = await conGemini(null, env, INSTRUCCION_UPC, true, ESQUEMA_GEMINI, `upc ${upc}`, limiteMs, PIDE_JSON_UPC) as
+  const cruda = await conAviso(env, 'busqueda_upc', () => conGemini(null, env, INSTRUCCION_UPC, true, ESQUEMA_GEMINI, `upc ${upc}`, limiteMs, PIDE_JSON_UPC)) as
     Partial<Ficha> & { precio_usd?: unknown; fuente?: unknown; fuentes?: string[] };
   const usd = Number(cruda.precio_usd);
   return { ...normalizar(cruda), precio_usd: Number.isFinite(usd) && usd > 0 ? Math.round(usd * 100) / 100 : 0,
@@ -375,9 +400,9 @@ const MINIMO_PRECIO_MS = 8_000;
  * de Google busca ese nombre en tiendas mexicanas. Lanza si no hay llave o no responde a tiempo.
  */
 async function precioPorNombre(ficha: Ficha, env: Env, limiteMs: number): Promise<{ precio_lista_mxn: number; confianza: number; fuentes?: string[] }> {
-  const cruda = await conGemini(null, env, INSTRUCCION_PRECIO, true, ESQUEMA_GEMINI,
+  const cruda = await conAviso(env, 'precio_por_nombre', () => conGemini(null, env, INSTRUCCION_PRECIO, true, ESQUEMA_GEMINI,
     `Articulo: ${ficha.nombre}${ficha.marca ? `, marca ${ficha.marca}` : ''}. Categoria: ${ficha.categoria}.`, limiteMs,
-  ) as Partial<Ficha> & { fuentes?: string[] };
+  )) as Partial<Ficha> & { fuentes?: string[] };
   const { precio_lista_mxn, confianza } = normalizar(cruda);
   return { precio_lista_mxn, confianza, fuentes: cruda.fuentes };
 }

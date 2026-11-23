@@ -70,9 +70,15 @@ Los enlaces salen del TCIN guardado en servidor; no se aceptan URLs arbitrarias 
 Cada tarjeta de El Dolarón sin foto (`foto_key = ''`), incluidas las de «Capturar sin foto»
 y «Revisión del catálogo público», ofrece **Buscar imagen**. Primero guarda las correcciones
 de nombre y marca: la consulta usa los datos guardados, junto al UPC si existe.
-Es manual: una llamada a Gemini en Vertex con `googleSearch` por clic, sin cron ni búsquedas
-automáticas. Reutiliza el cliente de `analisis.ts`. Sin `VERTEX_API_KEY` responde **503**
-con un mensaje claro; no usa la cuota de AI Studio como alternativa.
+Es manual: una llamada a Gemini con `googleSearch` por clic, sin cron ni búsquedas
+automáticas. Reutiliza el cliente de `analisis.ts`. Con `VERTEX_API_KEY` va por Vertex (con
+pensamiento `LOW`); sin ella va por AI Studio con `GEMINI_API_KEY` o `GEMINI2_API_KEY` (modelo
+`gemini-flash-latest`, sin ajuste de pensamiento). Sin ninguna de las tres llaves responde **503**
+con un mensaje claro. La regla original de #413 de no usar AI Studio era por la cuota gratuita
+agotada; ya no aplica desde que AI Studio corre con saldo prepagado (#904). Si la llamada falla,
+la razón queda en `config.gemini_ultimo_aviso` (`{en, que: "buscar_imagen", status, mensaje}`,
+una sola fila sobrescrita, sin URL ni llave; la misma fila avisa los fallos del precio por nombre
+y de la búsqueda por UPC).
 
 `POST /api/borradores/:id/imagen/buscar` toma hasta seis páginas únicas de
 `groundingMetadata.groundingChunks[].web.uri`. El Worker sigue la redirección de Vertex

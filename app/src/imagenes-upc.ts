@@ -275,7 +275,7 @@ export async function rutaImagenPieza(request: Request, env: Env, pathname: stri
   if (pieza.foto_key !== '') return json({ error: 'La pieza ya tiene foto.' }, 409);
 
   if (ruta[2]) {
-    if (!env.VERTEX_API_KEY) return json({ error: 'Falta VERTEX_API_KEY para buscar imágenes.' }, 503);
+    if (!env.VERTEX_API_KEY && !env.GEMINI_API_KEY && !env.GEMINI2_API_KEY) return json({ error: 'Falta la llave de Gemini (VERTEX_API_KEY, GEMINI_API_KEY o GEMINI2_API_KEY) para buscar imágenes.' }, 503);
     if (!pieza.nombre.trim()) return json({ error: 'Guarda el nombre de la pieza antes de buscar.' }, 400);
     try {
       const paginas = await paginasParaImagen([pieza.marca, pieza.nombre, pieza.upc].filter(Boolean).join(' '), env);
