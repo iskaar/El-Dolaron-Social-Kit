@@ -71,6 +71,7 @@ import { catalogoPublico, revisionCatalogo, COLUMNAS_UBICACION, tiendasDe } from
 import { rescatarPendientes, esCorridaSemanal, reportarHuerfanosR2 } from './huerfanos.ts';
 import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
 import { procesarPortadas, reiniciarPortada } from './portadas.ts';
+import { rutaPortadasAdmin } from './portadas-admin.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva, avisosPendientes, atenderVentaML } from './mercadolibre.ts';
 import { pedirDescuento, quitarDescuento, validarDescuento, listarDescuentos, listarDuenos, promoDe, promoRestantes, buenFinDe } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
@@ -2774,8 +2775,8 @@ export default {
         const respuesta = await rutaPiezas(request, env, url, await leerUsuario(env, correo), ctx);
         if (respuesta) return respuesta;
       }
-      // #441: revisar ropa y recortes modifica inventario; sus lecturas conservan el permiso por rol.
-      if (request.method === 'POST' && /^\/api\/(ropa-ia|recortes)\//.test(pathname)
+      // #441: revisar ropa, recortes y portadas (#890) modifica inventario; sus lecturas conservan el permiso por rol.
+      if (request.method === 'POST' && /^\/api\/(ropa-ia|recortes|portadas)\//.test(pathname)
           && !puedeEditarInventario(await leerUsuario(env, correo))) {
         return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
       }
@@ -2787,6 +2788,8 @@ export default {
           && !puedeEditarInventario(await leerUsuario(env, correo))) return json({ error: 'Tu cuenta no tiene permiso para editar el inventario.' }, 403);
       const respuestaRecortes = await rutaRecortesAdmin(request, env, pathname);
       if (respuestaRecortes) return respuestaRecortes;
+      const respuestaPortadas = await rutaPortadasAdmin(request, env, pathname);   // #890
+      if (respuestaPortadas) return respuestaPortadas;
       const respuestaImagen = await rutaImagenUpc(request, env, pathname, correo, ctx);
       if (respuestaImagen) return respuestaImagen;
       if (pathname === '/api/cajeros' && request.method === 'GET') return await listarCajeros(env, tienda);
