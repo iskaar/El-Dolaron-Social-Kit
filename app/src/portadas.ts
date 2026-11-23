@@ -25,6 +25,17 @@ export class SinImagen extends Error {}
 // Vertex, GA, endpoint global (docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/3-1-flash-image, 22/11/2026).
 // Falta probarlo con VERTEX_API_KEY real: el piloto en sandbox (#889) lo confirma; si no la acepta, cambiar solo esta constante.
 export const MODELO_IMAGEN = 'gemini-3.1-flash-image';
+// AI Studio (#900): lista de modelos de la API de Gemini (aistudio.google.com/docs/models, 23/11/2026): «Stable», «generación y edición de imágenes».
+// Falta la primera llamada real: si la API la rechaza, cambiar solo esta constante (hay un `gemini-nano-banana-2.1` más nuevo; no se usa: su página
+// solo muestra la API Interactions, no generateContent).
+export const MODELO_IMAGEN_AI_STUDIO = 'gemini-3.1-flash-image';
+/** Con una llave de AI Studio las portadas van por ahí (aunque haya VERTEX_API_KEY); sin ella, Vertex como antes. */
+const transporteImagen = (env: Env) => {
+  const aiStudio = Boolean(env.GEMINI_API_KEY || env.GEMINI2_API_KEY);
+  return { aiStudio, modelo: aiStudio ? MODELO_IMAGEN_AI_STUDIO : MODELO_IMAGEN };
+};
+// La llave viaja en la URL (`?key=`): nada que se guarde o se registre puede conservarla.
+const sinLlave = (texto: string) => texto.replace(/key=[^&\s"']*/gi, 'key=…');
 const LADO = 1200;
 // ponytail: lote fijo de 3 generaciones por corrida de 15 min (≈ 300 al día como techo, el tope diario manda). Subirlo si el piloto mide holgura.
 const LOTE = 3;
@@ -39,17 +50,20 @@ const llavePublicada = (id: string) => `extras/${id}/01.jpg`;
 
 const INSTRUCCION_GENERAR = 'Edit this product photo into a clean e-commerce studio photo. Keep the exact same product on a pure white (#FFFFFF) seamless background, square 1:1 composition, product centered and filling about 85% of the frame, soft natural shadow underneath, even lighting, sharp focus. Do not change the product in any way: keep every word, letter, logo, color, pattern, proportion and shape exactly as in the photo; do not invent, add, remove or redraw any part. Remove everything that is not the product: hands, hooks, hangers, shelves, neighboring items, the background, and any price tag or sticker added by the store (the manufacturer\'s own labels and hang tags are part of the product and stay). If part of the product is hidden, cut off or blurry, do not guess it: leave it as it appears. Return only the image.';
 
-/** Generador real: Gemini imagen-a-imagen por Vertex. Pide el cuadrado ya hecho para depender lo menos posible de IMAGES. */
+/** Generador real: Gemini imagen-a-imagen por AI Studio (con GEMINI_API_KEY) o por Vertex. Pide el cuadrado ya hecho para depender lo menos posible de IMAGES. */
 export async function generarConGemini(env: Env, foto: ArrayBuffer, problemas: string[]): Promise<Generada> {
   const texto = problemas.length
     ? `${INSTRUCCION_GENERAR}\nA previous attempt had these problems, avoid them: ${problemas.join('; ')}.`
     : INSTRUCCION_GENERAR;
+  const { aiStudio, modelo } = transporteImagen(env);
+  if (!aiStudio && !env.VERTEX_API_KEY) throw new Error('Falta GEMINI_API_KEY (AI Studio) o VERTEX_API_KEY para generar portadas.');
   const respuesta = await consultarGemini(env, {
     contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data: base64(foto) } }, { text: texto }] }],
     // ponytail: `imageConfig` en generationConfig es lo que muestra la guía de Vertex hoy; el esquema REST lo marca deprecado a favor de
-    // `responseFormat`. Si el piloto lo rechaza, cambiar solo este objeto.
+    // `responseFormat`. Si el piloto lo rechaza, cambiar solo este objeto. La referencia generateContent de AI Studio (23/11/2026) lo acepta
+    // igual (aspectRatio '1:1', imageSize '1K'); sus guías nuevas usan la API Interactions, que aquí no se usa.
     generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: '1:1', imageSize: '1K' } },
-  }, LIMITE_GENERAR_MS, MODELO_IMAGEN);
+  }, LIMITE_GENERAR_MS, modelo, aiStudio);
   const partes = respuesta.candidates?.[0]?.content?.parts ?? [];
   const imagen = partes.find((p) => p.inlineData?.data);
   if (!imagen?.inlineData?.data) {
@@ -96,11 +110,11 @@ const pasajero = (e: unknown) => !(e instanceof SinImagen) && (/9422/.test(Strin
 /**
  * Deja en `config` el último motivo por el que el proveedor detuvo la corrida (#898): el log no lo leen los agentes. Una sola fila,
  * sobrescrita. Nunca lanza. El mensaje sale del cuerpo de la respuesta o del error, no de la petición; aun así se quita todo `key=…`
- * porque la llave de Vertex viaja en la URL.
+ * porque la llave de Vertex y la de AI Studio viajan en la URL.
  */
 async function avisarProveedor(env: Env, id: string, error: unknown): Promise<void> {
   try {
-    const mensaje = (error instanceof Error ? error.message : String(error)).replace(/key=[^&\s"']*/gi, 'key=…').slice(0, 300);
+    const mensaje = sinLlave(error instanceof Error ? error.message : String(error)).slice(0, 300);
     await env.DB.prepare("insert into config (clave, valor) values ('portadas_ultimo_aviso', ?) on conflict (clave) do update set valor = excluded.valor")
       .bind(JSON.stringify({ en: ahora(), id, status: estadoDe(error) || null, mensaje })).run();
   } catch (e) { console.error(JSON.stringify({ mensaje: 'portadas: no se pudo guardar el último aviso', error: String(e).slice(0, 200) })); }
@@ -275,7 +289,7 @@ export async function resolverPortada(env: Env, id: string, accion: AccionPortad
 interface Pieza { id: string; foto_key: string }
 /** Lo que costó y tardó esta corrida con la pieza (#895): va en `portada_revision` para medir el costo real desde D1. */
 interface Medidas { tokens: { entrada: number; salida: number }; ms_generar: number; ms_comprobar: number; modelo: string }
-const medidasNuevas = (): Medidas => ({ tokens: { entrada: 0, salida: 0 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO_IMAGEN });
+const medidasNuevas = (env: Env): Medidas => ({ tokens: { entrada: 0, salida: 0 }, ms_generar: 0, ms_comprobar: 0, modelo: transporteImagen(env).modelo });
 
 /** Una pieza de principio a fin. 'alto' = no seguir con las demás (tope agotado o proveedor caído). */
 async function trabajar(env: Env, deps: Dependencias, pieza: Pieza, tope: number, conAprobacion: boolean, medidas: Medidas): Promise<'seguir' | 'alto'> {
@@ -298,7 +312,7 @@ async function trabajar(env: Env, deps: Dependencias, pieza: Pieza, tope: number
       const generada = await deps.generar(env, original, veredicto.problemas).catch(async (e) => { if (credencial(e)) await devolverGeneracion(env).catch(() => {}); throw e; });
       medidas.ms_generar += Date.now() - inicio;
       medidas.tokens.entrada += generada.tokens.entrada; medidas.tokens.salida += generada.tokens.salida;
-      console.log(JSON.stringify({ mensaje: 'portada generada', id, modelo: MODELO_IMAGEN, intento, tokens_entrada: generada.tokens.entrada, tokens_salida: generada.tokens.salida, ms: Date.now() - inicio }));
+      console.log(JSON.stringify({ mensaje: 'portada generada', id, modelo: medidas.modelo, intento, tokens_entrada: generada.tokens.entrada, tokens_salida: generada.tokens.salida, ms: Date.now() - inicio }));
       // Antes de cualquier otra cosa: una imagen pagada no se pierde por un fallo posterior.
       await env.FOTOS.put(llaveCruda(id), generada.bytes, { httpMetadata: { contentType: generada.tipo }, customMetadata: { foto_etag: etag } });
       cruda = generada.bytes;
@@ -351,7 +365,7 @@ export async function procesarPortadas(env: Env, deps: Dependencias = real): Pro
   let hechas = 0;
   for (const pieza of results) {
     if (hechas >= LOTE) return;
-    const medidas = medidasNuevas();
+    const medidas = medidasNuevas(env);
     try {
       // Ya hay portada hecha a mano (#628): se respeta tal cual, sin gastar.
       const manual = await env.FOTOS.get(llavePublicada(pieza.id));
@@ -364,11 +378,11 @@ export async function procesarPortadas(env: Env, deps: Dependencias = real): Pro
       if (await trabajar(env, deps, pieza, tope, conAprobacion, medidas) === 'alto') return;
     } catch (error) {
       if (pasajero(error)) {
-        console.error(JSON.stringify({ mensaje: 'portada pendiente', id: pieza.id, error: String(error).slice(0, 200) }));
+        console.error(JSON.stringify({ mensaje: 'portada pendiente', id: pieza.id, error: sinLlave(String(error)).slice(0, 200) }));
         await avisarProveedor(env, pieza.id, error);
         return;
       }
-      const motivo = error instanceof Error ? error.message : String(error);
+      const motivo = sinLlave(error instanceof Error ? error.message : String(error));
       await marcar(env, pieza.id, 'error', { ok: false, problemas: [motivo.slice(0, 200)], intentos: 0, ...medidas });
       await borrarEspera(env, pieza.id);
     }
