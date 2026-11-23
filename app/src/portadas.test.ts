@@ -160,11 +160,11 @@ test('portadas: con aprobación (config ausente) un veredicto ok queda en revisa
     await procesarPortadas(t.env, deps);
     const f = fila(t);
     assert.equal(f.portada_estado, 'revisar');
-    assert.deepEqual(exacta(t), { ok: true, problemas: [], intentos: 1, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
+    assert.deepEqual(exacta(t), { ok: true, problemas: [], intentos: 1, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO, tamano: '1K' });
     assert.deepEqual(llaves(t), [`portadas/${uuid(0)}.jpg`]);
     for (const c of ['foto_key', 'precio', 'stock', 'estado_analisis', 'nombre', 'marca']) assert.equal(f[c], antes[c], c);
     const registro = JSON.parse(logs.find((l) => l.includes('portada generada'))!);
-    assert.deepEqual({ ...registro, ms: 0 }, { mensaje: 'portada generada', id: uuid(0), modelo: MODELO_IMAGEN, intento: 1, tokens_entrada: 1300, tokens_salida: 1120, ms: 0 });
+    assert.deepEqual({ ...registro, ms: 0 }, { mensaje: 'portada generada', id: uuid(0), modelo: MODELO_IMAGEN, tamano: '1K', intento: 1, tokens_entrada: 1300, tokens_salida: 1120, ms: 0 });
     const comprobada = JSON.parse(logs.find((l) => l.includes('portada comprobada'))!);
     assert.deepEqual({ ...comprobada, ms: 0 }, { mensaje: 'portada comprobada', id: uuid(0), ok: true, foto_mala: false, problemas: [], ms: 0 });
   } finally { t.db.close(); }
@@ -177,7 +177,7 @@ test('portadas: con portadas_aprobacion en 0 un veredicto ok queda lista, ia, en
     assert.deepEqual([fila(t).portada_estado, fila(t).portada_origen], ['lista', 'ia']);
     assert.deepEqual(llaves(t), [`extras/${uuid(0)}/01.jpg`]);
     assert.deepEqual([...new Uint8Array(fotos(t).objetos.get(`extras/${uuid(0)}/01.jpg`))], [7, 7]);
-    assert.deepEqual(exacta(t), { ok: true, problemas: [], intentos: 1, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
+    assert.deepEqual(exacta(t), { ok: true, problemas: [], intentos: 1, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO, tamano: '1K' });
   } finally { t.db.close(); }
 });
 
@@ -195,14 +195,14 @@ test('portadas: un veredicto no ok reintenta con los problemas; el segundo ok si
   try {
     await procesarPortadas(t.env, d.deps);
     assert.deepEqual(d.llamadas.generar, [[], ['cambió el logo']]);
-    assert.deepEqual(exacta(t), { ok: true, problemas: [], intentos: 2, tokens: { entrada: 2600, salida: 2240 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
+    assert.deepEqual(exacta(t), { ok: true, problemas: [], intentos: 2, tokens: { entrada: 2600, salida: 2240 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO, tamano: '1K' });
     assert.equal(fila(t).portada_estado, 'revisar');
   } finally { t.db.close(); }
   t = await preparar(1); d = dependencias([malo, { ...malo, problemas: ['texto distinto'] }]);
   try {
     await procesarPortadas(t.env, d.deps);
     assert.equal(d.llamadas.generar.length, 2);
-    assert.deepEqual(exacta(t), { ok: false, problemas: ['texto distinto'], intentos: 2, tokens: { entrada: 2600, salida: 2240 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
+    assert.deepEqual(exacta(t), { ok: false, problemas: ['texto distinto'], intentos: 2, tokens: { entrada: 2600, salida: 2240 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO, tamano: '1K' });
     assert.equal(fila(t).portada_estado, 'revisar');
     assert.deepEqual(llaves(t), [`portadas/${uuid(0)}.jpg`]);
   } finally { t.db.close(); }
@@ -214,7 +214,7 @@ test('portadas: foto_mala pasa a retomar con un solo intento y no deja restos', 
     await procesarPortadas(t.env, deps);
     assert.equal(llamadas.generar.length, 1);
     assert.equal(fila(t).portada_estado, 'retomar');
-    assert.deepEqual(exacta(t), { ok: false, problemas: ['etiqueta de precio sobre el producto'], intentos: 1, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
+    assert.deepEqual(exacta(t), { ok: false, problemas: ['etiqueta de precio sobre el producto'], intentos: 1, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO, tamano: '1K' });
     assert.deepEqual(llaves(t), []);
   } finally { t.db.close(); }
 });
@@ -244,7 +244,7 @@ test('portadas: el tope también corta el reintento y la pieza queda en revisar 
   try {
     await procesarPortadas(t.env, d.deps);
     assert.equal(d.llamadas.generar.length, 1);
-    assert.deepEqual(exacta(t), { ok: false, problemas: ['forma distinta'], intentos: 1, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
+    assert.deepEqual(exacta(t), { ok: false, problemas: ['forma distinta'], intentos: 1, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO, tamano: '1K' });
   } finally { t.db.close(); }
 });
 
@@ -363,7 +363,7 @@ test('portadas: si IMAGES falla con 9422 después de generar, lo pagado queda en
     assert.deepEqual(llaves(t), [`portadas/${uuid(0)}.jpg`]);
     assert.equal(t.db.prepare('select valor from config where clave=?').get(`portadas_generadas_${hoyTienda()}`)?.valor, '1');
     // Retomó la imagen ya pagada: esta corrida no generó, así que no se anota costo ni tiempo de generar (#895).
-    assert.deepEqual(exacta(t), { ok: true, problemas: [], intentos: 1, tokens: { entrada: 0, salida: 0 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
+    assert.deepEqual(exacta(t), { ok: true, problemas: [], intentos: 1, tokens: { entrada: 0, salida: 0 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO, tamano: '1K' });
   } finally { t.db.close(); }
 });
 
@@ -382,7 +382,7 @@ test('portadas: el modelo sin imagen deja la pieza en error con el motivo', asyn
     await procesarPortadas(t.env, d.deps);
     assert.equal(fila(t).portada_estado, 'error');
     assert.match(revision(t).problemas[0], /sin imagen/);
-    assert.deepEqual({ ...revision(t), problemas: [] }, { ok: false, problemas: [], intentos: 0, tokens: { entrada: 0, salida: 0 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
+    assert.deepEqual({ ...revision(t), problemas: [] }, { ok: false, problemas: [], intentos: 0, tokens: { entrada: 0, salida: 0 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO, tamano: '1K' });
     assert.deepEqual(llaves(t), []);
   } finally { t.db.close(); }
 });
@@ -393,7 +393,7 @@ test('portadas: si comprobar falla con un 4xx después de generar, el error cons
   try {
     await procesarPortadas(t.env, d.deps);
     assert.equal(fila(t).portada_estado, 'error');
-    assert.deepEqual({ ...exacta(t), problemas: [] }, { ok: false, problemas: [], intentos: 0, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
+    assert.deepEqual({ ...exacta(t), problemas: [] }, { ok: false, problemas: [], intentos: 0, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO, tamano: '1K' });
   } finally { t.db.close(); }
 });
 
@@ -582,4 +582,160 @@ test('comprobarConClaude: manda las dos imágenes completas y normaliza el vered
     assert.deepEqual(await comprobarConClaude(t.env, new ArrayBuffer(1), new ArrayBuffer(1), async () => ({ ok: true, problemas: [], foto_mala: true })),
       { ok: false, problemas: [], foto_mala: true });
   } finally { t.db.close(); }
+});
+
+// --- #906: modelo y tamaño por config, y gemini-nano-banana-2.1 por la API Interactions ---
+const NANO = 'gemini-nano-banana-2.1';
+const INTERACCION_OK = () => new Response(JSON.stringify({ status: 'completed', steps: [
+  { type: 'thought', summary: [{ type: 'image', data: btoa('PRUEBA'), mime_type: 'image/png' }] },
+  { type: 'model_output', content: [{ type: 'text', text: 'listo' }, { type: 'image', data: btoa('FINAL'), mime_type: 'image/jpeg' }] },
+], usage: { total_input_tokens: 450, total_output_tokens: 1520, total_thought_tokens: 300 } }));
+/** Como conLlaves, pero guarda también los encabezados de la llave y de la revisión y el cuerpo de cada petición. */
+function espiar(t0: { after: (f: () => void) => void }, t: ReturnType<typeof tienda>, llaves: Record<string, string | undefined>, respuesta: () => Response) {
+  const original = globalThis.fetch; const llamadas: { url: string; llave: string | null; revision: string | null; cuerpo: any }[] = [];
+  t0.after(() => { globalThis.fetch = original; });
+  Object.assign(t.env, { VERTEX_API_KEY: undefined, GEMINI_API_KEY: undefined, GEMINI2_API_KEY: undefined }, llaves);
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    const h = new Headers(init.headers);
+    llamadas.push({ url, llave: h.get('x-goog-api-key'), revision: h.get('api-revision'), cuerpo: JSON.parse(String(init.body)) });
+    return respuesta();
+  }) as typeof fetch;
+  return llamadas;
+}
+const STUDIO = (modelo: string) => `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=llave-studio`;
+const INTERACTIONS = 'https://generativelanguage.googleapis.com/v1beta/interactions';
+
+test('portadas (#906): sin filas de config la petición es la de hoy (generateContent, 1K) salvo el texto, y la instrucción es una edición estricta', async (t0) => {
+  const t = await preparar(1);
+  const llamadas = espiar(t0, t, { GEMINI_API_KEY: 'llave-studio' }, IMAGEN_OK);
+  try {
+    await procesarPortadas(t.env, { generar: generarConGemini, comprobar: async () => OK });
+    assert.equal(llamadas.length, 1);
+    assert.equal(llamadas[0].url, STUDIO(MODELO_IMAGEN_AI_STUDIO));
+    const { contents, generationConfig, ...resto } = llamadas[0].cuerpo;
+    assert.deepEqual(resto, {});
+    assert.deepEqual(generationConfig, { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: '1:1', imageSize: '1K' } });
+    assert.equal(contents[0].role, 'user');
+    assert.equal(contents[0].parts[0].inlineData.mimeType, 'image/jpeg');
+    const texto: string = contents[0].parts[1].text;
+    for (const frase of [/edit of the attached product photo, not a new image/, /same arrangement of its parts/, /lettering, logos, barcode, numbers/,
+      /Change only the background and the lighting/, /Never add, complete, translate or guess any text/, /Remove nothing that belongs to the product/]) assert.match(texto, frase);
+    assert.equal(llamadas[0].llave, null, 'generateContent lleva la llave en la URL, como siempre');
+    assert.equal(revision(t).modelo, MODELO_IMAGEN_AI_STUDIO);
+    assert.equal(revision(t).tamano, '1K');
+    assert.equal(aviso(t), null, 'sin filas no hay aviso');
+  } finally { t.db.close(); }
+});
+
+test('portadas (#906): cada modelo permitido con cada tamaño arma su petición, va a su URL y queda en portada_revision y en el log', async (t0) => {
+  for (const modelo of [MODELO_IMAGEN_AI_STUDIO, NANO]) for (const tamano of ['1K', '2K']) {
+    const t = await preparar(1, { portadas_activo: '1', portadas_modelo: modelo, portadas_tamano: tamano });
+    const llamadas = espiar(t0, t, { GEMINI_API_KEY: 'llave-studio', VERTEX_API_KEY: 'llave-vertex' }, modelo === NANO ? INTERACCION_OK : IMAGEN_OK);
+    const registros: any[] = []; const log = console.log;
+    console.log = (m: string) => { try { registros.push(JSON.parse(m)); } catch { /* otro log */ } };
+    try {
+      await procesarPortadas(t.env, { generar: generarConGemini, comprobar: async () => OK });
+      const { url, cuerpo, llave, revision: rev } = llamadas[0];
+      if (modelo === NANO) {
+        assert.equal(url, INTERACTIONS);
+        assert.equal(llave, 'llave-studio'); assert.equal(rev, '2026-05-20');
+        assert.equal(cuerpo.model, NANO);
+        assert.equal(cuerpo.input[0].type, 'text'); assert.match(cuerpo.input[0].text, /edit of the attached product photo/);
+        assert.deepEqual(cuerpo.input[1], { type: 'image', mime_type: 'image/jpeg', data: btoa('\x01\x02\x03') });
+        assert.deepEqual(cuerpo.response_format, { type: 'image', mime_type: 'image/jpeg', aspect_ratio: '1:1', image_size: tamano });
+        assert.deepEqual(Object.keys(cuerpo).sort(), ['input', 'model', 'response_format']);
+      } else {
+        assert.equal(url, STUDIO(modelo));
+        assert.deepEqual(cuerpo.generationConfig.imageConfig, { aspectRatio: '1:1', imageSize: tamano });
+      }
+      assert.equal(revision(t).modelo, modelo); assert.equal(revision(t).tamano, tamano);
+      const generada = registros.find((r) => r.mensaje === 'portada generada');
+      assert.equal(generada.modelo, modelo); assert.equal(generada.tamano, tamano);
+      assert.equal(aviso(t), null);
+    } finally { console.log = log; t.db.close(); }
+  }
+});
+
+test('portadas (#906): un modelo o tamaño desconocido cae a lo de hoy, deja el aviso en portadas_ultimo_aviso y la corrida sigue', async (t0) => {
+  for (const [config, modelo, tamano, texto] of [
+    [{ portadas_modelo: 'gemini-inventado' }, MODELO_IMAGEN_AI_STUDIO, '1K', /portadas_modelo «gemini-inventado»/],
+    [{ portadas_modelo: 'constructor' }, MODELO_IMAGEN_AI_STUDIO, '1K', /portadas_modelo «constructor»/],
+    [{ portadas_modelo: NANO, portadas_tamano: '2k' }, NANO, '1K', /portadas_tamano «2k».*se usa 1K/],
+    [{ portadas_tamano: '4K' }, MODELO_IMAGEN_AI_STUDIO, '1K', /portadas_tamano «4K»/],
+    [{ portadas_modelo: '' }, MODELO_IMAGEN_AI_STUDIO, '1K', /portadas_modelo «»/],
+  ] as const) {
+    const t = await preparar(1, { portadas_activo: '1', ...config });
+    espiar(t0, t, { GEMINI_API_KEY: 'llave-studio' }, modelo === NANO ? INTERACCION_OK : IMAGEN_OK);
+    try {
+      await procesarPortadas(t.env, { generar: generarConGemini, comprobar: async () => OK });
+      assert.equal(fila(t).portada_estado, 'revisar', 'la pieza se generó igual');
+      assert.equal(revision(t).modelo, modelo); assert.equal(revision(t).tamano, tamano);
+      const a = aviso(t);
+      assert.match(a.mensaje, texto); assert.equal(a.status, null); assert.equal(a.id, null);
+    } finally { t.db.close(); }
+  }
+});
+
+test('portadas (#906): con Vertex (sin llave de AI Studio) las filas de config no cuentan: mismo modelo, 1K y sin aviso', async (t0) => {
+  const t = await preparar(1, { portadas_activo: '1', portadas_modelo: NANO, portadas_tamano: '2K' });
+  const llamadas = espiar(t0, t, { VERTEX_API_KEY: 'llave-vertex' }, IMAGEN_OK);
+  try {
+    await procesarPortadas(t.env, { generar: generarConGemini, comprobar: async () => OK });
+    assert.equal(llamadas[0].url, `https://aiplatform.googleapis.com/v1/publishers/google/models/${MODELO_IMAGEN}:generateContent?key=llave-vertex`);
+    assert.equal(llamadas[0].cuerpo.generationConfig.imageConfig.imageSize, '1K');
+    assert.equal(revision(t).modelo, MODELO_IMAGEN); assert.equal(revision(t).tamano, '1K');
+    assert.equal(aviso(t), null);
+  } finally { t.db.close(); }
+});
+
+test('generarConGemini (#906): la respuesta de Interactions da la última imagen de model_output (no las de pensamiento), su tipo y los tokens', async (t0) => {
+  const t = tienda();
+  const llamadas = espiar(t0, t, { GEMINI2_API_KEY: 'llave-2' }, INTERACCION_OK);
+  try {
+    const r = await generarConGemini(t.env, new ArrayBuffer(1), ['falta la palabra Combo'], { modelo: NANO, tamano: '2K' });
+    assert.equal(new TextDecoder().decode(r.bytes), 'FINAL');
+    assert.equal(r.tipo, 'image/jpeg');
+    assert.deepEqual(r.tokens, { entrada: 450, salida: 1520 });
+    assert.match(llamadas[0].cuerpo.input[0].text, /A previous attempt had these problems, avoid them: falta la palabra Combo\./);
+    assert.equal(llamadas[0].llave, 'llave-2');
+    assert.doesNotMatch(llamadas[0].url, /key=|llave/);
+    // Sin imagen (solo texto, solo imagen de pensamiento, estado fallido o vacía): SinImagen con el motivo.
+    for (const [cuerpo, motivo] of [
+      [{ status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'No puedo editar esto.' }] }] }, /No puedo editar esto/],
+      [{ status: 'completed', steps: [{ type: 'thought', summary: [{ type: 'image', data: btoa('X') }] }] }, /respuesta vacía/],
+      [{ status: 'failed', steps: [] }, /estado failed/],
+      [{}, /respuesta vacía/],
+    ] as const) {
+      globalThis.fetch = (async () => new Response(JSON.stringify(cuerpo))) as typeof fetch;
+      await assert.rejects(generarConGemini(t.env, new ArrayBuffer(1), [], { modelo: NANO, tamano: '1K' }),
+        (e: unknown) => e instanceof SinImagen && motivo.test((e as Error).message));
+    }
+    // Sin `usage` los tokens son 0 y sin tipo de imagen se asume PNG.
+    globalThis.fetch = (async () => new Response(JSON.stringify({ steps: [{ type: 'model_output', content: [{ type: 'image', data: btoa('Z') }] }] }))) as typeof fetch;
+    const sinUso = await generarConGemini(t.env, new ArrayBuffer(1), [], { modelo: NANO, tamano: '1K' });
+    assert.deepEqual(sinUso.tokens, { entrada: 0, salida: 0 }); assert.equal(sinUso.tipo, 'image/png');
+  } finally { t.db.close(); }
+});
+
+test('portadas (#906): un error de Interactions sigue la clasificación (403 detiene sin marcar, 400 marca error) sin llave en el aviso; sin llave lanza', async (t0) => {
+  const t = await preparar(2, { portadas_activo: '1', portadas_modelo: NANO });
+  const llamadas = espiar(t0, t, { GEMINI_API_KEY: 'LLAVE-SECRETA' }, () => new Response('{"error":{"code":403,"message":"billing"}}', { status: 403 }));
+  t.db.prepare('insert into config (clave,valor) values (?,?)').run(`portadas_generadas_${hoyTienda()}`, '5');
+  const consola = console.error; console.error = () => {};
+  try {
+    await procesarPortadas(t.env, { generar: generarConGemini, comprobar: async () => OK });
+    assert.equal(llamadas.length, 1);
+    assert.deepEqual([0, 1].map((i) => fila(t, uuid(i)).portada_estado), [null, null]);
+    assert.equal(generadas(t), '5');
+    assert.equal(aviso(t).status, 403); assert.match(aviso(t).mensaje, /^Gemini 403: /);
+    assert.doesNotMatch(JSON.stringify(aviso(t)), /LLAVE-SECRETA|googleapis|key=/);
+    // 400: la pieza queda en error con el motivo y el modelo usado.
+    globalThis.fetch = (async () => new Response('{"error":{"message":"image_size inválido"}}', { status: 400 })) as typeof fetch;
+    await procesarPortadas(t.env, { generar: generarConGemini, comprobar: async () => OK });
+    assert.equal(fila(t, uuid(0)).portada_estado, 'error');
+    assert.match(revision(t).problemas[0], /^Gemini 400: .*image_size/);
+    assert.equal(revision(t).modelo, NANO); assert.equal(revision(t).tamano, '1K');
+    Object.assign(t.env, { GEMINI_API_KEY: undefined, GEMINI2_API_KEY: undefined });
+    await assert.rejects(generarConGemini(t.env, new ArrayBuffer(1), [], { modelo: NANO, tamano: '1K' }), /GEMINI_API_KEY/);
+  } finally { console.error = consola; t.db.close(); }
 });

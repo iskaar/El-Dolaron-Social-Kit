@@ -10,13 +10,15 @@
  * Un 'original' sin referencia (p. ej. el botón «original» de /admin sobre una foto de anaquel) se genera como cualquier otra.
  */
 import { VENDIBLE } from './catalogo.ts';
-import { base64, conClaude, consultarGemini, sinLlave } from './analisis.ts';
+import { base64, conClaude, consultarGemini, consultarInteraccion, sinLlave } from './analisis.ts';
 import { hoyTienda } from './reportes.ts';
 
 export interface Generada { bytes: ArrayBuffer; tipo: string; tokens: { entrada: number; salida: number } }
+/** Modelo y tamaño con que se genera esta corrida (#906): salen de `transporteImagen`, ya validados. */
+export interface OpcionesImagen { modelo: string; tamano: string }
 export interface Veredicto { ok: boolean; problemas: string[]; foto_mala: boolean }
 export interface Dependencias {
-  generar(env: Env, foto: ArrayBuffer, problemas: string[]): Promise<Generada>;
+  generar(env: Env, foto: ArrayBuffer, problemas: string[], opciones?: OpcionesImagen): Promise<Generada>;
   comprobar(env: Env, original: ArrayBuffer, portada: ArrayBuffer): Promise<Veredicto>;
 }
 /** El modelo contestó, pero sin imagen (filtros de seguridad, o solo texto): la pieza pasa a `error` con el motivo. */
@@ -26,13 +28,34 @@ export class SinImagen extends Error {}
 // Falta probarlo con VERTEX_API_KEY real: el piloto en sandbox (#889) lo confirma; si no la acepta, cambiar solo esta constante.
 export const MODELO_IMAGEN = 'gemini-3.1-flash-image';
 // AI Studio (#900): lista de modelos de la API de Gemini (aistudio.google.com/docs/models, 23/11/2026): «Stable», «generación y edición de imágenes».
-// Falta la primera llamada real: si la API la rechaza, cambiar solo esta constante (hay un `gemini-nano-banana-2.1` más nuevo; no se usa: su página
-// solo muestra la API Interactions, no generateContent).
 export const MODELO_IMAGEN_AI_STUDIO = 'gemini-3.1-flash-image';
-/** Con una llave de AI Studio las portadas van por ahí (aunque haya VERTEX_API_KEY); sin ella, Vertex como antes. */
-const transporteImagen = (env: Env) => {
-  const aiStudio = Boolean(env.GEMINI_API_KEY || env.GEMINI2_API_KEY);
-  return { aiStudio, modelo: aiStudio ? MODELO_IMAGEN_AI_STUDIO : MODELO_IMAGEN };
+// #906: los únicos modelos que `portadas_modelo` acepta en AI Studio y la forma de petición de cada uno. `gemini-nano-banana-2.1` solo documenta la
+// API Interactions (aistudio.google.com/docs/image-generation, 22/11/2026); si resulta que también acepta generateContent, cambiar solo su valor aquí.
+// ponytail: lista fija de dos; un tercer modelo = una línea aquí y su forma de petición en `generarConGemini`, sin capa de proveedores.
+const MODELOS_AI_STUDIO = { [MODELO_IMAGEN_AI_STUDIO]: 'generateContent', 'gemini-nano-banana-2.1': 'interactions' } as const;
+const TAMANOS = ['1K', '2K'];   // mayúscula obligatoria: la API rechaza «2k»
+const conAiStudio = (env: Env) => Boolean(env.GEMINI_API_KEY || env.GEMINI2_API_KEY);
+/**
+ * Con una llave de AI Studio las portadas van por ahí (aunque haya VERTEX_API_KEY); sin ella, Vertex como antes.
+ * #906: en AI Studio `portadas_modelo` y `portadas_tamano` eligen modelo y tamaño; ausentes valen lo de siempre (modelo de arriba, 1K). Un valor
+ * fuera de la lista cae a lo de siempre y deja un aviso en `avisos`. Con Vertex las dos filas no cuentan: sigue igual que antes.
+ */
+const transporteImagen = (env: Env, config: Map<string, string> = new Map()) => {
+  const aiStudio = conAiStudio(env);
+  const avisos: string[] = [];
+  let modelo = aiStudio ? MODELO_IMAGEN_AI_STUDIO : MODELO_IMAGEN, tamano = '1K';
+  if (aiStudio) {
+    const pedido = config.get('portadas_modelo'), tamanoPedido = config.get('portadas_tamano');
+    if (pedido !== undefined) {
+      if (Object.hasOwn(MODELOS_AI_STUDIO, pedido)) modelo = pedido;
+      else avisos.push(`Config: portadas_modelo «${pedido.slice(0, 60)}» no es un modelo permitido (${Object.keys(MODELOS_AI_STUDIO).join(', ')}); se usa ${modelo}.`);
+    }
+    if (tamanoPedido !== undefined) {
+      if (TAMANOS.includes(tamanoPedido)) tamano = tamanoPedido;
+      else avisos.push(`Config: portadas_tamano «${tamanoPedido.slice(0, 60)}» no es un tamaño permitido (${TAMANOS.join(' o ')}); se usa ${tamano}.`);
+    }
+  }
+  return { aiStudio, modelo, tamano, avisos };
 };
 // La llave viaja en la URL (`?key=`): nada que se guarde o se registre puede conservarla.
 const LADO = 1200;
@@ -47,31 +70,49 @@ const llaveCruda = (id: string) => `portadas/${id}.cruda`;
 const llaveEspera = (id: string) => `portadas/${id}.jpg`;
 const llavePublicada = (id: string) => `extras/${id}/01.jpg`;
 
-const INSTRUCCION_GENERAR = 'Edit this product photo into a clean e-commerce studio photo. Keep the exact same product on a pure white (#FFFFFF) seamless background, square 1:1 composition, product centered and filling about 85% of the frame, soft natural shadow underneath, even lighting, sharp focus. Do not change the product in any way: keep every word, letter, logo, color, pattern, proportion and shape exactly as in the photo; do not invent, add, remove or redraw any part. Remove everything that is not the product: hands, hooks, hangers, shelves, neighboring items, the background, and any price tag or sticker added by the store (the manufacturer\'s own labels and hang tags are part of the product and stay). If part of the product is hidden, cut off or blurry, do not guess it: leave it as it appears. Return only the image.';
+const INSTRUCCION_GENERAR = 'This is an edit of the attached product photo, not a new image: keep the product exactly as photographed, with the same framing of the item (same view, angle and crop), the same arrangement of its parts, and the same lettering, logos, barcode, numbers, colors, pattern, proportions and shape. Change only the background and the lighting: pure white (#FFFFFF) seamless background, square 1:1 composition, product centered and filling about 85% of the frame, soft natural shadow underneath, even lighting, sharp focus. Never add, complete, translate or guess any text, number or barcode that is not legible in the original, and never redraw or rearrange any part; if something is hidden, cut off or blurry, leave it as it appears. Remove nothing that belongs to the product (the manufacturer\'s own labels, hang tags and accessories stay), and remove everything that is not the product: hands, hooks, hangers, shelves, neighboring items, and any price tag or sticker added by the store. Return only the image.';
 
 /** Generador real: Gemini imagen-a-imagen por AI Studio (con GEMINI_API_KEY) o por Vertex. Pide el cuadrado ya hecho para depender lo menos posible de IMAGES. */
-export async function generarConGemini(env: Env, foto: ArrayBuffer, problemas: string[]): Promise<Generada> {
+export async function generarConGemini(env: Env, foto: ArrayBuffer, problemas: string[], opciones: OpcionesImagen = transporteImagen(env)): Promise<Generada> {
   const texto = problemas.length
     ? `${INSTRUCCION_GENERAR}\nA previous attempt had these problems, avoid them: ${problemas.join('; ')}.`
     : INSTRUCCION_GENERAR;
-  const { aiStudio, modelo } = transporteImagen(env);
+  const aiStudio = conAiStudio(env);
+  const { modelo, tamano } = opciones;
   if (!aiStudio && !env.VERTEX_API_KEY) throw new Error('Falta GEMINI_API_KEY (AI Studio) o VERTEX_API_KEY para generar portadas.');
-  const respuesta = await consultarGemini(env, {
-    contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data: base64(foto) } }, { text: texto }] }],
-    // ponytail: `imageConfig` en generationConfig es lo que muestra la guía de Vertex hoy; el esquema REST lo marca deprecado a favor de
-    // `responseFormat`. Si el piloto lo rechaza, cambiar solo este objeto. La referencia generateContent de AI Studio (23/11/2026) lo acepta
-    // igual (aspectRatio '1:1', imageSize '1K'); sus guías nuevas usan la API Interactions, que aquí no se usa.
-    generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: '1:1', imageSize: '1K' } },
-  }, LIMITE_GENERAR_MS, modelo, aiStudio);
-  const partes = respuesta.candidates?.[0]?.content?.parts ?? [];
-  const imagen = partes.find((p) => p.inlineData?.data);
-  if (!imagen?.inlineData?.data) {
-    throw new SinImagen(`El modelo respondió sin imagen: ${partes.map((p) => p.text ?? '').join(' ').trim().slice(0, 200) || 'respuesta vacía'}`);
+  const imagenEntrada = base64(foto);
+  let imagen: { data?: string; mime?: string }, sinImagen = '', tokens = { entrada: 0, salida: 0 };
+  if (aiStudio && MODELOS_AI_STUDIO[modelo as keyof typeof MODELOS_AI_STUDIO] === 'interactions') {
+    // API Interactions (aistudio.google.com/docs/image-generation, 22/11/2026): `response_format` con `image_size` en mayúscula; la imagen
+    // llega en el último bloque `image` de un paso `model_output` (los pasos `thought` traen imágenes de prueba que no son la final).
+    // Tokens: usage.total_input_tokens / total_output_tokens (los de pensamiento, `total_thought_tokens`, van aparte y no se cuentan, como hoy).
+    const r = await consultarInteraccion(env, {
+      model: modelo,
+      input: [{ type: 'text', text: texto }, { type: 'image', mime_type: 'image/jpeg', data: imagenEntrada }],
+      response_format: { type: 'image', mime_type: 'image/jpeg', aspect_ratio: '1:1', image_size: tamano },
+    }, LIMITE_GENERAR_MS);
+    const bloques = (r.steps ?? []).filter((p) => p.type === 'model_output').flatMap((p) => p.content ?? []);
+    const ultima = bloques.filter((c) => c.type === 'image' && c.data).pop();
+    imagen = { data: ultima?.data, mime: ultima?.mime_type };
+    sinImagen = bloques.map((c) => c.text ?? '').join(' ').trim() || (r.status && r.status !== 'completed' ? `estado ${r.status}` : '');
+    tokens = { entrada: r.usage?.total_input_tokens ?? 0, salida: r.usage?.total_output_tokens ?? 0 };
+  } else {
+    const r = await consultarGemini(env, {
+      contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data: imagenEntrada } }, { text: texto }] }],
+      // ponytail: `imageConfig` en generationConfig es lo que muestra la guía de Vertex hoy; el esquema REST lo marca deprecado a favor de
+      // `responseFormat`. Si el piloto lo rechaza, cambiar solo este objeto. La referencia generateContent de AI Studio (23/11/2026) lo acepta
+      // igual (aspectRatio '1:1', imageSize '1K' o '2K'; con Vertex siempre '1K').
+      generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: '1:1', imageSize: tamano } },
+    }, LIMITE_GENERAR_MS, modelo, aiStudio);
+    const partes = r.candidates?.[0]?.content?.parts ?? [];
+    const parte = partes.find((p) => p.inlineData?.data);
+    imagen = { data: parte?.inlineData?.data, mime: parte?.inlineData?.mimeType };
+    sinImagen = partes.map((p) => p.text ?? '').join(' ').trim();
+    tokens = { entrada: r.usageMetadata?.promptTokenCount ?? 0, salida: r.usageMetadata?.candidatesTokenCount ?? 0 };
   }
-  const binario = atob(imagen.inlineData.data);
-  const bytes = Uint8Array.from(binario, (c) => c.charCodeAt(0));
-  return { bytes: bytes.buffer, tipo: imagen.inlineData.mimeType || 'image/png',
-    tokens: { entrada: respuesta.usageMetadata?.promptTokenCount ?? 0, salida: respuesta.usageMetadata?.candidatesTokenCount ?? 0 } };
+  if (!imagen.data) throw new SinImagen(`El modelo respondió sin imagen: ${sinImagen.slice(0, 200) || 'respuesta vacía'}`);
+  const bytes = Uint8Array.from(atob(imagen.data), (c) => c.charCodeAt(0));
+  return { bytes: bytes.buffer, tipo: imagen.mime || 'image/png', tokens };
 }
 
 const ESQUEMA_COMPROBAR = { type: 'object', properties: {
@@ -111,7 +152,7 @@ const pasajero = (e: unknown) => !(e instanceof SinImagen) && (/9422/.test(Strin
  * sobrescrita. Nunca lanza. El mensaje sale del cuerpo de la respuesta o del error, no de la petición; aun así se quita todo `key=…`
  * porque la llave de Vertex y la de AI Studio viajan en la URL.
  */
-async function avisarProveedor(env: Env, id: string, error: unknown): Promise<void> {
+async function avisarProveedor(env: Env, id: string | null, error: unknown): Promise<void> {
   try {
     const mensaje = sinLlave(error instanceof Error ? error.message : String(error)).slice(0, 300);
     await env.DB.prepare("insert into config (clave, valor) values ('portadas_ultimo_aviso', ?) on conflict (clave) do update set valor = excluded.valor")
@@ -287,8 +328,8 @@ export async function resolverPortada(env: Env, id: string, accion: AccionPortad
 
 interface Pieza { id: string; foto_key: string }
 /** Lo que costó y tardó esta corrida con la pieza (#895): va en `portada_revision` para medir el costo real desde D1. */
-interface Medidas { tokens: { entrada: number; salida: number }; ms_generar: number; ms_comprobar: number; modelo: string }
-const medidasNuevas = (env: Env): Medidas => ({ tokens: { entrada: 0, salida: 0 }, ms_generar: 0, ms_comprobar: 0, modelo: transporteImagen(env).modelo });
+interface Medidas { tokens: { entrada: number; salida: number }; ms_generar: number; ms_comprobar: number; modelo: string; tamano: string }
+const medidasNuevas = ({ modelo, tamano }: OpcionesImagen): Medidas => ({ tokens: { entrada: 0, salida: 0 }, ms_generar: 0, ms_comprobar: 0, modelo, tamano });
 
 /** Una pieza de principio a fin. 'alto' = no seguir con las demás (tope agotado o proveedor caído). */
 async function trabajar(env: Env, deps: Dependencias, pieza: Pieza, tope: number, conAprobacion: boolean, medidas: Medidas): Promise<'seguir' | 'alto'> {
@@ -308,10 +349,10 @@ async function trabajar(env: Env, deps: Dependencias, pieza: Pieza, tope: number
       if (!await gastarGeneracion(env, tope)) { if (intento === 1) return 'alto'; break; }
       const inicio = Date.now();
       // Un 401/403 no generó nada: el lugar del tope se devuelve (el resto de errores pasajeros conserva el comportamiento de siempre).
-      const generada = await deps.generar(env, original, veredicto.problemas).catch(async (e) => { if (credencial(e)) await devolverGeneracion(env).catch(() => {}); throw e; });
+      const generada = await deps.generar(env, original, veredicto.problemas, { modelo: medidas.modelo, tamano: medidas.tamano }).catch(async (e) => { if (credencial(e)) await devolverGeneracion(env).catch(() => {}); throw e; });
       medidas.ms_generar += Date.now() - inicio;
       medidas.tokens.entrada += generada.tokens.entrada; medidas.tokens.salida += generada.tokens.salida;
-      console.log(JSON.stringify({ mensaje: 'portada generada', id, modelo: medidas.modelo, intento, tokens_entrada: generada.tokens.entrada, tokens_salida: generada.tokens.salida, ms: Date.now() - inicio }));
+      console.log(JSON.stringify({ mensaje: 'portada generada', id, modelo: medidas.modelo, tamano: medidas.tamano, intento, tokens_entrada: generada.tokens.entrada, tokens_salida: generada.tokens.salida, ms: Date.now() - inicio }));
       // Antes de cualquier otra cosa: una imagen pagada no se pierde por un fallo posterior.
       await env.FOTOS.put(llaveCruda(id), generada.bytes, { httpMetadata: { contentType: generada.tipo }, customMetadata: { foto_etag: etag } });
       cruda = generada.bytes;
@@ -341,12 +382,15 @@ async function trabajar(env: Env, deps: Dependencias, pieza: Pieza, tope: number
 }
 
 export async function procesarPortadas(env: Env, deps: Dependencias = real): Promise<void> {
-  const claves = new Map((await env.DB.prepare("select clave, valor from config where clave in ('portadas_activo','portadas_aprobacion','portadas_tope_diario')")
+  const claves = new Map((await env.DB.prepare("select clave, valor from config where clave in ('portadas_activo','portadas_aprobacion','portadas_tope_diario','portadas_modelo','portadas_tamano')")
     .all<{ clave: string; valor: string }>()).results.map((f) => [f.clave, f.valor]));
   if (claves.get('portadas_activo') !== '1') return;
   const topeConfig = claves.get('portadas_tope_diario');
   const tope = topeConfig !== undefined && /^\d+$/.test(topeConfig) ? Number(topeConfig) : TOPE_POR_OMISION;
   const conAprobacion = claves.get('portadas_aprobacion') !== '0';
+  const imagen = transporteImagen(env, claves);
+  // ponytail: un solo aviso por corrida, y lo sobrescribe el del proveedor si falla algo después; si los dos hacen falta a la vez, filas separadas.
+  for (const aviso of imagen.avisos) await avisarProveedor(env, null, new Error(aviso));
   // La imagen oficial de Target ya es de estudio: no pasa por IA ni gasta nada. Si una persona pidió generarla igual desde /admin (#890,
   // la marca de «oficial» puede estar mal) la pieza trae `portada_revision`, y esta pasada no la vuelve a marcar. `original` solo no basta (el botón «original» de /admin
   // también lo pone sobre una foto de anaquel): hace falta una referencia confirmada para el UPC de la pieza, unida igual que
@@ -364,7 +408,7 @@ export async function procesarPortadas(env: Env, deps: Dependencias = real): Pro
   let hechas = 0;
   for (const pieza of results) {
     if (hechas >= LOTE) return;
-    const medidas = medidasNuevas(env);
+    const medidas = medidasNuevas(imagen);
     try {
       // Ya hay portada hecha a mano (#628): se respeta tal cual, sin gastar.
       const manual = await env.FOTOS.get(llavePublicada(pieza.id));

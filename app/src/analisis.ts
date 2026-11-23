@@ -270,6 +270,33 @@ export async function consultarGemini(env: Env, cuerpo: Record<string, unknown>,
   return await respuesta.json() as RespuestaGemini;
 }
 
+/** Respuesta de la API Interactions de AI Studio (#906): los bloques salen en `steps[].content[]`; los tokens, en `usage`. */
+export interface RespuestaInteraccion {
+  status?: string;
+  steps?: Array<{ type?: string; content?: Array<{ type?: string; text?: string; data?: string; mime_type?: string }> }>;
+  usage?: { total_input_tokens?: number; total_output_tokens?: number };
+}
+
+// #906: `gemini-nano-banana-2.1` solo documenta esta API (aistudio.google.com/docs/image-generation, 22/11/2026), no generateContent.
+// Mismo convenio de error que consultarGemini («Gemini <status>: <inicio del cuerpo>»), así la clasificación de portadas no cambia.
+// A diferencia de aquella, la llave viaja en el encabezado `x-goog-api-key` (como en la documentación), no en la URL.
+// `Api-Revision` es el que llevan los ejemplos de la guía; sin él la API usa su revisión por omisión, que no se probó.
+const REVISION_INTERACTIONS = '2026-05-20';
+export async function consultarInteraccion(env: Env, cuerpo: Record<string, unknown>, limiteMs: number): Promise<RespuestaInteraccion> {
+  const llave = env.GEMINI_API_KEY || env.GEMINI2_API_KEY;
+  if (!llave) throw new Error('Falta GEMINI_API_KEY o GEMINI2_API_KEY para la API Interactions.');
+  const respuesta = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+    method: 'POST',
+    signal: AbortSignal.timeout(limiteMs),
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': llave, 'api-revision': REVISION_INTERACTIONS },
+    body: JSON.stringify(cuerpo),
+  });
+  if (!respuesta.ok) {
+    throw new Error(`Gemini ${respuesta.status}: ${(await respuesta.text()).slice(0, 200)}`);
+  }
+  return await respuesta.json() as RespuestaInteraccion;
+}
+
 async function conGemini(foto: string | null, env: Env, instruccion: string, buscar = false, esquema: any = ESQUEMA_GEMINI,
   textoUsuario = 'Identifica este articulo.', limiteMs = LIMITES_MS.gemini, pideJson = PIDE_JSON): Promise<unknown> {
   const cuerpo = await consultarGemini(env, {
