@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda } from './prueba-d1.ts';
-import { analizarBorrador, LIMITES_MS } from './analisis.ts';
+import { analizarBorrador, consultarGemini, LIMITES_MS } from './analisis.ts';
 import { identificarPieza } from './worker.ts';
 
 test('un modelo que nunca responde deja la fila en error (Claude y Gemini)', async (t) => {
@@ -244,4 +244,25 @@ test('sin precio pero con nombre seguro del código, la pieza va aparte con ese 
     await identificarPieza(id, '886144175480', env, true);
     assert.deepEqual({ ...db.prepare('select nombre, estado_analisis from productos where id = ?').get(id) as any }, { nombre, estado_analisis: 'error' });
   }
+});
+
+test('consultarGemini: con modelo la URL de Vertex lleva ese modelo, sin VERTEX_API_KEY lanza y sin modelo es la de hoy (#888)', async (t) => {
+  const { env } = tienda();
+  const fetchOriginal = globalThis.fetch;
+  t.after(() => { globalThis.fetch = fetchOriginal; });
+  const urls: string[] = [];
+  globalThis.fetch = (async (destino: string) => { urls.push(destino); return new Response(JSON.stringify({ usageMetadata: { promptTokenCount: 7 } })); }) as typeof fetch;
+  (env as { VERTEX_API_KEY: string }).VERTEX_API_KEY = 'llave-vertex';
+  const respuesta = await consultarGemini(env, {}, 1000, 'gemini-prueba-imagen');
+  assert.equal(respuesta.usageMetadata?.promptTokenCount, 7);
+  await consultarGemini(env, {}, 1000);
+  assert.equal(urls[0], 'https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-prueba-imagen:generateContent?key=llave-vertex');
+  assert.match(urls[1], /models\/gemini-3\.8-flash:generateContent\?key=llave-vertex$/);
+  // Con modelo, otra llave de Gemini no sirve: ese modelo solo existe en Vertex.
+  delete (env as { VERTEX_API_KEY?: string }).VERTEX_API_KEY;
+  (env as { GEMINI_API_KEY: string }).GEMINI_API_KEY = 'ai-studio';
+  await assert.rejects(consultarGemini(env, {}, 1000, 'gemini-prueba-imagen'), /VERTEX_API_KEY/);
+  assert.equal(urls.length, 2);
+  await consultarGemini(env, {}, 1000);
+  assert.match(urls[2], /generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-flash-latest:generateContent\?key=ai-studio$/);
 });

@@ -70,6 +70,7 @@ import { sentenciasVale, buscarVale, valeDeVenta, usadosEnVenta, reimprimirVale,
 import { catalogoPublico, revisionCatalogo, COLUMNAS_UBICACION, tiendasDe } from './catalogo.ts';
 import { rescatarPendientes, esCorridaSemanal, reportarHuerfanosR2 } from './huerfanos.ts';
 import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
+import { procesarPortadas, reiniciarPortada } from './portadas.ts';
 import { rutaML, recibirNotificacion, conciliarSeguro, sincronizar, publicacionViva, avisosPendientes, atenderVentaML } from './mercadolibre.ts';
 import { pedirDescuento, quitarDescuento, validarDescuento, listarDescuentos, listarDuenos, promoDe, promoRestantes, buenFinDe } from './descuentos.ts';
 import { listarAltoValor, revisarConteo, ajustarExistencia, listarAjustes } from './conteo.ts';
@@ -346,7 +347,7 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
     const { meta } = await env.DB.prepare("update productos set foto_key = ?, actualizado_en = ?, recorte_estado=case when recorte_estado='original' then 'original' else null end, recorte_fecha=null, recorte_revision=null where id = ?")
       .bind(fotoKey, new Date().toISOString(), id)
       .run();
-    if (meta.changes) { await subirFoto(); await reiniciarRecorte(env, id); }
+    if (meta.changes) { await subirFoto(); await reiniciarRecorte(env, id); await reiniciarPortada(env, id); }
     if (meta.changes > 0) return json({ id });
   }
 
@@ -415,6 +416,8 @@ async function crearBorrador(request: Request, env: Env, ctx: ExecutionContext, 
 
   // Si descartaron la pieza mientras tanto, la foto recién subida no se queda sin fila.
   await subirFoto();
+  // Después de subir la foto: una portada que se esté generando ya ve la foto nueva y se descarta sola.
+  await reiniciarPortada(env, id);
   const descartada = await env.DB.prepare("select id, estado_analisis, stock, codigo from productos where id = ? and estado_analisis = 'descartado'").bind(id).first<{ codigo: string | null }>();
   if (descartada) {
     if (!descartada.codigo) await env.FOTOS.delete(fotoKey);
@@ -3226,6 +3229,8 @@ export default {
     ctx.waitUntil(vencerPedidos(env));
     ctx.waitUntil(procesarColaRopa(env));
     ctx.waitUntil((async () => { await procesarRecortes(env); await revisarRecortes(env); await ajustarRecortesViejos(env); })());
+    // #888: portadas con IA (apagado por omisión). Aparte de los recortes: tarda más y un fallo no frena al otro.
+    ctx.waitUntil(procesarPortadas(env).catch((error) => console.error(JSON.stringify({ mensaje: 'portadas fallidas', error: String(error).slice(0, 200) }))));
     // #718: UPCitemdb va después, para no competir con el relleno de las referencias de Target.
     ctx.waitUntil(procesarRellenoImagenes(env).then(() => procesarRellenoUpcitemdb(env)).catch((error) => console.error(JSON.stringify({ mensaje: 'relleno de imágenes fallido', error: String(error).slice(0, 200) }))));
     // Piezas que se quedaron en `pendiente` y fotos/recortes de R2 sin pieza (#481).
