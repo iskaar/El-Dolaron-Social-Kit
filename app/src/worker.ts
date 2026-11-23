@@ -37,6 +37,7 @@ import { verFotoReportada } from './pagos-reportados.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
 import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe, CajaAjena, CLAVE_TOPE_RETIRO } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
+import { rutaDinero } from './dinero.ts';
 import { sentenciasMover, esExistenciaInsuficiente, piezasSinExistencia, fueraDeSoledad, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD, sucursales, enCaminoSql, enTiendaSql, existenciaTotalSql, folioEnCaminoSql } from './existencias.ts';
 import { rutaBultos } from './bultos.ts';
 import { rutaPiezas, buscarPiezas, escribirExistencia, autorizarPrecio } from './piezas.ts';
@@ -3021,6 +3022,7 @@ export default {
       if (pathname === '/api/gastos' || pathname.startsWith('/api/gastos/')) {
         return await rutaGastos(request, env, url, correo, tienda);
       }
+      if (pathname === '/api/dinero' || pathname.startsWith('/api/dinero/')) return await rutaDinero(request, env, url, correo);   // solo gerencia (cuentas.ts)
       if (pathname === '/api/nomina' || pathname.startsWith('/api/nomina/')) {
         return await rutaNomina(request, env, url, correo, tienda);
       }
