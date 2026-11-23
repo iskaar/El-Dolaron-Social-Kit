@@ -1635,9 +1635,10 @@ export async function rellenarPrecios(env: Env): Promise<number> {
 /* ---------- visitas (#637) ---------- */
 
 // Solo lee de ML: guarda las visitas de los ultimos 7 dias de cada publicacion, una vez al dia, para fijar reglas de precio con datos.
+// ML rechazaba `/items/visits?date_from=...` (400 «unknown date format», #901): se lee la ventana de tiempo, que no lleva fechas.
 const DIAS_VISITAS = 7;
-const LOTE_VISITAS = 20;          // ids por llamada
-const LLAMADAS_VISITAS = 10;      // tope por corrida del cron (lotes y reintentos de uno en uno); lo que no alcanza sigue en la siguiente
+const LLAMADAS_VISITAS = 20;      // tope por corrida del cron (una publicacion por llamada): ~95 publicaciones terminan en 5 corridas (~1 h) con ~1,3 llamadas/min, muy lejos de cualquier limite de ML
+const REINTENTO_VISITAS_MS = 3_600_000;   // una publicacion sin lectura buena hoy se reintenta como pronto 1 h despues de su ultimo intento
 
 /** Las etiquetas (`tags`) de una publicacion como arreglo; vacio si no hay o no se leen. */
 const tagsDe = (texto: unknown): string[] => {
@@ -1645,38 +1646,27 @@ const tagsDe = (texto: unknown): string[] => {
 };
 
 /**
- * Visitas por articulo en la respuesta de `/items/visits`. La doc de ML se contradice (un id o varios) y no
- * mostro la forma de varios, asi que se acepta lo plausible: un objeto `{item_id, total_visits}`, un arreglo de
- * ellos, o un mapa `{MLM1: 3}` / `{MLM1: {total_visits}}`. Lo que no se reconoce no aparece (nunca se inventa un 0).
+ * Visitas de una publicacion en la respuesta de `/items/{id}/visits/time_window?last=${DIAS_VISITAS}&unit=day`: `{item_id, total_visits, results: [...]}`.
+ * Contrato NO CONFIRMADO con la doc oficial de ML (no se pudo leer, 403). Lo que no se reconoce devuelve null (nunca se inventa un 0);
+ * si trae `item_id` y no es el pedido, tambien.
  */
-export function parsearVisitas(cuerpo: unknown, ids: string[]): Map<string, number> {
-  const salida = new Map<string, number>();
-  const total = (x: any) => Number.isInteger(x?.total_visits) && x.total_visits >= 0 ? (x.total_visits as number) : null;
-  const filas = Array.isArray(cuerpo) ? cuerpo : [cuerpo];
-  for (const fila of filas as any[]) {
-    const id = String(fila?.item_id ?? fila?.id ?? (ids.length === 1 && filas.length === 1 ? ids[0] : ''));
-    const n = total(fila);
-    if (ids.includes(id) && n !== null) salida.set(id, n);
-  }
-  if (cuerpo && typeof cuerpo === 'object' && !Array.isArray(cuerpo)) {
-    for (const id of ids) {
-      const v = (cuerpo as any)[id];
-      const n = Number.isInteger(v) && v >= 0 ? (v as number) : total(v);
-      if (n !== null) salida.set(id, n);
-    }
-  }
-  return salida;
+export function parsearVisitas(cuerpo: unknown, id: string): number | null {
+  const c = cuerpo as { item_id?: unknown; total_visits?: unknown } | null;
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return null;
+  if (c.item_id !== undefined && String(c.item_id) !== id) return null;
+  return Number.isInteger(c.total_visits) && (c.total_visits as number) >= 0 ? (c.total_visits as number) : null;
 }
 
 const llavesDe = (cuerpo: unknown) => cuerpo && typeof cuerpo === 'object' ? Object.keys(cuerpo).slice(0, 12) : typeof cuerpo;
 
 /**
- * Cron (dentro de `sincronizar`): una lectura por publicacion y dia de tienda. `visitas_intento_en` es la guardia
- * (se marca con cada intento, bueno o malo, para que una publicacion que ML no contesta no se repita cada 15 min
- * ni tape a las demas); `visitas_7d` y `visitas_actualizado_en` solo cambian con una lectura buena. Un fallo de una
- * publicacion o un lote no toca las demas ni lo ya guardado y deja una linea `console.warn` con el status y las
- * llaves de la respuesta, porque la forma real de ML no se pudo probar fuera de produccion. 429, 5xx o un fallo de
- * red detienen la corrida sin marcar nada: se reintenta en la siguiente. Nunca lanza. Devuelve cuantas se guardaron.
+ * Cron (dentro de `sincronizar`): una lectura buena por publicacion y dia de tienda. Se piden (una por llamada) las publicaciones
+ * sin lectura buena hoy cuyo ultimo intento tiene mas de 1 h, las de intento mas viejo primero: asi una que ML no contesta se
+ * reintenta cada hora como maximo y, al quedar al final de la fila, no tapa a las demas (ni se repite cada 15 min). Las marcadas
+ * como intentadas hoy sin lectura (el 400 de fechas, #901) se retoman en cuanto se despliega. `visitas_7d` y `visitas_actualizado_en`
+ * solo cambian con una lectura buena. Un fallo de una publicacion no toca las demas ni lo ya guardado y deja su fila en
+ * `config.ml_visitas_ultimo_aviso` (#895). 429, 5xx o un fallo de red detienen la corrida sin marcar nada: se reintenta en la
+ * siguiente. Nunca lanza. Devuelve cuantas se guardaron.
  */
 export async function actualizarVisitas(env: Env, ahora = Date.now()): Promise<number> {
   // Además del log (que los agentes no pueden leer), deja la última anomalía en `config` (#895): una sola fila, sin cabeceras ni URL.
@@ -1685,52 +1675,38 @@ export async function actualizarVisitas(env: Env, ahora = Date.now()): Promise<n
     console.warn(JSON.stringify({ mensaje: `visitas ML: ${mensaje}`, ...datos }));
     try {
       await env.DB.prepare("insert into config (clave, valor) values ('ml_visitas_ultimo_aviso', ?) on conflict (clave) do update set valor = excluded.valor")
-        .bind(JSON.stringify({ en: new Date().toISOString(), mensaje, status: datos.status ?? null, ids: datos.ids ?? null, leidas: datos.leidas ?? null,
+        .bind(JSON.stringify({ en: new Date().toISOString(), mensaje, status: datos.status ?? null, id: datos.id ?? null,
           llaves: datos.llaves ?? null, cuerpo: texto?.slice(0, 300) ?? null })).run();
     } catch (error) { console.error(JSON.stringify({ mensaje: 'visitas ML: no se pudo guardar el último aviso', error: String(error).slice(0, 200) })); }
   };
   try {
-    const hoy = hoyTienda(ahora);
-    const desde = new Date(Date.parse(`${hoy}T00:00:00Z`) - DIAS_VISITAS * 86_400_000).toISOString().slice(0, 10);
     // ponytail: la tienda vive en UTC-6 todo el año (como hoyTienda); si cambiara el huso, ajustar aqui tambien.
-    const rango = `date_from=${encodeURIComponent(`${desde}T00:00:00.000-06:00`)}&date_to=${encodeURIComponent(`${hoy}T00:00:00.000-06:00`)}`;
+    const inicioHoy = `${hoyTienda(ahora)}T06:00:00.000Z`;
     const { results } = await env.DB.prepare(
       `select ml_item_id from ml_publicaciones
-       where ml_item_id is not null and estado in ('activa', 'pausada', 'pausada_por_venta') and visitas_intento_en < ?
+       where ml_item_id is not null and estado in ('activa', 'pausada', 'pausada_por_venta')
+         and (visitas_actualizado_en is null or visitas_actualizado_en < ?) and visitas_intento_en < ?
        order by visitas_intento_en, ml_item_id limit ?`,
-    ).bind(`${hoy}T06:00:00.000Z`, LOTE_VISITAS * LLAMADAS_VISITAS).all<{ ml_item_id: string }>();
-    const cola: string[][] = [];
-    for (let i = 0; i < results.length; i += LOTE_VISITAS) cola.push(results.slice(i, i + LOTE_VISITAS).map((r) => r.ml_item_id));
+    ).bind(inicioHoy, new Date(ahora - REINTENTO_VISITAS_MS).toISOString(), LLAMADAS_VISITAS).all<{ ml_item_id: string }>();
 
     const marca = new Date(ahora).toISOString();
-    const marcar = (ids: string[], visitas: Map<string, number>) => env.DB.batch(ids.map((id) => visitas.has(id)
-      ? env.DB.prepare('update ml_publicaciones set visitas_7d = ?, visitas_actualizado_en = ?, visitas_intento_en = ? where ml_item_id = ?')
-        .bind(visitas.get(id), marca, marca, id)
-      : env.DB.prepare('update ml_publicaciones set visitas_intento_en = ? where ml_item_id = ?').bind(marca, id)));
-
     let guardadas = 0;
-    for (let llamadas = 0; cola.length && llamadas < LLAMADAS_VISITAS; llamadas++) {
-      const lote = cola.shift()!;
+    for (const { ml_item_id: id } of results) {
       let respuesta: Response;
-      try { respuesta = await mlCrudo(env, `/items/visits?ids=${lote.join(',')}&${rango}`); }
+      try { respuesta = await mlCrudo(env, `/items/${encodeURIComponent(id)}/visits/time_window?last=${DIAS_VISITAS}&unit=day`); }
       catch (error) { await avisar('sin conexión con ML, se detiene la corrida', { error: String(error).slice(0, 200) }); break; }
       const texto = await respuesta.text();
       let cuerpo: unknown = null;
       try { cuerpo = texto ? JSON.parse(texto) : null; } catch { /* no era JSON */ }
-      if (respuesta.status === 429 || respuesta.status >= 500) { await avisar('ML pide esperar, se detiene la corrida', { status: respuesta.status, ids: lote.length, llaves: llavesDe(cuerpo) }, texto); break; }
-      if (respuesta.status === 400 && lote.length > 1) {
-        // La doc de ML dice «maximo 1 id» en un lugar y varios en otro: si el lote se rechaza, se pide de uno en uno.
-        await avisar('lote rechazado, se reintenta de uno en uno', { status: 400, ids: lote.length, llaves: llavesDe(cuerpo) }, texto);
-        cola.unshift(...lote.map((id) => [id]));
-        continue;
+      if (respuesta.status === 429 || respuesta.status >= 500) { await avisar('ML pide esperar, se detiene la corrida', { status: respuesta.status, id, llaves: llavesDe(cuerpo) }, texto); break; }
+      const visitas = respuesta.ok ? parsearVisitas(cuerpo, id) : null;
+      if (visitas === null) {
+        await avisar(respuesta.ok ? 'respuesta no reconocida' : 'ML rechazó la consulta', { status: respuesta.status, id, llaves: llavesDe(cuerpo) }, texto);
+        await env.DB.prepare('update ml_publicaciones set visitas_intento_en = ? where ml_item_id = ?').bind(marca, id).run();
+      } else {
+        await env.DB.prepare('update ml_publicaciones set visitas_7d = ?, visitas_actualizado_en = ?, visitas_intento_en = ? where ml_item_id = ?').bind(visitas, marca, marca, id).run();
+        guardadas++;
       }
-      const visitas = respuesta.ok ? parsearVisitas(cuerpo, lote) : new Map<string, number>();
-      if (!respuesta.ok || visitas.size < lote.length) {
-        await avisar(respuesta.ok ? 'respuesta no reconocida o incompleta' : 'ML rechazó la consulta',
-          { status: respuesta.status, ids: lote.length, leidas: visitas.size, llaves: llavesDe(cuerpo), ...(lote.length === 1 ? { id: lote[0] } : {}) }, texto);
-      }
-      await marcar(lote, visitas);
-      guardadas += visitas.size;
     }
     return guardadas;
   } catch (error) {
