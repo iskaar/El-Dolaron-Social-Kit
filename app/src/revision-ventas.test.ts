@@ -63,7 +63,7 @@ test('sincronizar deja encolada la venta si la respuesta no es del servidor o la
         put: (x: any) => cola.set(x.id, x),
       }),
       fetch: async () => respuesta, $: () => ({ textContent: '' }), dolares: String, AbortSignal,
-      pintarResultadosVales() {}, pendientes() {}, pintarRechazadas() {}, actualizarCorte() {},
+      pendientes() {}, pintarRechazadas() {}, actualizarCorte() {},
     });
     await sincronizar();
     return cola.get(v.id);

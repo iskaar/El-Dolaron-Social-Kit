@@ -274,7 +274,7 @@ test('sincronizar reenvía el destino remoto y elimina la venta sólo después d
         return { status:r.status, json:async () => r.cuerpo };
       },
       $:() => ({ textContent:'' }), dolares:String, AbortSignal,
-      pintarResultadosVales() {}, pendientes() {}, pintarRechazadas() {}, actualizarCorte() {},
+      pendientes() {}, pintarRechazadas() {}, actualizarCorte() {},
     });
     await sincronizar();
     assert.equal(cola.size, 0);

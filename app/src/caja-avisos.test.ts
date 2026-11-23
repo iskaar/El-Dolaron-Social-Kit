@@ -1019,8 +1019,32 @@ test('#817 «Ventas de hoy» abierta se refresca tras cobrar y sincronizar (actu
   let corteActualizado = 0;
   const sincronizar = runInNewContext(`${entre('let sincronizando = false;', 'async function pendientes()')}; sincronizar`, {
     store: async () => [], fetch: async () => { throw new Error('sin red'); }, AbortSignal, $: () => ({ textContent: '' }), dolares: String,
-    pintarResultadosVales() {}, pendientes() {}, pintarRechazadas() {}, actualizarCorte: () => { corteActualizado++; },
+    pendientes() {}, pintarRechazadas() {}, actualizarCorte: () => { corteActualizado++; },
   });
   await sincronizar();
   assert.equal(corteActualizado, 1);
+});
+
+test('#915 sincronizar una venta con vale o con socio no guarda ni pinta tarjetas; #aviso conserva su texto', async () => {
+  const ventas = [
+    { id: 'v-socio', recompensa_pendiente: true, respuesta: { id: 'v-socio', ganados: 1500 }, aviso: 'Venta v-socio sincronizada. Dolarones ganados: 1500.' },
+    { id: 'v-vale', vale_pendiente: true, respuesta: { id: 'v-vale', vale_emitido: { importe: 500 } }, aviso: 'Venta v-vale sincronizada. El vale fue emitido; imprímelo con el folio del ticket.' },
+  ];
+  for (const v of ventas) {
+    const escritos: string[] = [];
+    const aviso = { textContent: '' };
+    const sincronizar = runInNewContext(`${entre('let sincronizando = false;', 'async function pendientes()')}; sincronizar`, {
+      store: async (almacen: string, modo: string, fn: any) => {
+        if (modo === 'readwrite') escritos.push(almacen);
+        return fn({ getAll: () => almacen === 'ventas' ? [v] : [], delete() {}, put() {} });
+      },
+      fetch: async () => ({ ok: true, status: 201, json: async () => v.respuesta }),
+      AbortSignal, JSON, Object, $: (id: string) => id === 'aviso' ? aviso : { textContent: '' }, dolares: String,
+      pendientes() {}, pintarRechazadas() {}, actualizarCorte() {},
+    });
+    await sincronizar();
+    assert.equal(escritos.includes('vales_resultados'), false, `${v.id}: no se guarda tarjeta`);
+    assert.equal(aviso.textContent, v.aviso);
+  }
+  assert.equal(/vales-conciliados|pintarResultadosVales/.test(fuente), false, 'la caja ya no tiene el contenedor ni el pintado de tarjetas');
 });
