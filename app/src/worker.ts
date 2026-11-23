@@ -2271,15 +2271,15 @@ const COLUMNAS_TICKET = `v.id, v.total, v.forma_pago, v.cancelada, v.creado_en, 
             (select coalesce(sum(cancelada_cantidad), 0) from venta_lineas where venta_id = v.id) as cancelada_cantidad`;
 
 /** Tickets de un dia (hoy si no se dice): la caja cancela el que se cobro mal; reportes solo los ve. */
-async function ventasDelDia(url: URL, env: Env): Promise<Response> {
+async function ventasDelDia(url: URL, env: Env, tienda: string): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? hoyTienda();
   if (!DIA.test(dia)) return json({ error: 'Dia invalido.' }, 400);
   const { results } = await env.DB.prepare(
     `select ${COLUMNAS_TICKET}
-     from ventas v where v.creado_en >= ? and v.creado_en < ?
+     from ventas v where v.creado_en >= ? and v.creado_en < ? and v.tienda = ?
      order by v.creado_en desc limit 300`,
   )
-    .bind(...delDia(dia))
+    .bind(...delDia(dia), tienda)
     .all();
   return json(results);
 }
@@ -2292,8 +2292,10 @@ const DEVOLUCION_MAX = 30;
  * Buscar la venta de una devolucion (#764): por la pieza escaneada (etiqueta ED-… o numero suelto, como
  * en la caja; o su UPC con o sin ceros, como buscarPiezas), por palabras del nombre o por el inicio del
  * folio. Misma forma de renglon que `ventasDelDia` mas `lineas`: los ids de las lineas que coinciden.
+ * #912: por pieza o nombre solo la tienda de la sesion; por folio (lo que trae impreso el cliente) cualquier tienda,
+ * porque se devuelve en una tienda lo comprado en otra (R3 de #793).
  */
-async function buscarVentas(url: URL, env: Env): Promise<Response> {
+async function buscarVentas(url: URL, env: Env, tienda: string): Promise<Response> {
   const q = (url.searchParams.get('buscar') ?? '').trim();
   if (q.length < 3 || q.length > 80) return json({ error: 'Escribe al menos 3 caracteres (máximo 80).' }, 400);
   const ed = /^ed-?(\d{1,10})$/i.exec(q);
@@ -2314,10 +2316,10 @@ async function buscarVentas(url: URL, env: Env): Promise<Response> {
     `select ${COLUMNAS_TICKET},
             (select group_concat(l.id) from venta_lineas l where l.venta_id = v.id and ${cond}) as lineas
      from ventas v where v.creado_en >= ?
-       and (${folio ? 'v.id like ? or ' : ''}exists (select 1 from venta_lineas l where l.venta_id = v.id and ${cond}))
+       and (${folio ? 'v.id like ? or ' : ''}(v.tienda = ? and exists (select 1 from venta_lineas l where l.venta_id = v.id and ${cond})))
      order by v.creado_en desc, v.id desc limit ?`,
   )
-    .bind(...datos, desde, ...(folio ? [folio] : []), ...datos, DEVOLUCION_MAX)
+    .bind(...datos, desde, ...(folio ? [folio] : []), tienda, ...datos, DEVOLUCION_MAX)
     .all();
   return json(results);
 }
@@ -2343,7 +2345,7 @@ async function registrarAperturaCajon(request: Request, env: Env, correo: string
 }
 
 /** Corte del dia: lo que hay que cuadrar contra el efectivo en la caja. */
-async function corte(url: URL, env: Env): Promise<Response> {
+async function corte(url: URL, env: Env, tienda: string): Promise<Response> {
   const dia = url.searchParams.get('dia') ?? hoyTienda();
   if (!DIA.test(dia)) return json({ error: 'Dia invalido.' }, 400);
   const rango = delDia(dia);
@@ -2353,23 +2355,25 @@ async function corte(url: URL, env: Env): Promise<Response> {
        -- Lo devuelto en cupón (Issue #330) se quedó en el cajón.
        select forma_pago, count(*) as tickets, sum(total - dolarones - anticipo - devuelto + devuelto_cupon) as total,
               sum(dolarones - dolarones_devueltos) as dolarones
-       from ventas where creado_en >= ? and creado_en < ? and cancelada = 0 group by forma_pago
+       from ventas where creado_en >= ? and creado_en < ? and cancelada = 0 and tienda = ? group by forma_pago
        union all
+       -- ponytail: pedidos y pedido_movimientos no guardan la tienda donde entro el dinero (solo caja; recoge_en es donde se recoge):
+       -- siguen sumando todas. La caja solo pinta tickets y piezas (actualizarCorte), no estos importes (#912).
        select forma_pago, 0, sum(anticipo), 0 from pedidos where creado_en >= ? and creado_en < ? group by forma_pago
        union all
        select forma_pago, 0, sum(importe), 0 from pedido_movimientos
        where tipo = 'abono' and creado_en >= ? and creado_en < ? group by forma_pago
      ) group by forma_pago`,
   )
-    .bind(...rango, ...rango, ...rango)
+    .bind(...rango, tienda, ...rango, ...rango)
     .all<{ forma_pago: string; tickets: number; total: number; dolarones: number }>();
 
   const piezas = await env.DB.prepare(
     `select coalesce(sum(l.cantidad - l.cancelada_cantidad), 0) as piezas from venta_lineas l
      join ventas v on v.id = l.venta_id
-     where v.creado_en >= ? and v.creado_en < ? and v.cancelada = 0`,
+     where v.creado_en >= ? and v.creado_en < ? and v.cancelada = 0 and v.tienda = ?`,
   )
-    .bind(...rango)
+    .bind(...rango, tienda)
     .first<{ piezas: number }>();
 
   return json({
@@ -2969,8 +2973,8 @@ export default {
         if (request.method === 'POST') {
           return await registrarVenta(request, env, ctx, correo, tienda);
         }
-        if (url.searchParams.has('buscar')) return await buscarVentas(url, env);
-        return url.searchParams.get('lista') ? await ventasDelDia(url, env) : await corte(url, env);
+        if (url.searchParams.has('buscar')) return await buscarVentas(url, env, tienda);
+        return url.searchParams.get('lista') ? await ventasDelDia(url, env, tienda) : await corte(url, env, tienda);
       }
 
       if (pathname === '/api/impresiones' && request.method === 'GET') return await listarImpresiones(url, env, correo, tienda);
