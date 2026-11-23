@@ -13,6 +13,14 @@ const fotos = (t: ReturnType<typeof tienda>) => t.env.FOTOS as any;
 const llaves = (t: ReturnType<typeof tienda>) => [...fotos(t).objetos.keys()].filter((k: string) => !k.startsWith('fotos/')).sort();
 const fila = (t: ReturnType<typeof tienda>, id = uuid(0)) => t.db.prepare('select * from productos where id=?').get(id) as Record<string, any>;
 const revision = (t: ReturnType<typeof tienda>, id = uuid(0)) => JSON.parse(fila(t, id).portada_revision);
+const MODELO = MODELO_IMAGEN;
+/** La revisión completa, con los milisegundos (que varían) comprobados como números y puestos en 0 para poder comparar todo el objeto. */
+function exacta(t: ReturnType<typeof tienda>, id = uuid(0)) {
+  const r = revision(t, id);
+  for (const campo of ['ms_generar', 'ms_comprobar']) { assert.ok(Number.isInteger(r[campo]) && r[campo] >= 0, `${campo}: ${r[campo]}`); r[campo] = 0; }
+  return r;
+}
+const T1 = { entrada: 1300, salida: 1120 };   // los tokens de una generación en `dependencias`
 
 test('migración 087: portada_estado existe y rechaza un valor fuera del check', () => {
   const t = tienda();
@@ -152,7 +160,7 @@ test('portadas: con aprobación (config ausente) un veredicto ok queda en revisa
     await procesarPortadas(t.env, deps);
     const f = fila(t);
     assert.equal(f.portada_estado, 'revisar');
-    assert.deepEqual(revision(t), { ok: true, problemas: [], intentos: 1 });
+    assert.deepEqual(exacta(t), { ok: true, problemas: [], intentos: 1, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
     assert.deepEqual(llaves(t), [`portadas/${uuid(0)}.jpg`]);
     for (const c of ['foto_key', 'precio', 'stock', 'estado_analisis', 'nombre', 'marca']) assert.equal(f[c], antes[c], c);
     const registro = JSON.parse(logs.find((l) => l.includes('portada generada'))!);
@@ -169,6 +177,7 @@ test('portadas: con portadas_aprobacion en 0 un veredicto ok queda lista, ia, en
     assert.deepEqual([fila(t).portada_estado, fila(t).portada_origen], ['lista', 'ia']);
     assert.deepEqual(llaves(t), [`extras/${uuid(0)}/01.jpg`]);
     assert.deepEqual([...new Uint8Array(fotos(t).objetos.get(`extras/${uuid(0)}/01.jpg`))], [7, 7]);
+    assert.deepEqual(exacta(t), { ok: true, problemas: [], intentos: 1, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
   } finally { t.db.close(); }
 });
 
@@ -186,14 +195,14 @@ test('portadas: un veredicto no ok reintenta con los problemas; el segundo ok si
   try {
     await procesarPortadas(t.env, d.deps);
     assert.deepEqual(d.llamadas.generar, [[], ['cambió el logo']]);
-    assert.deepEqual(revision(t), { ok: true, problemas: [], intentos: 2 });
+    assert.deepEqual(exacta(t), { ok: true, problemas: [], intentos: 2, tokens: { entrada: 2600, salida: 2240 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
     assert.equal(fila(t).portada_estado, 'revisar');
   } finally { t.db.close(); }
   t = await preparar(1); d = dependencias([malo, { ...malo, problemas: ['texto distinto'] }]);
   try {
     await procesarPortadas(t.env, d.deps);
     assert.equal(d.llamadas.generar.length, 2);
-    assert.deepEqual(revision(t), { ok: false, problemas: ['texto distinto'], intentos: 2 });
+    assert.deepEqual(exacta(t), { ok: false, problemas: ['texto distinto'], intentos: 2, tokens: { entrada: 2600, salida: 2240 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
     assert.equal(fila(t).portada_estado, 'revisar');
     assert.deepEqual(llaves(t), [`portadas/${uuid(0)}.jpg`]);
   } finally { t.db.close(); }
@@ -205,7 +214,7 @@ test('portadas: foto_mala pasa a retomar con un solo intento y no deja restos', 
     await procesarPortadas(t.env, deps);
     assert.equal(llamadas.generar.length, 1);
     assert.equal(fila(t).portada_estado, 'retomar');
-    assert.deepEqual(revision(t).problemas, ['etiqueta de precio sobre el producto']);
+    assert.deepEqual(exacta(t), { ok: false, problemas: ['etiqueta de precio sobre el producto'], intentos: 1, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
     assert.deepEqual(llaves(t), []);
   } finally { t.db.close(); }
 });
@@ -235,7 +244,7 @@ test('portadas: el tope también corta el reintento y la pieza queda en revisar 
   try {
     await procesarPortadas(t.env, d.deps);
     assert.equal(d.llamadas.generar.length, 1);
-    assert.deepEqual(revision(t), { ok: false, problemas: ['forma distinta'], intentos: 1 });
+    assert.deepEqual(exacta(t), { ok: false, problemas: ['forma distinta'], intentos: 1, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
   } finally { t.db.close(); }
 });
 
@@ -272,6 +281,8 @@ test('portadas: si IMAGES falla con 9422 después de generar, lo pagado queda en
     assert.equal(fila(t).portada_estado, 'revisar');
     assert.deepEqual(llaves(t), [`portadas/${uuid(0)}.jpg`]);
     assert.equal(t.db.prepare('select valor from config where clave=?').get(`portadas_generadas_${hoyTienda()}`)?.valor, '1');
+    // Retomó la imagen ya pagada: esta corrida no generó, así que no se anota costo ni tiempo de generar (#895).
+    assert.deepEqual(exacta(t), { ok: true, problemas: [], intentos: 1, tokens: { entrada: 0, salida: 0 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
   } finally { t.db.close(); }
 });
 
@@ -290,7 +301,18 @@ test('portadas: el modelo sin imagen deja la pieza en error con el motivo', asyn
     await procesarPortadas(t.env, d.deps);
     assert.equal(fila(t).portada_estado, 'error');
     assert.match(revision(t).problemas[0], /sin imagen/);
+    assert.deepEqual({ ...revision(t), problemas: [] }, { ok: false, problemas: [], intentos: 0, tokens: { entrada: 0, salida: 0 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
     assert.deepEqual(llaves(t), []);
+  } finally { t.db.close(); }
+});
+
+test('portadas: si comprobar falla con un 4xx después de generar, el error conserva lo gastado', async () => {
+  const t = await preparar(1);
+  const d = dependencias(); d.deps.comprobar = async () => { throw new Error('Gemini 400: imagen inválida'); };
+  try {
+    await procesarPortadas(t.env, d.deps);
+    assert.equal(fila(t).portada_estado, 'error');
+    assert.deepEqual({ ...exacta(t), problemas: [] }, { ok: false, problemas: [], intentos: 0, tokens: T1, ms_generar: 0, ms_comprobar: 0, modelo: MODELO });
   } finally { t.db.close(); }
 });
 
