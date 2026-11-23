@@ -1679,7 +1679,16 @@ const llavesDe = (cuerpo: unknown) => cuerpo && typeof cuerpo === 'object' ? Obj
  * red detienen la corrida sin marcar nada: se reintenta en la siguiente. Nunca lanza. Devuelve cuantas se guardaron.
  */
 export async function actualizarVisitas(env: Env, ahora = Date.now()): Promise<number> {
-  const avisar = (mensaje: string, datos: Record<string, unknown>) => console.warn(JSON.stringify({ mensaje: `visitas ML: ${mensaje}`, ...datos }));
+  // Además del log (que los agentes no pueden leer), deja la última anomalía en `config` (#895): una sola fila, sin cabeceras ni URL.
+  // Escribirla nunca lanza ni detiene la corrida.
+  const avisar = async (mensaje: string, datos: Record<string, unknown>, texto?: string) => {
+    console.warn(JSON.stringify({ mensaje: `visitas ML: ${mensaje}`, ...datos }));
+    try {
+      await env.DB.prepare("insert into config (clave, valor) values ('ml_visitas_ultimo_aviso', ?) on conflict (clave) do update set valor = excluded.valor")
+        .bind(JSON.stringify({ en: new Date().toISOString(), mensaje, status: datos.status ?? null, ids: datos.ids ?? null, leidas: datos.leidas ?? null,
+          llaves: datos.llaves ?? null, cuerpo: texto?.slice(0, 300) ?? null })).run();
+    } catch (error) { console.error(JSON.stringify({ mensaje: 'visitas ML: no se pudo guardar el último aviso', error: String(error).slice(0, 200) })); }
+  };
   try {
     const hoy = hoyTienda(ahora);
     const desde = new Date(Date.parse(`${hoy}T00:00:00Z`) - DIAS_VISITAS * 86_400_000).toISOString().slice(0, 10);
@@ -1704,21 +1713,21 @@ export async function actualizarVisitas(env: Env, ahora = Date.now()): Promise<n
       const lote = cola.shift()!;
       let respuesta: Response;
       try { respuesta = await mlCrudo(env, `/items/visits?ids=${lote.join(',')}&${rango}`); }
-      catch (error) { avisar('sin conexión con ML, se detiene la corrida', { error: String(error).slice(0, 200) }); break; }
+      catch (error) { await avisar('sin conexión con ML, se detiene la corrida', { error: String(error).slice(0, 200) }); break; }
       const texto = await respuesta.text();
       let cuerpo: unknown = null;
       try { cuerpo = texto ? JSON.parse(texto) : null; } catch { /* no era JSON */ }
-      if (respuesta.status === 429 || respuesta.status >= 500) { avisar('ML pide esperar, se detiene la corrida', { status: respuesta.status, llaves: llavesDe(cuerpo) }); break; }
+      if (respuesta.status === 429 || respuesta.status >= 500) { await avisar('ML pide esperar, se detiene la corrida', { status: respuesta.status, ids: lote.length, llaves: llavesDe(cuerpo) }, texto); break; }
       if (respuesta.status === 400 && lote.length > 1) {
         // La doc de ML dice «maximo 1 id» en un lugar y varios en otro: si el lote se rechaza, se pide de uno en uno.
-        avisar('lote rechazado, se reintenta de uno en uno', { status: 400, ids: lote.length, llaves: llavesDe(cuerpo) });
+        await avisar('lote rechazado, se reintenta de uno en uno', { status: 400, ids: lote.length, llaves: llavesDe(cuerpo) }, texto);
         cola.unshift(...lote.map((id) => [id]));
         continue;
       }
       const visitas = respuesta.ok ? parsearVisitas(cuerpo, lote) : new Map<string, number>();
       if (!respuesta.ok || visitas.size < lote.length) {
-        avisar(respuesta.ok ? 'respuesta no reconocida o incompleta' : 'ML rechazó la consulta',
-          { status: respuesta.status, ids: lote.length, leidas: visitas.size, llaves: llavesDe(cuerpo), ...(lote.length === 1 ? { id: lote[0] } : {}) });
+        await avisar(respuesta.ok ? 'respuesta no reconocida o incompleta' : 'ML rechazó la consulta',
+          { status: respuesta.status, ids: lote.length, leidas: visitas.size, llaves: llavesDe(cuerpo), ...(lote.length === 1 ? { id: lote[0] } : {}) }, texto);
       }
       await marcar(lote, visitas);
       guardadas += visitas.size;
