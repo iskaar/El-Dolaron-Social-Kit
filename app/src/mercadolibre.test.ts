@@ -46,8 +46,8 @@ class SimML {
   ordenes = new Map<string, unknown>();
   /** Lo que contesta GET /orders/{id} si difiere de lo que trae la busqueda (#621). */
   detalle = new Map<string, unknown>();
-  /** #637: lo que contesta GET /items/visits segun los ids pedidos; null = ML no lo contesta (404). */
-  visitas: ((ids: string[], consulta: URLSearchParams) => { status?: number; cuerpo: unknown }) | null = null;
+  /** #637/#901: lo que contesta GET /items/{id}/visits/time_window segun el id pedido; null = ML no lo contesta (404). */
+  visitas: ((id: string, consulta: URLSearchParams) => { status?: number; cuerpo: unknown }) | null = null;
   /** Costos de envio por shipment (GET /shipments/{id}/costs); `fallarEnvios` los hace responder 500; `fallarOrdenes` hace lo mismo con GET /orders/{id}. */
   envios = new Map<string, unknown>();
   fallarEnvios = false;
@@ -139,10 +139,8 @@ class SimML {
       const ids = new URL(`https://x${ruta}`).searchParams.get('ids')!.split(',');
       return { cuerpo: ids.map((id) => this.items.has(id) ? { code: 200, body: this.items.get(id) } : { code: 404, body: {} }) };
     }
-    if (metodo === 'GET' && ruta.startsWith('/items/visits?') && this.visitas) {
-      const consulta = new URL(`https://x${ruta}`).searchParams;
-      return this.visitas(consulta.get('ids')!.split(','), consulta);
-    }
+    const visitas = /^\/items\/([^/]+)\/visits\/time_window\?/.exec(ruta);
+    if (metodo === 'GET' && visitas && this.visitas) return this.visitas(visitas[1], new URL(`https://x${ruta}`).searchParams);
     if (metodo === 'GET' && ruta.startsWith('/orders/search')) return { cuerpo: { results: [...this.ordenes.values()] } };
     const envio = /^\/shipments\/([^/]+)\/costs$/.exec(ruta);
     if (metodo === 'GET' && envio) {
@@ -1973,21 +1971,23 @@ test('#733: el cron de conciliación no reactiva una pieza D (pausada por venta 
   });
 });
 
-/* ---------- visitas por publicacion (#637) ---------- */
+/* ---------- visitas por publicacion (#637, #901) ---------- */
 
-test('visitas: se lee un objeto, un arreglo o un mapa por id; lo que no se reconoce no aparece', () => {
-  assert.deepEqual([...parsearVisitas({ item_id: 'MLM1', total_visits: 7, results: [] }, ['MLM1'])], [['MLM1', 7]]);
-  assert.deepEqual([...parsearVisitas({ total_visits: 3 }, ['MLM1'])], [['MLM1', 3]]);          // un solo id: sin item_id
-  assert.deepEqual([...parsearVisitas({ total_visits: 3 }, ['MLM1', 'MLM2'])], []);             // varios sin id: no se adivina
-  assert.deepEqual([...parsearVisitas([{ item_id: 'MLM1', total_visits: 0 }, { item_id: 'MLM2', total_visits: 4 }, { item_id: 'MLM9', total_visits: 8 }], ['MLM1', 'MLM2'])], [['MLM1', 0], ['MLM2', 4]]);
-  assert.deepEqual([...parsearVisitas({ MLM1: 5, MLM2: { total_visits: 1 } }, ['MLM1', 'MLM2'])], [['MLM1', 5], ['MLM2', 1]]);
-  for (const raro of [null, 'x', 5, [], {}, { item_id: 'MLM1', total_visits: -1 }, { item_id: 'MLM1', total_visits: '7' }, { message: 'no', status: 400 }]) {
-    assert.equal(parsearVisitas(raro, ['MLM1']).size, 0, JSON.stringify(raro));
+test('visitas: total_visits de la ventana de tiempo; lo que no se reconoce no se lee', () => {
+  assert.equal(parsearVisitas({ item_id: 'MLM1', total_visits: 7, last: 7, unit: 'day', results: [] }, 'MLM1'), 7);
+  assert.equal(parsearVisitas({ total_visits: 3 }, 'MLM1'), 3);          // sin item_id: es la del id pedido
+  assert.equal(parsearVisitas({ item_id: 'MLM1', total_visits: 0 }, 'MLM1'), 0);
+  assert.equal(parsearVisitas({ item_id: 'MLM9', total_visits: 8 }, 'MLM1'), null);   // de otra publicacion: no se adivina
+  for (const raro of [null, 'x', 5, [], {}, [{ item_id: 'MLM1', total_visits: 4 }], { MLM1: 5 }, { item_id: 'MLM1', total_visits: -1 }, { item_id: 'MLM1', total_visits: '7' },
+    { item_id: 'MLM1', total_visits: 1.5 }, { message: 'no', status: 400 }]) {
+    assert.equal(parsearVisitas(raro, 'MLM1'), null, JSON.stringify(raro));
   }
 });
 
 const AHORA = Date.parse('2026-11-23T15:00:00Z');   // 09:00 del 23/11 en la tienda
 const DIA = 86_400_000;
+const HORA = 3_600_000;
+const CRON = 15 * 60_000;
 /** n publicaciones con ids MLM-V1..MLM-Vn. */
 const publicadas = (t: Tienda, n: number, estado = 'activa', desde = 1) => Array.from({ length: n }, (_, i) => {
   const id = pieza(t);
@@ -1996,7 +1996,7 @@ const publicadas = (t: Tienda, n: number, estado = 'activa', desde = 1) => Array
 });
 const vistas = (t: Tienda) => t.db.prepare(`select ml_item_id i, visitas_7d v, visitas_actualizado_en a, visitas_intento_en x from ml_publicaciones
   order by cast(substr(ml_item_id, 6) as integer)`).all() as { i: string; v: number | null; a: string | null; x: string }[];
-const llamadasVisitas = (t: Tienda) => t.sim.de('GET', /^\/items\/visits\?/);
+const llamadasVisitas = (t: Tienda) => t.sim.de('GET', /^\/items\/[^/]+\/visits\//);
 /** Captura lo que sale por console.warn mientras corre `f`. */
 async function conAvisos<T>(f: () => Promise<T>): Promise<{ r: T; avisos: any[] }> {
   const real = console.warn;
@@ -2004,42 +2004,53 @@ async function conAvisos<T>(f: () => Promise<T>): Promise<{ r: T; avisos: any[] 
   console.warn = (x: unknown) => { try { avisos.push(JSON.parse(String(x))); } catch { avisos.push(x); } };
   try { return { r: await f(), avisos }; } finally { console.warn = real; }
 }
-const porId = (ids: string[]) => ({ cuerpo: ids.map((id, i) => ({ item_id: id, total_visits: i + 1 })) });
+/** ML contesta bien: total_visits = el numero del id (MLM-V7 -> 7). */
+const porId = (id: string) => ({ cuerpo: { item_id: id, total_visits: Number(id.slice(5)), last: 7, unit: 'day', results: [] } });
 
-test('visitas: una vez al día, en lotes de 20, con rango de 7 días completos de la tienda', async () => {
+const ultimoAviso = (t: Tienda) => {
+  const f = t.db.prepare("select valor from config where clave = 'ml_visitas_ultimo_aviso'").all() as { valor: string }[];
+  assert.ok(f.length <= 1);
+  return f.length ? JSON.parse(f[0].valor) : null;
+};
+
+test('visitas: una llamada por publicación a la ventana de tiempo, sin fechas, con tope de 20 por corrida y una lectura buena al día', async () => {
   await conML(async (t) => {
     publicadas(t, 25);
     publicadas(t, 1, 'cerrada', 26);       // una cerrada no se pide
     t.sim.visitas = porId;
-    assert.equal(await actualizarVisitas(t.env, AHORA), 25);
+    assert.equal(await actualizarVisitas(t.env, AHORA), 20);
     const llamadas = llamadasVisitas(t);
-    assert.deepEqual(llamadas.map((l) => new URL(`https://x${l.ruta}`).searchParams.get('ids')!.split(',').length), [20, 5]);
-    const q = new URL(`https://x${llamadas[0].ruta}`).searchParams;
-    assert.equal(q.get('date_from'), '2026-11-16T00:00:00.000-06:00');
-    assert.equal(q.get('date_to'), '2026-11-23T00:00:00.000-06:00');
+    assert.equal(llamadas.length, 20);                                           // el tope
+    assert.ok(llamadas.every((l) => /^\/items\/MLM-V\d+\/visits\/time_window\?last=7&unit=day$/.test(l.ruta)), llamadas[0].ruta);
+    assert.ok(llamadas.every((l) => !/date_from|date_to/.test(l.ruta)));
+    assert.equal(llamadas[0].ruta, '/items/MLM-V1/visits/time_window?last=7&unit=day');
+    // La siguiente corrida del cron (15 min) retoma las que faltaron, no las ya leidas.
+    assert.equal(await actualizarVisitas(t.env, AHORA + CRON), 5);
+    assert.equal(llamadasVisitas(t).length, 25);
     const filas = vistas(t).filter((f) => f.v !== null);
     assert.equal(filas.length, 25);
-    assert.ok(filas.every((f) => f.a === new Date(AHORA).toISOString()));
-    // El cron corre cada 15 min: el mismo dia no vuelve a preguntar.
-    assert.equal(await actualizarVisitas(t.env, AHORA + 15 * 60_000), 0);
-    assert.equal(await actualizarVisitas(t.env, AHORA + 10 * 3_600_000), 0);   // 19:00 de la tienda, mismo dia
-    assert.equal(llamadasVisitas(t).length, 2);
+    assert.ok(filas.every((f) => f.v === Number(f.i.slice(5))));
+    // Con todas leidas, el mismo dia no vuelve a preguntar.
+    assert.equal(await actualizarVisitas(t.env, AHORA + 2 * CRON), 0);
+    assert.equal(await actualizarVisitas(t.env, AHORA + 10 * HORA), 0);   // 19:00 de la tienda, mismo dia
+    assert.equal(llamadasVisitas(t).length, 25);
     // Al dia siguiente (despues de medianoche de la tienda) si.
-    assert.equal(await actualizarVisitas(t.env, AHORA + DIA), 25);
-    assert.equal(llamadasVisitas(t).length, 4);
+    assert.equal(await actualizarVisitas(t.env, AHORA + DIA), 20);
+    assert.equal(await actualizarVisitas(t.env, AHORA + DIA + CRON), 5);
+    assert.equal(llamadasVisitas(t).length, 50);
   });
 });
 
 test('visitas: sincronizar (el cron) las guarda y un fallo de visitas no frena la conciliación', async () => {
   await conML(async (t) => {
     const { id } = await publicarPieza(t);
-    t.sim.visitas = (ids) => ({ cuerpo: ids.map((i) => ({ item_id: i, total_visits: 9 })) });
+    t.sim.visitas = (i) => ({ cuerpo: { item_id: i, total_visits: 9 } });
     await worker.scheduled!({} as never, t.env, t.ctx as never);
     await t.esperar();
     const visitas = () => (t.db.prepare('select visitas_7d v from ml_publicaciones where producto_id = ?').get(id) as any).v;
     assert.equal(visitas(), 9);
     // Al dia siguiente ML rompe visitas: la conciliacion sigue su camino y lo guardado no se borra.
-    t.db.prepare("update ml_publicaciones set visitas_intento_en = ''").run();
+    t.db.prepare("update ml_publicaciones set visitas_intento_en = '', visitas_actualizado_en = null").run();
     t.sim.visitas = () => ({ status: 500, cuerpo: { message: 'boom' } });
     t.db.prepare('update productos set stock = 0 where id = ?').run(id);
     const { avisos } = await conAvisos(async () => { await worker.scheduled!({} as never, t.env, t.ctx as never); await t.esperar(); });
@@ -2049,82 +2060,108 @@ test('visitas: sincronizar (el cron) las guarda y un fallo de visitas no frena l
   });
 });
 
-test('visitas: un fallo o una respuesta rara no borra lo guardado, se registra con status y llaves y no se repite el mismo día', async () => {
+test('visitas: un fallo o una respuesta rara no borra lo guardado, se registra con status y llaves y no se repite antes de 1 h', async () => {
   await conML(async (t) => {
     publicadas(t, 3);
     t.db.prepare("update ml_publicaciones set visitas_7d = 42, visitas_actualizado_en = '2026-11-20T00:00:00.000Z' where ml_item_id = 'MLM-V2'").run();
-    // 403 con un cuerpo de error al lote entero: ninguna se lee.
+    // 403 a cada una: ninguna se lee.
     t.sim.visitas = () => ({ status: 403, cuerpo: { message: 'forbidden', error: 'forbidden', status: 403 } });
     let r = await conAvisos(() => actualizarVisitas(t.env, AHORA));
     assert.equal(r.r, 0);
-    assert.equal(r.avisos.length, 1);
-    assert.deepEqual([r.avisos[0].status, r.avisos[0].llaves], [403, ['message', 'error', 'status']]);
+    assert.equal(r.avisos.length, 3);
+    assert.deepEqual([r.avisos[0].status, r.avisos[0].llaves, r.avisos[0].id], [403, ['message', 'error', 'status'], 'MLM-V1']);
     assert.equal(vistas(t)[1].v, 42);
     assert.equal(vistas(t)[1].a, '2026-11-20T00:00:00.000Z');
-    assert.equal(llamadasVisitas(t).length, 1);
-    await actualizarVisitas(t.env, AHORA + 60_000);
-    assert.equal(llamadasVisitas(t).length, 1);                  // ya se intento hoy
-    // Al dia siguiente, una forma desconocida (200): se avisa, se queda el 42 y las demas siguen sin dato.
+    assert.equal(llamadasVisitas(t).length, 3);
+    await actualizarVisitas(t.env, AHORA + CRON);
+    assert.equal(llamadasVisitas(t).length, 3);                  // se intento hace menos de 1 h
+    // Pasada la hora, una forma desconocida (200): se avisa, se queda el 42 y las demas siguen sin dato.
     t.sim.visitas = () => ({ cuerpo: { resultado: { raro: true } } });
-    r = await conAvisos(() => actualizarVisitas(t.env, AHORA + DIA));
+    r = await conAvisos(() => actualizarVisitas(t.env, AHORA + HORA + 60_000));
     assert.equal(r.r, 0);
-    assert.deepEqual([r.avisos[0].status, r.avisos[0].llaves, r.avisos[0].leidas], [200, ['resultado'], 0]);
+    assert.equal(llamadasVisitas(t).length, 6);
+    assert.deepEqual([r.avisos[0].status, r.avisos[0].llaves], [200, ['resultado']]);
     assert.deepEqual(vistas(t).map((f) => f.v), [null, 42, null]);
-    // Y cuando ML ya contesta bien, se guarda.
+    // Y cuando ML ya contesta bien, se guarda (el mismo dia).
     t.sim.visitas = porId;
-    assert.equal(await actualizarVisitas(t.env, AHORA + 2 * DIA), 3);
+    assert.equal(await actualizarVisitas(t.env, AHORA + 2 * HORA + 120_000), 3);
     assert.deepEqual(vistas(t).map((f) => f.v), [1, 2, 3]);
   });
 });
 
-test('visitas: si ML rechaza el lote con 400 (un solo id por llamada) se pide de uno en uno; un 404 de una no frena a las demás', async () => {
+test('visitas: un 404 de una publicación no frena a las demás ni toca lo guardado, y deja su fila de diagnóstico', async () => {
   await conML(async (t) => {
     publicadas(t, 3);
-    t.sim.visitas = (ids) => ids.length > 1
-      ? { status: 400, cuerpo: { message: 'validation_parameters: max ids is 1', error: 'validation_parameters', status: 400 } }
-      : ids[0] === 'MLM-V2' ? { status: 404, cuerpo: { message: 'not found', error: 'not_found', status: 404 } }
-        : { cuerpo: { item_id: ids[0], total_visits: ids[0] === 'MLM-V1' ? 6 : 2, results: [] } };
+    t.db.prepare("update ml_publicaciones set visitas_7d = 42, visitas_actualizado_en = '2026-11-20T00:00:00.000Z' where ml_item_id = 'MLM-V2'").run();
+    t.sim.visitas = (id) => id === 'MLM-V2' ? { status: 404, cuerpo: { message: 'not found', error: 'not_found', status: 404 } } : porId(id);
     const { r, avisos } = await conAvisos(() => actualizarVisitas(t.env, AHORA));
     assert.equal(r, 2);
-    assert.deepEqual(vistas(t).map((f) => f.v), [6, null, 2]);
-    assert.equal(llamadasVisitas(t).length, 4);                  // el lote y cada una
+    assert.deepEqual(vistas(t).map((f) => f.v), [1, 42, 3]);
+    assert.equal(vistas(t)[1].a, '2026-11-20T00:00:00.000Z');
+    assert.equal(llamadasVisitas(t).length, 3);
     assert.ok(avisos.some((a) => a.status === 404 && a.id === 'MLM-V2'));
-    // Hoy no se repite ninguna, ni la que fallo.
-    await actualizarVisitas(t.env, AHORA + 60_000);
-    assert.equal(llamadasVisitas(t).length, 4);
+    assert.deepEqual([ultimoAviso(t).status, ultimoAviso(t).id], [404, 'MLM-V2']);
+    // Hoy no se repite ninguna dentro de la hora, ni la que fallo.
+    await actualizarVisitas(t.env, AHORA + CRON);
+    assert.equal(llamadasVisitas(t).length, 3);
   });
 });
 
-const ultimoAviso = (t: Tienda) => {
-  const f = t.db.prepare("select valor from config where clave = 'ml_visitas_ultimo_aviso'").all() as { valor: string }[];
-  assert.ok(f.length <= 1);
-  return f.length ? JSON.parse(f[0].valor) : null;
-};
+test('visitas: las intentadas hoy sin lectura (el 400 de fechas) se leen en cuanto se despliega, no al día siguiente', async () => {
+  await conML(async (t) => {
+    publicadas(t, 3);
+    // Estado que dejo el codigo anterior: intento hoy (hace 3 h) sin lectura buena. Una intentada hace 5 min espera.
+    t.db.prepare('update ml_publicaciones set visitas_intento_en = ?').run(new Date(AHORA - 3 * HORA).toISOString());
+    t.db.prepare("update ml_publicaciones set visitas_intento_en = ? where ml_item_id = 'MLM-V3'").run(new Date(AHORA - 5 * 60_000).toISOString());
+    t.sim.visitas = porId;
+    assert.equal(await actualizarVisitas(t.env, AHORA), 2);
+    assert.deepEqual(vistas(t).map((f) => f.v), [1, 2, null]);
+    assert.equal(await actualizarVisitas(t.env, AHORA + HORA), 1);   // la tercera ya cumplio su hora
+    assert.deepEqual(vistas(t).map((f) => f.v), [1, 2, 3]);
+  });
+});
 
-test('visitas: cada anomalía deja UNA fila en config (#895) con status, ids, leidas, llaves y el cuerpo crudo, sin cabeceras ni URL', async () => {
+test('visitas: una publicación que ML nunca contesta se reintenta como mucho cada hora y no frena a las demás', async () => {
+  await conML(async (t) => {
+    publicadas(t, 25);
+    t.sim.visitas = (id) => id === 'MLM-V1' ? { status: 404, cuerpo: { message: 'not found' } } : porId(id);
+    const { r } = await conAvisos(async () => [
+      await actualizarVisitas(t.env, AHORA),                 // V1 falla, 19 se leen
+      await actualizarVisitas(t.env, AHORA + CRON),          // las 5 que faltaban; V1 espera
+      await actualizarVisitas(t.env, AHORA + 2 * CRON),      // nada que hacer: V1 aun no cumple la hora
+      await actualizarVisitas(t.env, AHORA + 5 * CRON),      // 75 min: solo V1, otra vez (y falla)
+    ]);
+    assert.deepEqual(r, [19, 5, 0, 0]);
+    assert.equal(llamadasVisitas(t).filter((l) => l.ruta.includes('/MLM-V1/')).length, 2);
+    assert.equal(llamadasVisitas(t).length, 20 + 5 + 1);
+    assert.equal(vistas(t).filter((f) => f.v !== null).length, 24);
+  });
+});
+
+test('visitas: cada anomalía deja UNA fila en config (#895) con status, id, llaves y el cuerpo crudo, sin cabeceras ni URL', async () => {
   await conML(async (t) => {
     publicadas(t, 3);
     assert.equal(ultimoAviso(t), null);
-    // 403 al lote entero.
+    // 403 a cada una: la fila queda con la ultima.
     t.sim.visitas = () => ({ status: 403, cuerpo: { message: 'forbidden', error: 'forbidden', status: 403 } });
     await conAvisos(() => actualizarVisitas(t.env, AHORA));
     let a = ultimoAviso(t);
-    assert.deepEqual(Object.keys(a).sort(), ['cuerpo', 'en', 'ids', 'leidas', 'llaves', 'mensaje', 'status']);
-    assert.deepEqual([a.status, a.ids, a.leidas, a.llaves, a.mensaje], [403, 3, 0, ['message', 'error', 'status'], 'ML rechazó la consulta']);
+    assert.deepEqual(Object.keys(a).sort(), ['cuerpo', 'en', 'id', 'llaves', 'mensaje', 'status']);
+    assert.deepEqual([a.status, a.id, a.llaves, a.mensaje], [403, 'MLM-V3', ['message', 'error', 'status'], 'ML rechazó la consulta']);
     assert.equal(a.cuerpo, JSON.stringify({ message: 'forbidden', error: 'forbidden', status: 403 }));
     assert.ok(Number.isFinite(Date.parse(a.en)));
-    assert.ok(!/Bearer|access_token|\/items\/visits|secreto-de-la-app/.test(JSON.stringify(a)), JSON.stringify(a));
-    // 400 al lote: se avisa, se reintenta de uno en uno y la fila se sobreescribe (sigue siendo una).
-    t.sim.visitas = (ids) => ids.length > 1 ? { status: 400, cuerpo: { message: 'validation_parameters: max ids is 1' } } : porId(ids);
+    assert.ok(!/Bearer|access_token|time_window|\/items\/|secreto-de-la-app/.test(JSON.stringify(a)), JSON.stringify(a));
+    // El 400 de fechas que dio origen a #901 queda tal cual en la fila (se sobreescribe, sigue siendo una).
+    t.sim.visitas = () => ({ status: 400, cuerpo: { message: 'Invalid request unknown date format: x', error: 'bad_request', status: 400, cause: [] } });
     await conAvisos(() => actualizarVisitas(t.env, AHORA + DIA));
     a = ultimoAviso(t);
-    assert.deepEqual([a.status, a.ids, a.leidas, a.mensaje], [400, 3, null, 'lote rechazado, se reintenta de uno en uno']);
-    assert.match(a.cuerpo, /max ids is 1/);
+    assert.deepEqual([a.status, a.mensaje], [400, 'ML rechazó la consulta']);
+    assert.match(a.cuerpo, /unknown date format/);
     // 200 con una forma que no se reconoce.
     t.sim.visitas = () => ({ cuerpo: { resultado: { raro: true } } });
     await conAvisos(() => actualizarVisitas(t.env, AHORA + 2 * DIA));
     a = ultimoAviso(t);
-    assert.deepEqual([a.status, a.ids, a.leidas, a.llaves, a.mensaje], [200, 3, 0, ['resultado'], 'respuesta no reconocida o incompleta']);
+    assert.deepEqual([a.status, a.llaves, a.mensaje], [200, ['resultado'], 'respuesta no reconocida']);
     assert.equal(a.cuerpo, '{"resultado":{"raro":true}}');
   });
 });
@@ -2143,7 +2180,7 @@ test('visitas: el cuerpo guardado en el aviso se corta a 300 caracteres y un cue
   });
 });
 
-test('visitas: si no se puede escribir el aviso en config, se registra una vez y la corrida sigue igual', async () => {
+test('visitas: si no se puede escribir el aviso en config, se registra por cada fallo y la corrida sigue igual', async () => {
   await conML(async (t) => {
     publicadas(t, 2);
     t.sim.visitas = () => ({ status: 403, cuerpo: { message: 'forbidden' } });
@@ -2156,14 +2193,14 @@ test('visitas: si no se puede escribir el aviso en config, se registra una vez y
     try {
       assert.equal((await conAvisos(() => actualizarVisitas(t.env, AHORA))).r, 0);
     } finally { console.error = error; (t.env as any).DB = base; }
-    assert.equal(errores.length, 1);
+    assert.equal(errores.length, 2);                              // una por publicacion fallida
     assert.match(errores[0], /no se pudo guardar el último aviso.*D1 caída/);
     assert.equal(ultimoAviso(t), null);
     assert.ok(vistas(t).every((f) => f.x !== ''), 'las publicaciones se marcaron igual');
   });
 });
 
-test('visitas: un 429 detiene la corrida sin marcar nada y la siguiente la retoma; el tope por corrida son 10 llamadas', async () => {
+test('visitas: un 429 o un 5xx detiene la corrida sin marcar nada y la siguiente la retoma; el tope por corrida son 20 llamadas', async () => {
   await conML(async (t) => {
     publicadas(t, 45);
     t.sim.visitas = () => ({ status: 429, cuerpo: { message: 'too many requests', error: 'too_many_requests', status: 429 } });
@@ -2172,16 +2209,16 @@ test('visitas: un 429 detiene la corrida sin marcar nada y la siguiente la retom
     assert.equal(llamadasVisitas(t).length, 1);
     assert.equal(avisos[0].status, 429);
     assert.ok(vistas(t).every((f) => f.x === ''));
+    t.sim.visitas = () => ({ status: 503, cuerpo: { message: 'unavailable' } });
+    assert.equal((await conAvisos(() => actualizarVisitas(t.env, AHORA + CRON))).r, 0);
+    assert.equal(llamadasVisitas(t).length, 2);
+    assert.ok(vistas(t).every((f) => f.x === ''));
     t.sim.visitas = porId;
-    assert.equal(await actualizarVisitas(t.env, AHORA + 15 * 60_000), 45);
-    assert.equal(llamadasVisitas(t).length, 1 + 3);
-    // Con lotes que ML rechaza en 400, el tope de 10 llamadas deja lo demas para la siguiente corrida.
-    publicadas(t, 30, 'activa', 46);
-    t.sim.visitas = (ids) => ids.length > 1 ? { status: 400, cuerpo: { message: 'max 1' } } : porId(ids);
-    const antes = llamadasVisitas(t).length;
-    const { r: hechas } = await conAvisos(() => actualizarVisitas(t.env, AHORA + 15 * 60_000 + DIA));   // 45 viejas y 30 nuevas: 75 ids, 4 lotes
-    assert.equal(llamadasVisitas(t).length - antes, 10);
-    assert.ok(hechas > 0 && hechas < 75, String(hechas));
+    assert.equal(await actualizarVisitas(t.env, AHORA + 2 * CRON), 20);
+    assert.equal(llamadasVisitas(t).length, 2 + 20);
+    assert.equal(await actualizarVisitas(t.env, AHORA + 3 * CRON), 20);
+    assert.equal(await actualizarVisitas(t.env, AHORA + 4 * CRON), 5);
+    assert.equal(vistas(t).filter((f) => f.v !== null).length, 45);
   });
 });
 
