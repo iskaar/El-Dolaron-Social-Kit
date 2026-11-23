@@ -5,6 +5,7 @@
  */
 import { CAJAS } from './cuentas.ts';
 import { cajaDe } from './corte.ts';
+import { pagadoCon, tienePagadoCon } from './dinero.ts';
 import { hashPin } from './dolarones.ts';
 import { vendedoras, esVendedora } from './cajeros.ts';
 
@@ -262,6 +263,8 @@ async function registrarMovimiento(request: Request, env: Env, correo: string, t
   }
   const origen = ['pago', 'adelanto'].includes(tipo) ? c.origen : null;
   if (['pago', 'adelanto'].includes(tipo) && origen !== 'caja' && origen !== 'fuera') return json({ error: 'Origen inválido.' }, 400);
+  const pagado = pagadoCon(origen, c.pagado_con);   // '¿Con qué se pagó?' (#910): solo el pago o adelanto de origen fuera
+  if (pagado === null) return json({ error: 'Forma de pago inválida.' }, 400);
   let bono = 0;
   let resumen: Record<string, number> = { faltas: 0, retardos: 0 };
   if (tipo === 'pago') {
@@ -296,10 +299,11 @@ async function registrarMovimiento(request: Request, env: Env, correo: string, t
   }
   const importeLibro = ['adelanto', 'devengo'].includes(tipo) ? monto : -monto;
   const movimientoId = tipo === 'devengo' ? `devengo:${empleadoId}:${fecha}` : id;
-  sentencias.push(env.DB.prepare(`insert into nomina_movimientos (id,empleado_id,fecha,tipo,importe,nota,origen,retiro_id,creado_por,creado_en)
-    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict(id) do nothing`)
+  const conPagado = await tienePagadoCon(env, 'nomina_movimientos');   // antes de la migración 090 se guarda como siempre
+  sentencias.push(env.DB.prepare(`insert into nomina_movimientos (id,empleado_id,fecha,tipo,importe,nota,origen,retiro_id,creado_por,creado_en${conPagado ? ',pagado_con' : ''})
+    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?${conPagado ? ', ?' : ''}) on conflict(id) do nothing`)
     .bind(movimientoId, empleadoId, fecha, tipo, tipo === 'pago' ? -monto : importeLibro,
-      nota, origen, caja ? id : null, correo, ahora));
+      nota, origen, caja ? id : null, correo, ahora, ...(conPagado ? [pagado] : [])));
   if (tipo === 'pago' && bono > 0) {
     sentencias.push(env.DB.prepare(`insert into nomina_movimientos (id,empleado_id,fecha,tipo,importe,nota,origen,creado_por,creado_en)
       values (?, ?, ?, 'bono', ?, ?, ?, ?, ?) on conflict(id) do nothing`)
@@ -327,5 +331,5 @@ async function registrarMovimiento(request: Request, env: Env, correo: string, t
   }
   await env.DB.batch(sentencias);
   return json({ id, empleado_id: empleadoId, fecha, tipo, importe: importeLibro, neto: tipo === 'pago' ? monto : null,
-    abono, bono, origen, retiro_id: caja ? id : null, ...resumen }, 201);
+    abono, bono, origen, pagado_con: pagado, retiro_id: caja ? id : null, ...resumen }, 201);
 }

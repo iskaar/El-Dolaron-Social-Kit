@@ -1,5 +1,6 @@
 import { CAJAS } from './cuentas.ts';
 import { cajaDe } from './corte.ts';
+import { pagadoCon, tienePagadoCon } from './dinero.ts';
 import { CATEGORIAS_GASTO } from '../public/categorias.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -86,11 +87,14 @@ export async function rutaGastos(request: Request, env: Env, url: URL, correo: s
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) return json({ error: 'Mes invalido.' }, 400);
     const desde = `${mes}-01`;
     const hasta = new Date(Date.UTC(Number(mes.slice(0, 4)), Number(mes.slice(5)), 1)).toISOString().slice(0, 10);
+    // `pagado_con` llega con la migración 090 (#910): antes de correrla se responde '' y todo sigue igual.
+    const pagado = (await tienePagadoCon(env, 'gastos')) ? "coalesce((select pagado_con from gastos g where g.id = u.id), '')" : "''";
     const { results } = await env.DB.prepare(
       `select u.id, u.fecha, u.categoria, u.importe, u.nota, u.origen, u.retiro_id, u.caja, u.creado_por, u.creado_en,
-              coalesce((select comprobante_key is not null from gastos g where g.id = u.id), 0) as con_comprobante
+              coalesce((select comprobante_key is not null from gastos g where g.id = u.id), 0) as con_comprobante, ${pagado} as pagado_con
          from (${GASTOS_DEL_MES}) u order by u.fecha desc, u.creado_en desc`,
     ).bind(desde, hasta, `${desde}T00:00:00`, `${hasta}T00:00:00`).all<{
+      pagado_con: string;
       id: string; fecha: string; categoria: string; importe: number; nota: string; origen: string;
       retiro_id: string | null; caja: string | null; creado_por: string; creado_en: string; con_comprobante: number;
     }>();
@@ -113,6 +117,8 @@ export async function rutaGastos(request: Request, env: Env, url: URL, correo: s
     if (!CATEGORIAS.has(categoria)) return json({ error: 'Categoría invalida.' }, 400);
     if (!Number.isInteger(importe) || importe <= 0 || importe > 10_000_000) return json({ error: 'Importe invalido.' }, 400);
     if (origen !== 'caja' && origen !== 'fuera') return json({ error: 'Origen invalido.' }, 400);
+    const pagado = pagadoCon(origen, cuerpo.pagado_con);
+    if (pagado === null) return json({ error: 'Forma de pago invalida.' }, 400);
     const creadoEn = new Date().toISOString();
     const sentencias = [];
     let retiroId: string | null = null;
@@ -126,12 +132,13 @@ export async function rutaGastos(request: Request, env: Env, url: URL, correo: s
          values (?, 'gasto', ?, ?, ?, ?, null, ?, ?) on conflict (id) do nothing`,
       ).bind(retiroId, caja, correo, importe, nota || CATEGORIAS_GASTO.find(([clave]) => clave === categoria)?.[1], creadoEn, categoria));
     }
+    const conPagado = await tienePagadoCon(env, 'gastos');   // antes de la migración 090 se guarda como siempre
     sentencias.push(env.DB.prepare(
-      `insert into gastos (id, fecha, categoria, importe, nota, origen, retiro_id, creado_por, creado_en)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (id) do nothing`,
-    ).bind(id, fecha, categoria, importe, nota, origen, retiroId, correo, creadoEn));
+      `insert into gastos (id, fecha, categoria, importe, nota, origen, retiro_id, creado_por, creado_en${conPagado ? ', pagado_con' : ''})
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?${conPagado ? ', ?' : ''}) on conflict (id) do nothing`,
+    ).bind(id, fecha, categoria, importe, nota, origen, retiroId, correo, creadoEn, ...(conPagado ? [pagado] : [])));
     await env.DB.batch(sentencias);
-    return json({ id, fecha, categoria, importe, nota, origen, retiro_id: retiroId }, 201);
+    return json({ id, fecha, categoria, importe, nota, origen, retiro_id: retiroId, pagado_con: pagado }, 201);
   }
 
   const id = /^\/api\/gastos\/([^/]+)$/.exec(url.pathname)?.[1];

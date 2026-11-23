@@ -7,6 +7,7 @@
 <style>
   :root { --azul:#16366B; --rojo:#D72B32; --verde:#1b7a3a; --linea:#dfe3ea; --suave:#5b6478; }
   * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
   body { margin:0; background:#f4f6f9; color:#1a1f2b; font-family:system-ui,-apple-system,sans-serif; }
   header { background:var(--azul); color:white; padding:14px 20px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
   header h1 { margin:0; font-size:19px; flex:1; }
@@ -61,11 +62,36 @@
 <header><h1>Dinero</h1><a href="/">Inicio</a></header>
 <main>
   <section>
+    <h2>Efectivo de gerencia</h2>
+    <div id="saldo"></div>
+    <div id="acciones" class="campos" hidden>
+      <button type="button" data-forma="deposito">Depósito al banco</button>
+      <button type="button" data-forma="otro" class="claro">Otro movimiento</button>
+      <button type="button" data-forma="arqueo" class="claro">Arqueo</button>
+    </div>
+    <form id="forma" class="panel" hidden>
+      <h2 id="forma-titulo"></h2>
+      <p id="forma-ayuda" class="suave"></p>
+      <div class="campos">
+        <label id="campo-tipo" hidden>Movimiento<select name="tipo">
+          <option value="a_tienda">Entrega a la tienda (cambio o fondo)</option>
+          <option value="entrada">Entra efectivo</option>
+          <option value="salida">Sale efectivo</option>
+        </select></label>
+        <label id="campo-importe">Importe ($)<input name="importe" type="number" min="0" step="0.01" inputmode="decimal" required></label>
+        <label id="campo-diferencia" hidden>Diferencia<b id="diferencia" style="font-size:20px;min-height:44px;display:flex;align-items:center">—</b></label>
+        <label class="ancho">Nota<textarea name="nota" maxlength="300" rows="2"></textarea></label>
+        <button type="submit">Guardar</button>
+        <button type="button" class="claro" id="cancelar-forma">Cancelar</button>
+      </div>
+    </form>
+  </section>
+  <section>
     <h2>Pendiente de recoger</h2>
     <p id="estado" role="status" aria-live="polite"></p>
     <div id="tiendas"></div>
   </section>
-  <section>
+  <section id="seccion-desde">
     <h2>Contar desde</h2>
     <p class="suave">Los cortes anteriores a esta fecha no se consideran pendientes.</p>
     <div class="campos">
@@ -76,6 +102,14 @@
   <section>
     <h2>Recolecciones</h2>
     <div class="tabla"><table><thead><tr><th>Fecha</th><th>Tienda</th><th>Recibió</th><th>Entregó</th><th class="importe">Esperado</th><th class="importe">Contado</th><th class="importe">Diferencia</th><th>Nota</th></tr></thead><tbody id="historial"></tbody></table></div>
+  </section>
+  <section>
+    <h2>Arqueos</h2>
+    <div class="tabla"><table><thead><tr><th>Fecha</th><th>Registró</th><th class="importe">Esperado</th><th class="importe">Contado</th><th class="importe">Diferencia</th><th>Nota</th></tr></thead><tbody id="arqueos"></tbody></table></div>
+  </section>
+  <section>
+    <h2>Otros movimientos</h2>
+    <div class="tabla"><table><thead><tr><th>Fecha</th><th>Registró</th><th>Movimiento</th><th class="importe">Importe</th><th>Nota</th></tr></thead><tbody id="movimientos"></tbody></table></div>
   </section>
 </main>
 <script type="module">
@@ -92,14 +126,59 @@ let datos = null;
 const ids = {};
 const abiertas = new Set();
 
+// Cómo se nombra cada renglón del saldo; el signo dice si suma o resta.
+const RENGLONES = [
+  ['recolecciones', '+', 'Recolecciones de los cortes'], ['terminal', '+', 'Pagos de la terminal entregados a gerencia'], ['entradas', '+', 'Otras entradas'],
+  ['gastos', '−', 'Gastos pagados en efectivo'], ['nomina', '−', 'Nómina pagada en efectivo'], ['depositos', '−', 'Depósitos al banco'],
+  ['a_tienda', '−', 'Entregas a la tienda (cambio o fondo)'], ['salidas', '−', 'Otras salidas'],
+];
+const TIPOS = { deposito:'Depósito al banco', a_tienda:'Entrega a la tienda', entrada:'Entra efectivo', salida:'Sale efectivo' };
+const FORMAS = {
+  deposito: { titulo:'Depósito al banco', ayuda:'El efectivo que gerencia lleva al banco.' },
+  otro: { titulo:'Otro movimiento', ayuda:'Escribe la nota si entra o sale efectivo por otra razón.' },
+  arqueo: { titulo:'Arqueo', ayuda:'Cuenta el efectivo de gerencia y escribe el total.' },
+};
+
+function pintarSaldo() {
+  const escribe = datos.puede_escribir && datos.caja_lista;
+  $('acciones').hidden = !escribe;
+  // Sin arqueo todavía no hay saldo contra el cual mover nada: solo el primero.
+  $('acciones').querySelectorAll('[data-forma]').forEach((b) => { b.hidden = !datos.saldo && b.dataset.forma !== 'arqueo'; });
+  if (!datos.caja_lista) { $('saldo').innerHTML = '<p class="suave">Falta actualizar el sistema (migración 090): avisa a gerencia.</p>'; return; }
+  const s = datos.saldo;
+  if (!s) {
+    $('saldo').innerHTML = `<p>Todavía no hay saldo.${escribe ? ' Cuenta el efectivo de gerencia y registra el primer arqueo: será el saldo inicial.' : ' Gerencia debe registrar el primer arqueo.'}</p>`;
+    return;
+  }
+  $('saldo').innerHTML = `<div class="resumen"><span>Gerencia debería tener</span><span class="total ${clase(s.esperado)}">${pesos(s.esperado)}</span></div>
+    <p class="suave">Desde el último arqueo (${escapar(fechaHora(s.desde))}).</p>
+    <div class="tabla"><table><tbody><tr><td>Contado en el último arqueo</td><td class="importe">${pesos(s.base)}</td></tr>${RENGLONES.map(([clave, signoR, nombre]) =>
+      `<tr><td>${signoR} ${nombre}</td><td class="importe">${pesos(s[clave])}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+function pintarHistorial() {
+  $('arqueos').innerHTML = datos.arqueos.map((a) => `<tr>
+    <td data-label="Fecha">${escapar(fechaHora(a.creado_en))}</td><td data-label="Registró">${escapar(a.creado_por_nombre || a.creado_por)}</td>
+    <td class="importe" data-label="Esperado">${pesos(a.esperado)}</td><td class="importe" data-label="Contado">${pesos(a.contado)}</td>
+    <td class="importe ${clase(a.diferencia)}" data-label="Diferencia">${signo(a.diferencia)}</td><td data-label="Nota">${escapar(a.nota || '—')}</td></tr>`).join('')
+    || '<tr><td>Todavía no hay arqueos.</td></tr>';
+  $('movimientos').innerHTML = datos.movimientos.map((m) => `<tr>
+    <td data-label="Fecha">${escapar(fechaHora(m.creado_en))}</td><td data-label="Registró">${escapar(m.creado_por_nombre || m.creado_por)}</td>
+    <td data-label="Movimiento">${escapar(TIPOS[m.tipo] || m.tipo)}</td><td class="importe" data-label="Importe">${pesos(m.importe)}</td>
+    <td data-label="Nota">${escapar(m.nota || '—')}</td></tr>`).join('') || '<tr><td>Todavía no hay movimientos.</td></tr>';
+}
+
 function pintar() {
+  pintarSaldo();
+  pintarHistorial();
+  $('seccion-desde').hidden = !datos.puede_escribir;
   $('desde').value = dia(datos.desde);
   $('tiendas').innerHTML = datos.tiendas.map((t) => {
     const viejo = t.cortes[0] ? Math.max(0, Math.floor((Date.now() - new Date(t.cortes[0].hasta)) / 86400000)) : 0;
     return `<div class="tienda" data-tienda="${t.clave}">
       <div class="resumen"><div><b>${escapar(t.nombre)}</b><div class="suave">${t.cortes.length ? `${t.cortes.length} corte${t.cortes.length === 1 ? '' : 's'} · el más viejo, hace ${viejo} día${viejo === 1 ? '' : 's'}` : 'Nada por recoger'}</div></div>
       <div class="total">${pesos(t.total)}</div></div>
-      ${t.cortes.length ? `<button type="button" data-recoger="${t.clave}">${abiertas.has(t.clave) ? 'Cerrar' : 'Recoger'}</button>` : ''}
+      ${t.cortes.length && datos.puede_escribir ? `<button type="button" data-recoger="${t.clave}">${abiertas.has(t.clave) ? 'Cerrar' : 'Recoger'}</button>` : ''}
       ${abiertas.has(t.clave) ? panel(t) : ''}</div>`;
   }).join('');
   $('historial').innerHTML = datos.recolecciones.map((r) => `<tr>
@@ -177,6 +256,56 @@ $('tiendas').addEventListener('submit', async (e) => {
       ? `Recolección registrada con ${cuerpo.tomados} de ${cuerpo.pedidos} cortes: otro dispositivo ya había recogido el resto. Esperado ${pesos(cuerpo.esperado)}.`
       : 'Recolección registrada.');
   } catch (error) { aviso(error.message, true); boton.disabled = false; }
+});
+// Depósito, otro movimiento y arqueo: un solo formulario. Un identificador por tipo hasta que se guarde (reintentar no duplica).
+let abierta = '';
+const formaIds = {};
+const centavos = (campo) => Math.round(Number(campo.value) * 100);
+function cerrarForma() { abierta = ''; $('forma').hidden = true; }
+function recalcularArqueo() {
+  if (abierta !== 'arqueo') return;
+  const f = $('forma');
+  const dif = f.elements.importe.value === '' || !datos.saldo ? null : centavos(f.elements.importe) - datos.saldo.esperado;
+  $('diferencia').textContent = dif === null ? '—' : signo(dif);
+  $('diferencia').className = dif === null ? '' : clase(dif);
+}
+$('acciones').addEventListener('click', (e) => {
+  const clave = e.target.closest('[data-forma]')?.dataset.forma;
+  if (!clave) return;
+  abierta = clave;
+  const f = $('forma');
+  f.reset();
+  $('forma-titulo').textContent = FORMAS[clave].titulo;
+  $('forma-ayuda').textContent = FORMAS[clave].ayuda + (clave === 'arqueo' && !datos.saldo ? ' Este primer conteo es el saldo inicial: no tiene diferencia.' : '');
+  $('campo-tipo').hidden = clave !== 'otro';
+  $('campo-diferencia').hidden = clave !== 'arqueo' || !datos.saldo;
+  f.elements.importe.previousSibling.textContent = clave === 'arqueo' ? 'Total contado ($)' : 'Importe ($)';
+  f.elements.importe.min = clave === 'arqueo' ? '0' : '0.01';
+  recalcularArqueo();
+  f.hidden = false;
+  f.scrollIntoView({ behavior:'smooth' });
+});
+$('cancelar-forma').addEventListener('click', cerrarForma);
+$('forma').addEventListener('input', recalcularArqueo);
+$('forma').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target, boton = f.querySelector('button[type=submit]'), clave = abierta;
+  const tipo = clave === 'otro' ? f.elements.tipo.value : clave;
+  boton.disabled = true; aviso('');
+  try {
+    const llave = clave === 'otro' ? `otro:${tipo}` : clave;
+    formaIds[llave] ||= crypto.randomUUID();
+    const esArqueo = clave === 'arqueo';
+    const r = await fetch(esArqueo ? '/api/dinero/arqueos' : '/api/dinero/movimientos', { method:'POST', headers:{ 'content-type':'application/json' },
+      body:JSON.stringify(esArqueo ? { id:formaIds[llave], contado:centavos(f.elements.importe), nota:f.elements.nota.value }
+        : { id:formaIds[llave], tipo, importe:centavos(f.elements.importe), nota:f.elements.nota.value }) });
+    const cuerpo = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(cuerpo.error || 'No se pudo guardar.');
+    delete formaIds[llave]; cerrarForma();
+    await cargar();
+    aviso(esArqueo ? 'Arqueo registrado.' : 'Movimiento registrado.');
+  } catch (error) { aviso(error.message, true); }
+  boton.disabled = false;
 });
 $('guardar-desde').addEventListener('click', async () => {
   if (!$('desde').value) return;

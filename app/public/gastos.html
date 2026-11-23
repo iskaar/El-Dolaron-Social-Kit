@@ -16,6 +16,7 @@
   h2 { margin:0 0 12px; color:var(--azul); font-size:17px; }
   form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 12px; }
   label { display:grid; gap:5px; color:var(--suave); font-size:13px; }
+  label[hidden] { display:none; }
   input,select,textarea,button { font:inherit; }
   input,select,textarea { width:100%; min-height:44px; padding:10px; border:1px solid var(--linea); border-radius:8px; color:#1a1f2b; background:white; }
   textarea { resize:vertical; }
@@ -62,6 +63,7 @@
       <label>Categoría<select id="categoria" required></select></label>
       <label>Importe ($)<input id="importe" type="number" min="0.01" step="0.01" inputmode="decimal" required></label>
       <label>Origen<select id="origen"><option value="fuera">Fuera de caja</option><option value="caja">Del cajón</option></select></label>
+      <label id="pagado-campo">¿Con qué se pagó?<select id="pagado_con"><option value="efectivo">Efectivo</option><option value="banco">Transferencia</option></select></label>
       <label id="caja-campo" hidden>Caja<select id="caja"><option>Caja 1</option><option>Caja 2</option><option>Caja 3</option></select></label>
       <label class="ancho">Nota<textarea id="nota" maxlength="200" rows="2"></textarea></label>
       <label class="ancho">Comprobante (opcional)<input id="comprobante" type="file" accept="image/*,application/pdf,.xml"></label>
@@ -87,7 +89,10 @@ $('fecha').value = hoy;
 $('mes').value = hoy.slice(0, 7);
 $('categoria').innerHTML = '<option value="">Elige categoría</option>' + CATEGORIAS_GASTO.map(([clave, nombre]) => `<option value="${clave}">${nombre}</option>`).join('');
 $('categoria').addEventListener('change', () => { $('nota').placeholder = $('categoria').value === 'inversionistas' ? '¿A quién?' : ''; });
-$('origen').addEventListener('change', () => { $('caja-campo').hidden = $('origen').value !== 'caja'; });
+$('origen').addEventListener('change', () => {
+  $('caja-campo').hidden = $('origen').value !== 'caja';
+  $('pagado-campo').hidden = $('origen').value !== 'fuera';   // «¿Con qué se pagó?» solo importa si el gasto salió de fuera del cajón
+});
 
 async function cargar() {
   const r = await fetch(`/api/gastos?mes=${encodeURIComponent($('mes').value)}`, { cache:'no-store' });
@@ -98,7 +103,7 @@ async function cargar() {
   $('categorias').innerHTML = datos.por_categoria.map((x) => `<div class="categoria"><span>${escapar(nombres.get(x.categoria) || (x.categoria === 'sin_categoria' ? 'Sin categoría' : x.categoria))}</span><b>${pesos(x.importe)}</b></div>`).join('') || '<span>Sin gastos este mes.</span>';
   $('filas').innerHTML = datos.gastos.map((g) => `<tr>
     <td data-label="Fecha">${escapar(g.fecha)}</td><td data-label="Categoría">${escapar(nombres.get(g.categoria) || (g.categoria === 'sin_categoria' ? 'Sin categoría' : g.categoria))}</td>
-    <td data-label="Nota">${escapar(g.nota || '—')}${g.caja ? ` · ${escapar(g.caja)}` : ''}</td><td data-label="Origen">${g.origen === 'caja' ? 'Caja' : 'Fuera'}</td>
+    <td data-label="Nota">${escapar(g.nota || '—')}${g.caja ? ` · ${escapar(g.caja)}` : ''}</td><td data-label="Origen">${g.origen === 'caja' ? 'Caja' : g.pagado_con === 'banco' ? 'Fuera · transferencia' : 'Fuera'}</td>
     <td class="importe" data-label="Importe">${pesos(g.importe)}</td><td class="acciones">${g.con_comprobante ? `<a class="ver" href="/api/gastos/${g.id}/comprobante" target="_blank" rel="noopener">Ver comprobante</a>` : (g.origen === 'fuera' || g.retiro_id) ? `<button class="adjuntar" data-adjuntar="${g.id}">Adjuntar</button>` : ''}${g.origen === 'fuera' ? `<button class="borrar" data-borrar="${g.id}">Borrar</button>` : ''}</td></tr>`).join('') || '<tr><td>Sin gastos este mes.</td></tr>';
 }
 function escapar(texto) { return String(texto).replace(/[&<>"']/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]); }
@@ -149,6 +154,7 @@ $('formulario').addEventListener('submit', async (e) => {
   try {
     const cuerpo = { id:idPendiente, fecha:$('fecha').value, categoria:$('categoria').value, importe:Math.round(Number($('importe').value) * 100), nota:$('nota').value, origen:$('origen').value };
     if (cuerpo.origen === 'caja') cuerpo.caja = $('caja').value;
+    else cuerpo.pagado_con = $('pagado_con').value;
     const r = await fetch('/api/gastos', { method:'POST', headers:{ 'content-type':'application/json' }, body:JSON.stringify(cuerpo) });
     const datos = await r.json();
     if (!r.ok) throw new Error(datos.error || 'No se pudo registrar.');
