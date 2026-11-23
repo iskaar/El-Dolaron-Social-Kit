@@ -25,19 +25,20 @@ interface Pendiente { id: string; caja: string; cajero: string; cajero_nombre: s
 
 const desdeConfig = async (env: Env) =>
   (await env.DB.prepare('select valor from config where clave = ?').bind(CLAVE_DESDE).first<{ valor: string }>())?.valor ?? null;
-const SIN_MIGRAR = () => json({ error: 'Falta actualizar el sistema (migración 089): avisa a Isaac.' }, 503);
+const SIN_MIGRAR = () => json({ error: 'Falta actualizar el sistema (migración 089): avisa a gerencia.' }, 503);
+
+const CON_NOMBRES = `select r.*, (select nombre from usuarios where correo = r.recibio) as recibio_nombre,
+            (select nombre from usuarios where correo = r.entrego) as entrego_nombre from recolecciones r`;
+const CORTES_DE = `select x.recoleccion_id, c.id, c.caja, c.hasta, c.entregado from recolecciones_cortes x join cortes c on c.id = x.corte_id`;
+const conTienda = <T extends { tienda: string }>(fila: T, cortes: unknown[]) =>
+  ({ ...fila, tienda_nombre: esTienda(fila.tienda) ? TIENDAS[fila.tienda].nombre : fila.tienda, cortes });
 
 const leerRecoleccion = async (env: Env, id: string) => {
-  const fila = await env.DB.prepare(
-    `select r.*, (select nombre from usuarios where correo = r.recibio) as recibio_nombre,
-            (select nombre from usuarios where correo = r.entrego) as entrego_nombre from recolecciones r where r.id = ?`,
-  ).bind(id).first<Record<string, unknown> & { tienda: string }>();
+  const fila = await env.DB.prepare(`${CON_NOMBRES} where r.id = ?`).bind(id).first<Record<string, unknown> & { tienda: string }>();
   if (!fila) return null;
-  const { results: cortes } = await env.DB.prepare(
-    `select c.id, c.caja, c.hasta, c.entregado from recolecciones_cortes x join cortes c on c.id = x.corte_id
-     where x.recoleccion_id = ? order by c.hasta`,
-  ).bind(id).all();
-  return { ...fila, tienda_nombre: esTienda(fila.tienda) ? TIENDAS[fila.tienda].nombre : fila.tienda, cortes };
+  const { results: cortes } = await env.DB.prepare(`select c.id, c.caja, c.hasta, c.entregado from recolecciones_cortes x join cortes c on c.id = x.corte_id
+     where x.recoleccion_id = ? order by c.hasta`).bind(id).all();
+  return conTienda(fila, cortes);
 };
 
 async function listar(env: Env): Promise<Response> {
@@ -63,8 +64,13 @@ async function listar(env: Env): Promise<Response> {
       }).map(({ correo, nombre }) => ({ correo, nombre })),
     };
   });
-  const { results: ultimas } = await env.DB.prepare('select id from recolecciones order by creado_en desc, id limit ?').bind(HISTORIAL).all<{ id: string }>();
-  const recolecciones = await Promise.all(ultimas.map((r) => leerRecoleccion(env, r.id)));
+  // Historial en dos consultas (las últimas recolecciones y todos sus cortes), agrupado aquí.
+  const { results: ultimas } = await env.DB.prepare(`${CON_NOMBRES} order by r.creado_en desc, r.id limit ?`)
+    .bind(HISTORIAL).all<Record<string, unknown> & { id: string; tienda: string }>();
+  const { results: deEllas } = await env.DB.prepare(`${CORTES_DE} where x.recoleccion_id in (select value from json_each(?)) order by c.hasta`)
+    .bind(JSON.stringify(ultimas.map((r) => r.id))).all<{ recoleccion_id: string; id: string; caja: string; hasta: string; entregado: number }>();
+  const recolecciones = ultimas.map((r) =>
+    conTienda(r, deEllas.filter((c) => c.recoleccion_id === r.id).map(({ id, caja, hasta, entregado }) => ({ id, caja, hasta, entregado }))));
   return json({ desde, tiendas, recolecciones });
 }
 
