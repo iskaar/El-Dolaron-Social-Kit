@@ -107,6 +107,12 @@ async function borrarEspera(env: Env, id: string): Promise<void> {
   await env.FOTOS.delete(llaveCruda(id));
 }
 
+async function existe(env: Env, llave: string): Promise<boolean> {
+  const objeto = await env.FOTOS.get(llave);
+  await objeto?.body.cancel();
+  return objeto !== null;
+}
+
 /** Marca el resultado solo si la pieza sigue pendiente y no la descartaron mientras tanto. */
 async function marcar(env: Env, id: string, estado: string, revision: object | null, origen: string | null = null): Promise<boolean> {
   const { meta } = await env.DB.prepare(`update productos set portada_estado = ?, portada_origen = ?, portada_fecha = ?, portada_revision = ?
@@ -116,25 +122,40 @@ async function marcar(env: Env, id: string, estado: string, revision: object | n
 }
 
 /**
- * Pasa `portadas/{id}.jpg` a `extras/{id}/01.jpg` y marca lista/ia. `desde` es el estado que debe tener la pieza: null desde el cron,
- * 'revisar' desde una aprobación. R2 primero con put condicional (no pisa una publicada) y después D1; si D1 ya no la acepta se
- * quita lo que se acaba de poner.
+ * Pasa `portadas/{id}.jpg` a `extras/{id}/01.jpg` y marca `lista` (origen `ia`, salvo que ya fuera `manual`: una portada a mano rechazada y
+ * vuelta a aprobar sigue siendo a mano y una foto nueva nunca la borra). `desde` es el estado que debe tener la pieza: null desde el cron,
+ * 'revisar' desde una aprobación; `fecha`, si viene, la portada que la persona vio (#890). R2 primero con put condicional (no pisa una
+ * publicada) y después D1; si D1 ya no la acepta se quita lo que se acaba de poner.
  */
-async function promover(env: Env, id: string, desde: 'revisar' | null, revision?: object): Promise<boolean> {
+async function promover(env: Env, id: string, desde: 'revisar' | null, revision?: object, fecha?: string | null): Promise<boolean> {
   const espera = await env.FOTOS.get(llaveEspera(id));
   if (!espera) return false;
-  const puesta = await env.FOTOS.put(llavePublicada(id), await espera.arrayBuffer(), { onlyIf: { etagDoesNotMatch: '*' }, httpMetadata: { contentType: 'image/jpeg' } });
+  const puesta = await env.FOTOS.put(llavePublicada(id), await espera.arrayBuffer(), { onlyIf: { etagDoesNotMatch: '*' }, httpMetadata: { contentType: espera.httpMetadata?.contentType || 'image/jpeg' } });
   if (!puesta) return false;
-  const { meta } = await env.DB.prepare(`update productos set portada_estado = 'lista', portada_origen = 'ia', portada_fecha = ?, portada_revision = coalesce(?, portada_revision)
-    where id = ? and portada_estado is ? and estado_analisis <> 'descartado'`).bind(ahora(), revision ? JSON.stringify(revision) : null, id, desde).run();
+  const { meta } = await env.DB.prepare(`update productos set portada_estado = 'lista', portada_origen = coalesce(portada_origen, 'ia'), portada_fecha = ?, portada_revision = coalesce(?, portada_revision)
+    where id = ? and portada_estado is ? and (? = 0 or portada_fecha is ?) and estado_analisis <> 'descartado'`)
+    .bind(ahora(), revision ? JSON.stringify(revision) : null, id, desde, fecha === undefined ? 0 : 1, fecha ?? null).run();
   if (!meta.changes) { await env.FOTOS.delete(llavePublicada(id)); return false; }
   await borrarEspera(env, id);
   return true;
 }
 
-/** Pasa `portadas/{id}.jpg` a `extras/{id}/01.jpg` y marca `lista`/`ia`. false si no había portada en espera o ya hay una publicada. */
-export async function publicarPortada(env: Env, id: string): Promise<boolean> {
-  return promover(env, id, 'revisar');
+/**
+ * Aprobar desde /admin (#890): pasa la portada en espera a `extras/` y marca `lista`. `fecha` = la portada que la persona vio.
+ * false si no había portada en espera o ya hay una publicada. Una portada a mano que sigue publicada tras una foto nueva
+ * (`reiniciarPortada` la deja en `revisar` con su `extras/`) no tiene nada que mover: aprobarla solo confirma que sigue valiendo.
+ */
+export async function publicarPortada(env: Env, id: string, fecha?: string | null): Promise<boolean> {
+  if (await promover(env, id, 'revisar', undefined, fecha)) return true;
+  const publicada = await env.FOTOS.get(llavePublicada(id));
+  if (!publicada) return false;
+  await publicada.body.cancel();
+  const { meta } = await env.DB.prepare(`update productos set portada_estado = 'lista', portada_fecha = ?
+    where id = ? and portada_estado = 'revisar' and portada_origen = 'manual' and (? = 0 or portada_fecha is ?) and estado_analisis <> 'descartado'`)
+    .bind(ahora(), id, fecha === undefined ? 0 : 1, fecha ?? null).run();
+  if (!meta.changes) return false;
+  await borrarEspera(env, id);   // una copia en espera de lo que ya está publicado sobra
+  return true;
 }
 
 /**
@@ -152,14 +173,81 @@ export async function reiniciarPortada(env: Env, id: string): Promise<void> {
 
 async function reiniciar(env: Env, id: string): Promise<void> {
   const pieza = await env.DB.prepare('select portada_origen from productos where id = ?').bind(id).first<{ portada_origen: string | null }>();
-  await borrarEspera(env, id);
   if (pieza?.portada_origen === 'manual') {
+    // Una portada a mano rechazada en /admin (#890) vive solo en espera: no se borra. Con `extras/` presente la copia en espera sobra.
+    if (await existe(env, llavePublicada(id))) await borrarEspera(env, id);
     await env.DB.prepare("update productos set portada_estado = 'revisar', portada_fecha = ?, portada_revision = ? where id = ? and portada_origen = 'manual'")
       .bind(ahora(), JSON.stringify({ ok: false, problemas: ['Llegó una foto nueva: revisa que la portada siga siendo la misma pieza.'], intentos: 0 }), id).run();
     return;
   }
+  await borrarEspera(env, id);
   if (pieza?.portada_origen === 'ia') await env.FOTOS.delete(llavePublicada(id));
   await env.DB.prepare('update productos set portada_estado = null, portada_origen = null, portada_fecha = null, portada_revision = null where id = ?').bind(id).run();
+}
+
+/** La imagen que /admin muestra (#890): la que espera aprobación (o, si no hay, la publicada a mano que sigue en `extras/`), o la ya publicada. */
+export async function imagenDePortada(env: Env, id: string, estado: string | null) {
+  if (estado === 'lista') return env.FOTOS.get(llavePublicada(id));
+  if (estado !== 'revisar') return null;
+  return (await env.FOTOS.get(llaveEspera(id))) ?? env.FOTOS.get(llavePublicada(id));
+}
+
+export type AccionPortada = 'aprobar' | 'rechazar' | 'retomar' | 'generar';
+/** inexistente = 404; cambio = la pieza ya no está como la pantalla la mostró (409); manual = «Generar otra» sobre una portada a mano (409). */
+export type ResultadoPortada = 'ok' | 'inexistente' | 'cambio' | 'manual';
+const DESDE: Record<AccionPortada, string[]> = {
+  aprobar: ['revisar'], rechazar: ['lista'], retomar: ['revisar', 'lista'], generar: ['revisar', 'retomar', 'lista', 'oficial'],
+};
+const REVISION_HUMANA = (problema: string) => JSON.stringify({ ok: false, problemas: [problema], intentos: 0 });
+
+/** Saca la portada de `extras/`. A mano: se conserva en espera, nunca se borra. IA: se borra con lo demás. Sin origen `extras/` no es nuestro. */
+async function retirar(env: Env, id: string, origen: string | null): Promise<void> {
+  if (origen === 'manual') { await moverAEspera(env, id); return; }
+  if (origen === 'ia') await env.FOTOS.delete(llavePublicada(id));
+  await borrarEspera(env, id);
+}
+
+/** `extras/{id}/01.jpg` → `portadas/{id}.jpg`, copiando antes de borrar. true si queda una imagen en espera. */
+async function moverAEspera(env: Env, id: string): Promise<boolean> {
+  const publicada = await env.FOTOS.get(llavePublicada(id));
+  if (!publicada) return existe(env, llaveEspera(id));
+  await env.FOTOS.put(llaveEspera(id), await publicada.arrayBuffer(), { httpMetadata: { contentType: publicada.httpMetadata?.contentType || 'image/jpeg' } });
+  await env.FOTOS.delete(llavePublicada(id));
+  return true;
+}
+
+/**
+ * Revisión humana en /admin (#890). `visto` es el estado y la `portada_fecha` que la pantalla mostró: si ya no coinciden (otra persona, el cron)
+ * no se hace nada, así nadie aprueba una portada que no vio ni aplica dos veces lo mismo.
+ * - aprobar: `publicarPortada`. - rechazar: la portada publicada sale de `extras/` y vuelve a `revisar`.
+ * - retomar: estado `retomar` con motivo; la portada de IA se borra, la hecha a mano se guarda en espera; `foto_key` no se toca.
+ * - generar: la pieza vuelve a la cola del cron (estado null; el tope diario y las comprobaciones aplican, aquí no se llama al modelo).
+ *   Una portada a mano no se reemplaza. La marca en `portada_revision` evita que la pasada de «oficial» la recoja otra vez.
+ * Lo que sale de `extras/` se quita ANTES de tocar D1: si D1 pierde la carrera la pieza queda sin portada publicada, nunca con una sin aprobar.
+ */
+export async function resolverPortada(env: Env, id: string, accion: AccionPortada, visto: { estado: string; fecha: string | null }): Promise<ResultadoPortada> {
+  const pieza = await env.DB.prepare("select portada_estado, portada_origen, portada_fecha from productos where id = ? and propietario = 'dolaron' and estado_analisis <> 'descartado'")
+    .bind(id).first<{ portada_estado: string | null; portada_origen: string | null; portada_fecha: string | null }>();
+  if (!pieza) return 'inexistente';
+  if (!DESDE[accion].includes(visto.estado) || pieza.portada_estado !== visto.estado || pieza.portada_fecha !== visto.fecha) return 'cambio';
+  if (accion === 'aprobar') return await publicarPortada(env, id, visto.fecha) ? 'ok' : 'cambio';
+  if (accion === 'generar' && pieza.portada_origen === 'manual') return 'manual';
+  let cambios: string, valores: (string | null)[];
+  if (accion === 'rechazar') {
+    if (!await moverAEspera(env, id)) return 'cambio';
+    cambios = "portada_estado = 'revisar', portada_revision = ?"; valores = [REVISION_HUMANA('Una persona rechazó la portada.')];
+  } else if (accion === 'retomar') {
+    await retirar(env, id, pieza.portada_origen);
+    cambios = "portada_estado = 'retomar', portada_origen = case when portada_origen = 'manual' then 'manual' end, portada_revision = ?";
+    valores = [REVISION_HUMANA('Una persona pidió retomar la foto.')];
+  } else {
+    // Una «oficial» no tiene portada que borrar: lo que haya en `extras/` puede ser de #628 y el cron lo recogerá como manual.
+    if (visto.estado !== 'oficial') await retirar(env, id, pieza.portada_origen);
+    cambios = 'portada_estado = null, portada_origen = null, portada_revision = ?'; valores = [REVISION_HUMANA('Una persona pidió otra portada.')];
+  }
+  const { meta } = await env.DB.prepare(`update productos set ${cambios}, portada_fecha = ? where id = ? and portada_estado = ? and portada_fecha is ? and estado_analisis <> 'descartado'`)
+    .bind(...valores, ahora(), id, visto.estado, visto.fecha).run();
+  return meta.changes ? 'ok' : 'cambio';
 }
 
 interface Pieza { id: string; foto_key: string }
@@ -223,13 +311,14 @@ export async function procesarPortadas(env: Env, deps: Dependencias = real): Pro
   const topeConfig = claves.get('portadas_tope_diario');
   const tope = topeConfig !== undefined && /^\d+$/.test(topeConfig) ? Number(topeConfig) : TOPE_POR_OMISION;
   const conAprobacion = claves.get('portadas_aprobacion') !== '0';
-  // La imagen oficial de Target ya es de estudio: no pasa por IA ni gasta nada. `original` solo no basta (el botón «original» de /admin
+  // La imagen oficial de Target ya es de estudio: no pasa por IA ni gasta nada. Si una persona pidió generarla igual desde /admin (#890,
+  // la marca de «oficial» puede estar mal) la pieza trae `portada_revision`, y esta pasada no la vuelve a marcar. `original` solo no basta (el botón «original» de /admin
   // también lo pone sobre una foto de anaquel): hace falta una referencia confirmada para el UPC de la pieza, unida igual que
   // guardarImagenComoFoto (imagenes_upc con su manifiesto, confirmado_en <> '') y con la misma clave sin ceros (`ltrim(upc, '0')`).
   // ponytail: sin forzar el índice, SQLite recorre todo lo de la tienda (productos_propietario_precio); con él, solo las pendientes de la cola
   // (~2,000 filas con `recorte_estado` leído de la tabla) y la referencia por llave primaria. Las `original` sin referencia (hoy ~10) se
   // reevalúan cada corrida hasta que se generan. Si pesa, sumar `recorte_estado` a un índice parcial propio.
-  await env.DB.prepare(`update productos as p indexed by productos_portadas_pendientes set portada_estado = 'oficial', portada_fecha = ? where p.portada_estado is null and p.recorte_estado = 'original'
+  await env.DB.prepare(`update productos as p indexed by productos_portadas_pendientes set portada_estado = 'oficial', portada_fecha = ? where p.portada_estado is null and p.portada_revision is null and p.recorte_estado = 'original'
     and exists (select 1 from imagenes_upc i join manifiesto m on m.upc = i.upc and m.tcin = i.tcin where i.upc = ltrim(p.upc, '0') and i.confirmado_en <> '')
     and ${VENDIBLE}`).bind(ahora()).run();
   // ponytail: una pieza que falla siempre por un motivo transitorio (plazo, 5xx) encabeza la cola y frena a las demás; los 4xx y las

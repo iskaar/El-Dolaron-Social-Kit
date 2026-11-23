@@ -155,6 +155,17 @@ En `/admin`, junto a la revisión de recortes y con el mismo patrón (`rutaRecor
 
 Roles y host: los de la revisión de recortes (Access, dueño o capturista, solo El Dolarón).
 
+Implementada en #890 (`portadas-admin.ts`, rutas `/api/portadas`). Reglas que fija:
+
+- **Con imagen oficial** (`oficial`): lista corta con «Generar portada», porque la marca puede estar mal (referencia de Target confirmada pero foto
+  propia de anaquel). Las listas muestran las 30 más recientes de cada estado; no hay búsqueda.
+- **Generar otra / Generar portada** no llama al modelo desde la petición: deja la pieza en la cola del cron (estado `null`), así el tope diario y las
+  comprobaciones aplican. Con origen `ia` se borran la portada publicada y las de espera; con `manual` se niega.
+- **Portada a mano** (origen `manual`): ninguna acción la borra. Rechazarla o retomar la foto la pasa de `extras/` a `portadas/{id}.jpg` (espera), de
+  donde Aprobar la devuelve a `extras/` conservando el origen; una foto nueva tampoco la borra de la espera.
+- Cada cambio es condicional al estado y a la `portada_fecha` que mostraba la pantalla: nadie aprueba una portada que no vio ni aplica dos veces lo
+  mismo (409 y la pantalla se actualiza). Lo que sale de `extras/` se quita antes de tocar D1.
+
 ### Segunda imagen: tarjeta de características
 
 Pedido explícito de Isaac. Tiene dos partes y va **después** del piloto de portadas:

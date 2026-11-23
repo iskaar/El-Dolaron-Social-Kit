@@ -44,6 +44,9 @@ test('una pantalla o API que nadie listo es solo dgerencia', () => {
   assert.deepEqual(permiso('/api/ropa-ia/abc/aceptar', 'POST'), ['capturista']);
   assert.deepEqual(permiso('/api/recortes', 'GET'), ['capturista']);
   assert.deepEqual(permiso('/api/recortes/abc/original', 'POST'), ['capturista']);
+  assert.deepEqual(permiso('/api/portadas', 'GET'), ['capturista']);   // #890: sin FEP, sin vendedor
+  assert.deepEqual(permiso('/api/portadas/abc/imagen', 'GET'), ['capturista']);
+  assert.deepEqual(permiso('/api/portadas/abc/aprobar', 'POST'), ['capturista']);
   assert.equal(puede(usuario(['cajero', 'capturista']), permiso('/pantalla-nueva', 'GET')), false);
 });
 

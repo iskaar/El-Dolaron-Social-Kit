@@ -33,6 +33,8 @@
     content-visibility: auto; contain-intrinsic-size: auto 260px; }   /* el navegador no pinta las que no se ven */
   .ficha img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #eceff4; }
   .recorte-par { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .panel h3 { font-size: 14px; margin: 18px 0 10px; }
+  .ficha.portada { grid-template-columns: minmax(0, 340px) 1fr; }   /* #890: original y portada lado a lado, legibles */
   .candidatas { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 12px; }
   .candidatas a { display: block; overflow-wrap: anywhere; font-size: 13px; margin: 6px 0; }
   .candidatas img { object-fit: contain; }
@@ -49,7 +51,7 @@
   .etiqueta.error { background: #fdecec; color: var(--rojo); }
   .etiqueta.pendiente { background: #fff6d9; color: #8a6d00; }
   .aviso { font-size: 13px; color: var(--rojo); min-height: 18px; }
-  @media (max-width: 640px) { .ficha { grid-template-columns: 1fr; } }
+  @media (max-width: 640px) { .ficha, .ficha.portada { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -91,6 +93,13 @@
   <section class="panel solo-dueno" id="recortes">
     <h2>Recortes</h2>
     <div id="recortes-lista"></div>
+  </section>
+
+  <!-- #890: portadas con IA. Como Revisar ropa: capturista y gerencia (la API exige el rol y «Editar inventario»). -->
+  <section class="panel" id="portadas">
+    <h2>Portadas</h2>
+    <p class="aviso" id="portadas-aviso" role="status"></p>
+    <div id="portadas-lista"></div>
   </section>
 
   <!-- Issue #115: solo el dueno (la API tambien lo exige). -->
@@ -787,6 +796,71 @@ async function cargarRecortes() {
   }
 }
 await cargarRecortes();
+
+// #890: portadas con IA. Cada botón manda el estado y la fecha de lo que se mostró; el servidor solo actúa si la pieza sigue igual.
+// ponytail: listas de hasta 30 piezas (tope del servidor), sin buscar ni paginar.
+async function cargarPortadas(mensaje = '') {
+  const raiz = document.getElementById('portadas-lista');
+  const aviso = document.getElementById('portadas-aviso');
+  const respuesta = await fetch('/api/portadas');
+  if (!respuesta.ok) { raiz.textContent = 'No se pudieron cargar las portadas.'; return; }
+  const listas = await respuesta.json(); raiz.replaceChildren();
+  const OTRA = 'Se generará otra en la próxima corrida (cada 15 minutos).';
+  const RETOMAR = 'Quedó en «Fotos por retomar».';
+  const SECCIONES = [
+    ['revisar', 'Portadas por revisar', 'No hay portadas por revisar.', [['Aprobar', 'aprobar', 'Aprobada: ya está publicada.'], ['Generar otra', 'generar', OTRA], ['Retomar foto', 'retomar', RETOMAR]]],
+    ['retomar', 'Fotos por retomar', 'No hay fotos por retomar.', [['Generar otra', 'generar', OTRA]]],
+    ['lista', 'Portadas listas recientes', 'Aún no hay portadas listas.', [['Rechazar', 'rechazar', 'Rechazada: ya no está publicada y vuelve a «por revisar».'], ['Generar otra', 'generar', OTRA], ['Retomar foto', 'retomar', RETOMAR]]],
+    ['oficial', 'Con imagen oficial', 'Ninguna pieza con imagen oficial.', [['Generar portada', 'generar', 'Se generará la portada en la próxima corrida (cada 15 minutos).']]],
+  ];
+  for (const [estado, titulo, vacio, acciones] of SECCIONES) {
+    const piezas = listas[estado] || [];
+    const encabezado = document.createElement('h3'); encabezado.textContent = `${titulo} (${piezas.length})`; raiz.append(encabezado);
+    if (!piezas.length) { const nada = document.createElement('p'); nada.textContent = vacio; raiz.append(nada); continue; }
+    for (const p of piezas) {
+      const ficha = document.createElement('article'); ficha.className = 'ficha portada';
+      const imagenes = document.createElement('div'); imagenes.className = 'recorte-par';
+      const fuentes = estado === 'revisar' ? [[`/api/foto/${p.id}`, 'Foto original'], [`/api/portadas/${p.id}/imagen`, 'Portada']]
+        : estado === 'lista' ? [[`/api/portadas/${p.id}/imagen`, 'Portada publicada'], [`/api/foto/${p.id}`, 'Foto original']]
+        : [[`/api/foto/${p.id}`, 'Foto original']];
+      for (const [src, alt] of fuentes) {
+        const img = document.createElement('img'); img.src = src; img.alt = alt; img.style.objectFit = 'contain'; imagenes.append(img);
+      }
+      const cuerpo = document.createElement('div');
+      const titular = document.createElement('p'); titular.textContent = `${p.codigo} · ${p.nombre}`;
+      const detalle = document.createElement('p');
+      const problemas = (p.revision && p.revision.problemas) || [];
+      if (estado === 'revisar') detalle.textContent = `${p.revision && p.revision.ok ? 'La comprobación automática la dio por buena.' : 'La comprobación automática no la dio por buena.'}${problemas.length ? ` Problemas: ${problemas.join('; ')}.` : ''}`;
+      else if (estado === 'retomar') detalle.textContent = `Motivo: ${problemas.join('; ') || 'sin detalle'}.`;
+      else if (estado === 'lista') detalle.textContent = p.origen === 'manual' ? 'Hecha a mano.' : 'Hecha con IA.';
+      else detalle.textContent = 'Usa su imagen oficial. Si la foto es de anaquel, genera su portada.';
+      const botones = document.createElement('div'); botones.className = 'acciones';
+      for (const [texto, accion, listo] of acciones) {
+        if (accion === 'generar' && p.origen === 'manual') continue;   // a mano no se reemplaza (el servidor también lo niega)
+        const boton = document.createElement('button'); boton.type = 'button'; boton.textContent = texto;
+        if (accion === 'rechazar' || accion === 'retomar') boton.className = 'claro';
+        boton.addEventListener('click', async () => {
+          for (const b of botones.querySelectorAll('button')) b.disabled = true;   // un toque por vez
+          const r = await fetch(`/api/portadas/${p.id}/${accion}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ estado, fecha: p.fecha }) });
+          const error = r.ok ? '' : ((await r.json().catch(() => ({}))).error || 'No se pudo actualizar la portada.');
+          await cargarPortadas(error || listo);
+          aviso.style.color = error ? '' : '#2c7a3f';
+        });
+        botones.append(boton);
+      }
+      cuerpo.append(titular, detalle, botones);
+      if (!puedeEditarInventario) {
+        for (const b of cuerpo.querySelectorAll('button')) b.disabled = true;
+        const solo = document.createElement('span'); solo.className = 'aviso';
+        solo.textContent = 'Solo consulta: tu cuenta no tiene «Editar inventario».';
+        cuerpo.append(solo);
+      }
+      ficha.append(imagenes, cuerpo); raiz.append(ficha);
+    }
+  }
+  aviso.textContent = mensaje;
+}
+await cargarPortadas();
 </script>
 </body>
 </html>
