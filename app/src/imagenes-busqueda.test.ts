@@ -57,16 +57,27 @@ test('candidatas de og:image y Product del grounding, redirección Vertex, máxi
   assert.equal(await p.env.FOTOS.get(`fotos/${PRODUCTO}.jpg`), null);
 });
 
-test('sin grounding no usa URLs del modelo; sin Vertex da 503 aunque haya llave de AI Studio', async (t) => {
+test('sin grounding no usa URLs del modelo; sin ninguna llave de Gemini da 503', async (t) => {
   const p = preparar();
   let llamadas = 0;
   t.mock.method(globalThis, 'fetch', async () => { llamadas++; return grounding([]); });
   assert.deepEqual((await p.pedir(`${RUTA}/buscar`, {})).cuerpo.candidatas, []);
   delete p.env.VERTEX_API_KEY;
-  p.env.GEMINI_API_KEY = 'no-usar';
   const r = await p.pedir(`${RUTA}/buscar`, {});
-  assert.equal(r.status, 503); assert.match(r.cuerpo.error, /VERTEX_API_KEY/);
+  assert.equal(r.status, 503); assert.match(r.cuerpo.error, /llave de Gemini/);
   assert.equal(llamadas, 1);
+});
+
+// #904: Vertex ya no está en producción; con la llave de AI Studio (saldo prepagado) la búsqueda funciona por ahí.
+test('sin VERTEX_API_KEY pero con GEMINI_API_KEY busca por AI Studio', async (t) => {
+  const p = preparar();
+  delete p.env.VERTEX_API_KEY;
+  p.env.GEMINI_API_KEY = 'ai-studio-sintetica';
+  const urls: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string) => { urls.push(url); return grounding([]); });
+  const r = await p.pedir(`${RUTA}/buscar`, {});
+  assert.equal(r.status, 200); assert.deepEqual(r.cuerpo.candidatas, []);
+  assert.deepEqual(urls, ['https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=ai-studio-sintetica']);
 });
 
 test('páginas sin imagen, bloqueadas, repetidas o inseguras se omiten; error Vertex no se reintenta', async (t) => {

@@ -10,7 +10,7 @@
  * Un 'original' sin referencia (p. ej. el botón «original» de /admin sobre una foto de anaquel) se genera como cualquier otra.
  */
 import { VENDIBLE } from './catalogo.ts';
-import { base64, conClaude, consultarGemini } from './analisis.ts';
+import { base64, conClaude, consultarGemini, sinLlave } from './analisis.ts';
 import { hoyTienda } from './reportes.ts';
 
 export interface Generada { bytes: ArrayBuffer; tipo: string; tokens: { entrada: number; salida: number } }
@@ -35,7 +35,6 @@ const transporteImagen = (env: Env) => {
   return { aiStudio, modelo: aiStudio ? MODELO_IMAGEN_AI_STUDIO : MODELO_IMAGEN };
 };
 // La llave viaja en la URL (`?key=`): nada que se guarde o se registre puede conservarla.
-const sinLlave = (texto: string) => texto.replace(/key=[^&\s"']*/gi, 'key=…');
 const LADO = 1200;
 // ponytail: lote fijo de 3 generaciones por corrida de 15 min (≈ 300 al día como techo, el tope diario manda). Subirlo si el piloto mide holgura.
 const LOTE = 3;
