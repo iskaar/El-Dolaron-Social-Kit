@@ -12,6 +12,7 @@
 import { TIENDAS, tiendaDeCaja, apruebaDinero, leerRoles, leerUsuario, esTienda, type Rol } from './cuentas.ts';
 import { atiende, verificarPinAprobacion } from './cajeros.ts';
 import { hoyTienda } from './reportes.ts';
+import { fechaValida } from './gastos.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const json = (cuerpo: unknown, status = 200) => new Response(JSON.stringify(cuerpo), {
@@ -141,17 +142,25 @@ async function movimiento(request: Request, env: Env, correo: string): Promise<R
   if (!['deposito', 'a_tienda', 'entrada', 'salida'].includes(tipo)) return json({ error: 'Tipo de movimiento invalido.' }, 400);
   if (!Number.isInteger(importe) || importe <= 0 || importe > 100_000_000) return json({ error: 'Importe invalido.' }, 400);
   if ((tipo === 'entrada' || tipo === 'salida') && !nota) return json({ error: 'Escribe una nota que explique el movimiento.' }, 400);
-  if (!(await migrada(env))) return SIN_MIGRAR_090();
-  const leer = () => env.DB.prepare('select * from dinero_movimientos where id = ?').bind(id).first();
-  const previo = await leer();
-  if (previo) return json({ ...previo, repetida: true });
-  // Sin arqueo no hay saldo que mover: el movimiento se perdería en silencio al hacer el primero.
-  if (!(await ultimoArqueo(env))) return json({ error: 'Haz primero el arqueo inicial.' }, 409);
   const ahora = new Date().toISOString();
+  const hoy = hoyTienda(Date.parse(ahora));
+  // Misma validación de fecha que los gastos; sin fecha es hoy, y una fecha futura no se acepta.
+  const fecha = cuerpo.fecha === undefined || cuerpo.fecha === null || cuerpo.fecha === '' ? hoy : cuerpo.fecha;
+  if (!fechaValida(fecha) || fecha > hoy) return json({ error: 'Fecha invalida.' }, 400);
+  if (!(await migrada(env))) return SIN_MIGRAR_090();
+  // Sin arqueo no hay saldo que mover: el movimiento se perdería en silencio al hacer el primero.
+  const ultimo = await ultimoArqueo(env);
+  if (!ultimo) return json({ error: 'Haz primero el arqueo inicial.' }, 409);
+  const leer = () => env.DB.prepare('select * from dinero_movimientos where id = ?').bind(id).first<{ fecha: string; creado_en: string }>();
+  // Siempre se guarda; `cuenta` dice si mueve el saldo (misma regla que POSTERIOR: posterior al último arqueo).
+  const con = (fila: { fecha: string; creado_en: string }, extra: Record<string, unknown> = {}) =>
+    json({ ...fila, ...extra, cuenta: fila.fecha > ultimo.fecha || (fila.fecha === ultimo.fecha && fila.creado_en > ultimo.creado_en) }, extra.repetida ? 200 : 201);
+  const previo = await leer();
+  if (previo) return con(previo, { repetida: true });
   await env.DB.prepare(
     `insert into dinero_movimientos (id, fecha, tipo, importe, nota, creado_por, creado_en) values (?, ?, ?, ?, ?, ?, ?) on conflict (id) do nothing`,
-  ).bind(id, hoyTienda(Date.parse(ahora)), tipo, importe, nota, correo, ahora).run();
-  return json(await leer(), 201);
+  ).bind(id, fecha, tipo, importe, nota, correo, ahora).run();
+  return con((await leer())!);
 }
 
 async function arqueo(request: Request, env: Env, correo: string): Promise<Response> {

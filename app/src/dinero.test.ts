@@ -370,6 +370,26 @@ test('el primer arqueo es el saldo inicial; los movimientos esperan a que exista
   assert.equal((db.prepare('select count(*) as n from dinero_movimientos').get() as { n: number }).n, 1);
 });
 
+test('un movimiento lleva fecha: el anterior al último arqueo se guarda pero no mueve el saldo; hoy sí; futura o inválida, 400', async () => {
+  const { arqueo, mover, saldo, db } = await montarCaja();
+  assert.equal((await arqueo(100000)).status, 201);
+  const antes = await mover('deposito', 8000, { fecha: hoyTienda(-1) });
+  assert.equal(antes.status, 201, JSON.stringify(antes.cuerpo));
+  assert.equal(antes.cuerpo.cuenta, false);
+  assert.equal(antes.cuerpo.fecha, hoyTienda(-1));
+  assert.equal((await saldo()).saldo.esperado, 100000, 'fecha anterior al arqueo: guardado, sin mover el saldo');
+  assert.equal((db.prepare('select count(*) as n from dinero_movimientos').get() as { n: number }).n, 1);
+  assert.equal((await saldo()).movimientos.length, 1);
+  const hoy = await mover('deposito', 8000, { fecha: hoyTienda() });
+  assert.equal(hoy.cuerpo.cuenta, true);
+  assert.equal((await saldo()).saldo.esperado, 92000);
+  const sinFecha = await mover('salida', 1000, { nota: 'Sin fecha' });
+  assert.deepEqual([sinFecha.cuerpo.cuenta, sinFecha.cuerpo.fecha], [true, hoyTienda()]);
+  assert.equal((await saldo()).saldo.esperado, 91000);
+  for (const fecha of [hoyTienda(1), '2026-02-30', 'ayer', 20261120]) assert.equal((await mover('deposito', 100, { fecha })).status, 400, String(fecha));
+  assert.equal((db.prepare('select count(*) as n from dinero_movimientos').get() as { n: number }).n, 3);
+});
+
 test('reintentar con el mismo id no duplica movimientos ni arqueos', async () => {
   const { pedir, saldo, db } = await montarCaja();
   const idArqueo = crypto.randomUUID(), idMov = crypto.randomUUID();

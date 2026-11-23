@@ -80,6 +80,7 @@
         </select></label>
         <label id="campo-importe">Importe ($)<input name="importe" type="number" min="0" step="0.01" inputmode="decimal" required></label>
         <label id="campo-diferencia" hidden>Diferencia<b id="diferencia" style="font-size:20px;min-height:44px;display:flex;align-items:center">—</b></label>
+        <label id="campo-fecha">Fecha<input name="fecha" type="date" required></label>
         <label class="ancho">Nota<textarea name="nota" maxlength="300" rows="2"></textarea></label>
         <button type="submit">Guardar</button>
         <button type="button" class="claro" id="cancelar-forma">Cancelar</button>
@@ -259,6 +260,7 @@ $('tiendas').addEventListener('submit', async (e) => {
 });
 // Depósito, otro movimiento y arqueo: un solo formulario. Un identificador por tipo hasta que se guarde (reintentar no duplica).
 let abierta = '';
+const hoyDia = () => dia(new Date().toISOString());
 const formaIds = {};
 const centavos = (campo) => Math.round(Number(campo.value) * 100);
 function cerrarForma() { abierta = ''; $('forma').hidden = true; }
@@ -278,6 +280,10 @@ $('acciones').addEventListener('click', (e) => {
   $('forma-titulo').textContent = FORMAS[clave].titulo;
   $('forma-ayuda').textContent = FORMAS[clave].ayuda + (clave === 'arqueo' && !datos.saldo ? ' Este primer conteo es el saldo inicial: no tiene diferencia.' : '');
   $('campo-tipo').hidden = clave !== 'otro';
+  // Depósito y otro movimiento llevan fecha (hoy por omisión, nunca futura); el arqueo siempre es de este momento.
+  $('campo-fecha').hidden = clave === 'arqueo';
+  f.elements.fecha.required = clave !== 'arqueo';
+  f.elements.fecha.max = f.elements.fecha.value = hoyDia();
   $('campo-diferencia').hidden = clave !== 'arqueo' || !datos.saldo;
   f.elements.importe.previousSibling.textContent = clave === 'arqueo' ? 'Total contado ($)' : 'Importe ($)';
   f.elements.importe.min = clave === 'arqueo' ? '0' : '0.01';
@@ -298,12 +304,13 @@ $('forma').addEventListener('submit', async (e) => {
     const esArqueo = clave === 'arqueo';
     const r = await fetch(esArqueo ? '/api/dinero/arqueos' : '/api/dinero/movimientos', { method:'POST', headers:{ 'content-type':'application/json' },
       body:JSON.stringify(esArqueo ? { id:formaIds[llave], contado:centavos(f.elements.importe), nota:f.elements.nota.value }
-        : { id:formaIds[llave], tipo, importe:centavos(f.elements.importe), nota:f.elements.nota.value }) });
+        : { id:formaIds[llave], tipo, importe:centavos(f.elements.importe), fecha:f.elements.fecha.value, nota:f.elements.nota.value }) });
     const cuerpo = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(cuerpo.error || 'No se pudo guardar.');
     delete formaIds[llave]; cerrarForma();
     await cargar();
-    aviso(esArqueo ? 'Arqueo registrado.' : 'Movimiento registrado.');
+    aviso(esArqueo ? 'Arqueo registrado.' : cuerpo.cuenta === false
+      ? 'Quedó registrado. Es anterior al último arqueo, así que no mueve el saldo.' : 'Movimiento registrado.');
   } catch (error) { aviso(error.message, true); }
   boton.disabled = false;
 });
