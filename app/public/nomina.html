@@ -16,6 +16,7 @@
   h2 { margin:0 0 12px; color:var(--azul); font-size:17px; }
   form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 12px; }
   label { display:grid; gap:5px; color:var(--suave); font-size:13px; }
+  label#campo-pagado[hidden] { display:none; }
   input,select,button { font:inherit; }
   input,select { width:100%; min-height:44px; padding:10px; border:1px solid var(--linea); border-radius:8px; background:white; }
   button { min-height:44px; padding:9px 14px; border:0; border-radius:8px; background:var(--azul); color:white; font-weight:650; cursor:pointer; }
@@ -86,6 +87,9 @@
       <label class="solo-pago solo-bono">Bono ($)<input name="bono" type="number" min="0" step="0.01" value="0"></label>
       <label class="con-dinero">Sale de
         <select name="origen"><option value="caja">El cajón (lo descuenta el corte)</option><option value="fuera">Fuera de caja</option></select>
+      </label>
+      <label id="campo-pagado" hidden>¿Con qué se pagó?
+        <select name="pagado_con"><option value="efectivo">Efectivo</option><option value="banco">Transferencia</option></select>
       </label>
       <label class="con-dinero" id="campo-caja">Caja
         <select name="caja"><option>Caja 1</option><option>Caja 2</option><option>Caja 3</option></select>
@@ -240,6 +244,8 @@ const cargarPeriodo = (empleado) => api(`/api/nomina/${empleado.id}/periodo`);
 function mostrarCaja() {
   const f = $('accion-form');
   $('campo-caja').hidden = f.elements.origen.value !== 'caja' || f.elements.origen.closest('label').hidden;
+  // «¿Con qué se pagó?» solo si el pago o adelanto sale de fuera del cajón (#910).
+  $('campo-pagado').hidden = f.elements.origen.value !== 'fuera' || f.elements.origen.closest('label').hidden;
 }
 
 /** Antes de confirmar un pago: cuanto se le debe, cuanto se abona y cuanto efectivo sale. */
@@ -306,6 +312,7 @@ $('accion-form').addEventListener('submit', async (ev) => {
         if (tipo === 'devengo') cuerpo.origen = 'manual';
       } else Object.assign(cuerpo, {
         fecha: hoy(), importe: centavos(f.elements.importe.value), origen: f.elements.origen.value, caja: f.elements.caja.value,
+        ...(f.elements.origen.value === 'fuera' ? { pagado_con: f.elements.pagado_con.value } : {}),
         abono: tipo === 'pago' ? centavos(f.elements.abono.value) : 0,
         bono: tipo === 'pago' ? centavos(f.elements.bono.value) : 0,
       });
