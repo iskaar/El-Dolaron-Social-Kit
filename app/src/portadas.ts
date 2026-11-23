@@ -163,9 +163,12 @@ async function reiniciar(env: Env, id: string): Promise<void> {
 }
 
 interface Pieza { id: string; foto_key: string }
+/** Lo que costó y tardó esta corrida con la pieza (#895): va en `portada_revision` para medir el costo real desde D1. */
+interface Medidas { tokens: { entrada: number; salida: number }; ms_generar: number; ms_comprobar: number; modelo: string }
+const medidasNuevas = (): Medidas => ({ tokens: { entrada: 0, salida: 0 }, ms_generar: 0, ms_comprobar: 0, modelo: MODELO_IMAGEN });
 
 /** Una pieza de principio a fin. 'alto' = no seguir con las demás (tope agotado o proveedor caído). */
-async function trabajar(env: Env, deps: Dependencias, pieza: Pieza, tope: number, conAprobacion: boolean): Promise<'seguir' | 'alto'> {
+async function trabajar(env: Env, deps: Dependencias, pieza: Pieza, tope: number, conAprobacion: boolean, medidas: Medidas): Promise<'seguir' | 'alto'> {
   const { id } = pieza;
   const foto = await env.FOTOS.get(pieza.foto_key);
   if (!foto) { await marcar(env, id, 'error', { ok: false, problemas: ['Foto no encontrada en R2.'], intentos: 0 }); return 'seguir'; }
@@ -182,6 +185,8 @@ async function trabajar(env: Env, deps: Dependencias, pieza: Pieza, tope: number
       if (!await gastarGeneracion(env, tope)) { if (intento === 1) return 'alto'; break; }
       const inicio = Date.now();
       const generada = await deps.generar(env, original, veredicto.problemas);
+      medidas.ms_generar += Date.now() - inicio;
+      medidas.tokens.entrada += generada.tokens.entrada; medidas.tokens.salida += generada.tokens.salida;
       console.log(JSON.stringify({ mensaje: 'portada generada', id, modelo: MODELO_IMAGEN, intento, tokens_entrada: generada.tokens.entrada, tokens_salida: generada.tokens.salida, ms: Date.now() - inicio }));
       // Antes de cualquier otra cosa: una imagen pagada no se pierde por un fallo posterior.
       await env.FOTOS.put(llaveCruda(id), generada.bytes, { httpMetadata: { contentType: generada.tipo }, customMetadata: { foto_etag: etag } });
@@ -191,6 +196,7 @@ async function trabajar(env: Env, deps: Dependencias, pieza: Pieza, tope: number
     portada = await normalizar(env, cruda);
     const inicio = Date.now();
     veredicto = await deps.comprobar(env, original, portada);
+    medidas.ms_comprobar += Date.now() - inicio;
     console.log(JSON.stringify({ mensaje: 'portada comprobada', id, ok: veredicto.ok, foto_mala: veredicto.foto_mala, problemas: veredicto.problemas, ms: Date.now() - inicio }));
     if (veredicto.ok || veredicto.foto_mala) break;
   }
@@ -199,7 +205,7 @@ async function trabajar(env: Env, deps: Dependencias, pieza: Pieza, tope: number
   await actual?.body.cancel();
   if (actual?.etag !== etag) { await borrarEspera(env, id); return 'seguir'; }
 
-  const revision = { ok: veredicto.ok, problemas: veredicto.problemas, intentos };
+  const revision = { ok: veredicto.ok, problemas: veredicto.problemas, intentos, ...medidas };
   if (veredicto.foto_mala) await marcar(env, id, 'retomar', revision);
   else {
     await env.FOTOS.put(llaveEspera(id), portada!, { httpMetadata: { contentType: 'image/jpeg' } });
@@ -233,6 +239,7 @@ export async function procesarPortadas(env: Env, deps: Dependencias = real): Pro
   let hechas = 0;
   for (const pieza of results) {
     if (hechas >= LOTE) return;
+    const medidas = medidasNuevas();
     try {
       // Ya hay portada hecha a mano (#628): se respeta tal cual, sin gastar.
       const manual = await env.FOTOS.get(llavePublicada(pieza.id));
@@ -242,14 +249,14 @@ export async function procesarPortadas(env: Env, deps: Dependencias = real): Pro
         continue;
       }
       hechas++;
-      if (await trabajar(env, deps, pieza, tope, conAprobacion) === 'alto') return;
+      if (await trabajar(env, deps, pieza, tope, conAprobacion, medidas) === 'alto') return;
     } catch (error) {
       if (pasajero(error)) {
         console.error(JSON.stringify({ mensaje: 'portada pendiente', id: pieza.id, error: String(error).slice(0, 200) }));
         return;
       }
       const motivo = error instanceof Error ? error.message : String(error);
-      await marcar(env, pieza.id, 'error', { ok: false, problemas: [motivo.slice(0, 200)], intentos: 0 });
+      await marcar(env, pieza.id, 'error', { ok: false, problemas: [motivo.slice(0, 200)], intentos: 0, ...medidas });
       await borrarEspera(env, pieza.id);
     }
   }

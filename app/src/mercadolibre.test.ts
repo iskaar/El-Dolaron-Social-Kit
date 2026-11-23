@@ -2095,6 +2095,74 @@ test('visitas: si ML rechaza el lote con 400 (un solo id por llamada) se pide de
   });
 });
 
+const ultimoAviso = (t: Tienda) => {
+  const f = t.db.prepare("select valor from config where clave = 'ml_visitas_ultimo_aviso'").all() as { valor: string }[];
+  assert.ok(f.length <= 1);
+  return f.length ? JSON.parse(f[0].valor) : null;
+};
+
+test('visitas: cada anomalía deja UNA fila en config (#895) con status, ids, leidas, llaves y el cuerpo crudo, sin cabeceras ni URL', async () => {
+  await conML(async (t) => {
+    publicadas(t, 3);
+    assert.equal(ultimoAviso(t), null);
+    // 403 al lote entero.
+    t.sim.visitas = () => ({ status: 403, cuerpo: { message: 'forbidden', error: 'forbidden', status: 403 } });
+    await conAvisos(() => actualizarVisitas(t.env, AHORA));
+    let a = ultimoAviso(t);
+    assert.deepEqual(Object.keys(a).sort(), ['cuerpo', 'en', 'ids', 'leidas', 'llaves', 'mensaje', 'status']);
+    assert.deepEqual([a.status, a.ids, a.leidas, a.llaves, a.mensaje], [403, 3, 0, ['message', 'error', 'status'], 'ML rechazó la consulta']);
+    assert.equal(a.cuerpo, JSON.stringify({ message: 'forbidden', error: 'forbidden', status: 403 }));
+    assert.ok(Number.isFinite(Date.parse(a.en)));
+    assert.ok(!/Bearer|access_token|\/items\/visits|secreto-de-la-app/.test(JSON.stringify(a)), JSON.stringify(a));
+    // 400 al lote: se avisa, se reintenta de uno en uno y la fila se sobreescribe (sigue siendo una).
+    t.sim.visitas = (ids) => ids.length > 1 ? { status: 400, cuerpo: { message: 'validation_parameters: max ids is 1' } } : porId(ids);
+    await conAvisos(() => actualizarVisitas(t.env, AHORA + DIA));
+    a = ultimoAviso(t);
+    assert.deepEqual([a.status, a.ids, a.leidas, a.mensaje], [400, 3, null, 'lote rechazado, se reintenta de uno en uno']);
+    assert.match(a.cuerpo, /max ids is 1/);
+    // 200 con una forma que no se reconoce.
+    t.sim.visitas = () => ({ cuerpo: { resultado: { raro: true } } });
+    await conAvisos(() => actualizarVisitas(t.env, AHORA + 2 * DIA));
+    a = ultimoAviso(t);
+    assert.deepEqual([a.status, a.ids, a.leidas, a.llaves, a.mensaje], [200, 3, 0, ['resultado'], 'respuesta no reconocida o incompleta']);
+    assert.equal(a.cuerpo, '{"resultado":{"raro":true}}');
+  });
+});
+
+test('visitas: el cuerpo guardado en el aviso se corta a 300 caracteres y un cuerpo que no es un objeto también se guarda', async () => {
+  await conML(async (t) => {
+    publicadas(t, 1);
+    t.sim.visitas = () => ({ status: 403, cuerpo: { message: 'x'.repeat(500) } });
+    await conAvisos(() => actualizarVisitas(t.env, AHORA));
+    const a = ultimoAviso(t);
+    assert.equal(a.cuerpo.length, 300);
+    assert.equal(a.cuerpo, JSON.stringify({ message: 'x'.repeat(500) }).slice(0, 300));
+    t.sim.visitas = () => ({ status: 403, cuerpo: '<html>Forbidden</html>' });
+    await conAvisos(() => actualizarVisitas(t.env, AHORA + DIA));
+    assert.deepEqual([ultimoAviso(t).status, ultimoAviso(t).llaves], [403, 'string']);
+  });
+});
+
+test('visitas: si no se puede escribir el aviso en config, se registra una vez y la corrida sigue igual', async () => {
+  await conML(async (t) => {
+    publicadas(t, 2);
+    t.sim.visitas = () => ({ status: 403, cuerpo: { message: 'forbidden' } });
+    const base = t.env.DB; const errores: string[] = []; const error = console.error;
+    console.error = (l: string) => { errores.push(l); };
+    (t.env as any).DB = { ...base, batch: base.batch.bind(base), prepare: (sql: string) => {
+      if (/ml_visitas_ultimo_aviso/.test(sql)) throw new Error('D1 caída');
+      return base.prepare(sql);
+    } };
+    try {
+      assert.equal((await conAvisos(() => actualizarVisitas(t.env, AHORA))).r, 0);
+    } finally { console.error = error; (t.env as any).DB = base; }
+    assert.equal(errores.length, 1);
+    assert.match(errores[0], /no se pudo guardar el último aviso.*D1 caída/);
+    assert.equal(ultimoAviso(t), null);
+    assert.ok(vistas(t).every((f) => f.x !== ''), 'las publicaciones se marcaron igual');
+  });
+});
+
 test('visitas: un 429 detiene la corrida sin marcar nada y la siguiente la retoma; el tope por corrida son 10 llamadas', async () => {
   await conML(async (t) => {
     publicadas(t, 45);
