@@ -220,7 +220,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 <main>
   <section class="panel">
     <div class="fila-codigo">
-      <input id="codigo" placeholder="Escanea el código, escribe P-17 de un pedido, o busca por descripción" autocomplete="off" autofocus>
+      <input id="codigo" data-lector-propio placeholder="Escanea el código, escribe P-17 de un pedido, o busca por descripción" autocomplete="off" autofocus>
       <button id="abrir-camara" type="button">Cámara</button>
       <button id="sin-etiqueta" type="button" title="Cobrar una pieza que no tiene etiqueta ni banda de precio, escribiendo qué es y cuánto cuesta">Sin etiqueta</button>
     </div>
@@ -560,6 +560,7 @@ import {
 } from '/ticket.js';
 import { imprimirDevolucion } from '/impresora.js';
 import { codigoDeDigitos } from '/code128.js';
+import { escucharLector } from '/lector.js';
 import { leerMensajeAlta } from '/venta.js';
 
 // Tonos de la caja (#817): agudo al agregar una pieza, grave y doble al rechazar un código. Sin archivos de audio.
@@ -3023,6 +3024,12 @@ $('abrir-camara').addEventListener('click', async () => {
 });
 $('camara-cerrar').addEventListener('click', cerrarCamara);
 $('dialogo-camara').addEventListener('cancel', (e) => { e.preventDefault(); cerrarCamara(); });
+
+// #913: lo que lee el lector entra SIEMPRE como pieza (o pedido, socio, vale), esté donde esté el foco. Sin ventana abierta, una ráfaga de
+// lector terminada en Enter llega aquí desde cualquier campo, botón o desde el body; el campo donde cayó queda como estaba (lector.js) y el foco
+// vuelve a #codigo. #codigo (data-lector-propio) sigue con su propio Enter, arriba: sugerencias, búsqueda por texto, multiplicador.
+// Con una ventana abierta no se toca nada: cada ventana tiene su destino del escaneo (guía, devolución, alta...).
+escucharLector(({ codigo }) => { escanear(codigo); $('codigo').focus(); }, { libre: () => !document.querySelector('dialog[open]') });
 
 $('ticket').addEventListener('click', (e) => {
   if (e.target.dataset?.quitarDescuento !== undefined) return $('quitar-descuento').click();

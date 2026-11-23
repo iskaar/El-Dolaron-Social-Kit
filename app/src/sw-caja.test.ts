@@ -55,7 +55,7 @@ test('al instalarse precarga la caja y sus scripts; lo que Access redirige no se
   let espera: Promise<unknown> = Promise.resolve();
   oyentes.install({ waitUntil: (p: Promise<unknown>) => { espera = p; } });
   await espera;
-  assert.deepEqual([...guardado.keys()].sort(), ['/ayuda-contenido.js', '/ayuda.js', '/cajero.js', '/camara.js', '/categorias.js', '/code128.js', '/impresora.js', '/ticket.js', '/venta.js']);
+  assert.deepEqual([...guardado.keys()].sort(), ['/ayuda-contenido.js', '/ayuda.js', '/cajero.js', '/camara.js', '/categorias.js', '/code128.js', '/impresora.js', '/lector.js', '/ticket.js', '/venta.js']);
 });
 
 test('cada modulo que importa caja.html tiene copia sin red (Issue #326)', () => {
