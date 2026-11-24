@@ -2971,7 +2971,7 @@ export default {
       }
 
       if (pathname.startsWith('/api/pedidos')) {
-        const respuestaPedidos = await rutaPedidos(request, env, ctx, pathname, correo, tienda);
+        const respuestaPedidos = await rutaPedidos(request, env, ctx, pathname, correo, tienda, !!usuario?.roles.includes('dueno'));   // #920: gerencia = la cuenta de Access, como /api/avisos
         if (respuestaPedidos) return respuestaPedidos;
       }
 

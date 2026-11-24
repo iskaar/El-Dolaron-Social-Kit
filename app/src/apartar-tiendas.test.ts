@@ -213,10 +213,12 @@ test('cancelar con la pieza ya enviada la regresa a la existencia de Romero; al 
   assert.equal((await m.marcar(salk, 1, a.id, 'separar')).status, 200);
   assert.equal((await romero('/api/pedidos/1/abonos', { id: crypto.randomUUID(), importe: 10000, forma_pago: 'efectivo', caja: 'Romero 1' })).status, 200);
   assert.equal((await m.marcar(salk, 1, a.id, 'mandar')).status, 200);
-  const cancelar = await soledad('/api/pedidos/1/cancelar', {});
+  // #920: el pedido se recoge en Romero; una caja de Soledad ya no lo cancela. Lo cancela Romero, que es donde se recoge.
+  assert.equal((await soledad('/api/pedidos/1/cancelar', {})).status, 403);
+  const cancelar = await romero('/api/pedidos/1/cancelar', {});
   assert.equal(cancelar.status, 200, JSON.stringify(cancelar.cuerpo));
   assert.deepEqual([m.unidades(a.id, 'salk'), m.unidades(a.id, 'romero'), m.unidades(a.id, 'soledad')], [0, 1, 0]);
-  assert.equal((await soledad('/api/pedidos/1/cancelar', {})).status, 409);
+  assert.equal((await romero('/api/pedidos/1/cancelar', {})).status, 409);
   assert.deepEqual([m.unidades(a.id, 'salk'), m.unidades(a.id, 'romero')], [0, 1], 'la segunda cancelación no suma otra');
   assert.equal((await m.avisos(romero)).por_llegar.length, 1, 'la pieza sigue en camino aunque se canceló');
   assert.deepEqual((await m.avisos(romero)).por_regresar, []);

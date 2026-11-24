@@ -8,7 +8,7 @@
  */
 
 import { cajaDe } from './corte.ts';
-import { TIENDA_CENTRAL, TIENDAS, esTienda, tiendaDeCaja, type Tienda } from './cuentas.ts';
+import { TIENDA_CENTRAL, TIENDAS, esTienda, tiendaDeCaja, cajasDe, type Tienda } from './cuentas.ts';
 import { sentenciasMover, esExistenciaInsuficiente, enTiendaSql } from './existencias.ts';
 import { avisarTiendas, nombreTienda } from './avisos-pedidos.ts';
 import { sumarMeses } from './dolarones.ts';
@@ -428,13 +428,23 @@ async function crearPedidoDe(cuerpo: Record<string, unknown>, env: Env, ctx: Exe
   return json({ pedido: creado, excedente_transferencia: transf?.ok ? transf.excedente : 0 }, 201);
 }
 
-/** Apartados, envios por mandar y saldos a favor vigentes. */
-async function listarPedidos(env: Env): Promise<Response> {
+/**
+ * #920: un pedido ES DE una tienda si se recoge ahí (`recoge_en`), si la levantó una de sus cajas, o, sin caja (revendedora), si la
+ * cuenta que lo levantó es de esa tienda (sin tienda = Soledad, como `tiendaDe`). El canal 'portal' no es una cuenta: solo cuenta `recoge_en`.
+ * Es la única definición: la usan la lista, la lectura por folio y las acciones. SQL de `pedidos`; las claves son constantes, no texto del navegador.
+ */
+const deTienda = (tienda: string) => !esTienda(tienda) ? '0'
+  : `(pedidos.recoge_en = '${tienda}' or pedidos.caja in (${cajasDe(tienda).map((c) => `'${c}'`).join(', ')})
+      or (pedidos.caja = '' and exists (select 1 from usuarios u where u.correo = pedidos.vendedora
+        and coalesce(nullif(u.tienda, ''), '${TIENDA_CENTRAL}') = '${tienda}')))`;
+
+/** Apartados, envios por mandar y saldos a favor vigentes, solo los de la tienda de la sesion (gerencia: todos). */
+async function listarPedidos(env: Env, gerencia: boolean, tienda: string): Promise<Response> {
   const ahora = new Date().toISOString();
   const pedidos = await leerPedidos(
     env,
     `(estado = 'apartado' or (estado = 'vendido' and entrega = 'envio' and guia = '')
-      or (estado != 'apartado' and saldo > 0 and saldo_vence_en > ?))`,
+      or (estado != 'apartado' and saldo > 0 and saldo_vence_en > ?)) and ${gerencia ? '1' : deTienda(tienda)}`,
     [ahora],
     `estado != 'apartado', case when estado = 'apartado' then vence_en else '' end, actualizado_en desc`,
   );
@@ -771,16 +781,37 @@ async function pagosDe(env: Env, p: FilaPedido) {
   return pagos.sort((a, b) => a.creado_en.localeCompare(b.creado_en));
 }
 
-/** null = la ruta no es de pedidos. El permiso (CAJA) ya lo cobro cuentas.ts. */
-export async function rutaPedidos(request: Request, env: Env, ctx: ExecutionContext, pathname: string, correo: string, tienda: string): Promise<Response | null> {
+/**
+ * #920: el pedido de ESTE folio cuando es de otra tienda (null = es de la sesion, o no existe y el handler responde 404). Trae lo minimo
+ * para el saldo a favor vigente de un pedido cancelado o vencido, que se gasta en cualquier caja (#800).
+ */
+const deOtraTienda = (env: Env, folio: number, tienda: string) => env.DB.prepare(
+  `select id, folio, estado, entrega, envio, anticipo, saldo, saldo_vence_en, vence_en, liquidado_en, cliente, recoge_en from pedidos
+   where folio = ? and not ${deTienda(tienda)}`).bind(folio).first<FilaPedido>();
+
+/** null = la ruta no es de pedidos. El permiso (CAJA) ya lo cobro cuentas.ts. `gerencia` y `tienda` salen de la cuenta de Access, nunca del navegador. */
+export async function rutaPedidos(request: Request, env: Env, ctx: ExecutionContext, pathname: string, correo: string, tienda: string, gerencia = false): Promise<Response | null> {
   const m = /^\/api\/pedidos(?:\/(\d{1,9})(?:\/(cancelar|guia|piezas|abonos|rechazar-pago))?)?$/.exec(pathname);
   if (!m) return null;
   const metodo = request.method;
   const folio = m[1] === undefined ? null : Number(m[1]);
   if (folio === null) {
     if (metodo === 'POST') return crearPedido(request, env, ctx, correo, 'caja', tienda);
-    if (metodo === 'GET') return listarPedidos(env);
-  } else if (m[2] === undefined) {
+    if (metodo === 'GET') return listarPedidos(env, gerencia, tienda);
+    return json({ error: 'Metodo no permitido.' }, 405);
+  }
+  // #920: la tienda se comprueba antes de leer o escribir nada.
+  const ajeno = gerencia ? null : await deOtraTienda(env, folio, tienda);
+  if (ajeno) {
+    const vigente = ajeno.estado !== 'apartado' && ajeno.saldo > 0 && ajeno.saldo_vence_en > new Date().toISOString();
+    if (m[2] === undefined && metodo === 'GET' && vigente) {
+      // Saldo a favor de un pedido cancelado o vencido: solo lo que la caja necesita para cobrarlo y el nombre para confirmar quien lo gasta.
+      const { id, folio: f, estado, entrega, envio, anticipo, saldo, saldo_vence_en, vence_en, liquidado_en, cliente } = ajeno;
+      return json({ pedido: { id, folio: f, estado, entrega, envio, anticipo, saldo, saldo_vence_en, vence_en, liquidado_en, cliente, telefono: '', lineas: [] } });
+    }
+    return json({ error: `El pedido P-${folio} es de otra tienda: se recoge en ${nombreTienda(ajeno.recoge_en)}.` }, 403);
+  }
+  if (m[2] === undefined) {
     if (metodo === 'GET') {
       const pedido = await pedidoPor(env, 'folio = ?', folio);
       return pedido ? json({ pedido: { ...pedido, pagos: await pagosDe(env, pedido) } }) : json({ error: 'El pedido no existe.' }, 404);
