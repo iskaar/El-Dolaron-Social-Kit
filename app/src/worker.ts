@@ -2845,8 +2845,11 @@ export default {
       if (pathname === '/api/avisos' && request.method === 'GET') {
         // Ventas de ML + transferencias que Banxico no confirmo (#603): la caja las ve como aviso, el dueño las valida.
         // #800: más los avisos de apartados de la tienda de esta terminal (el dueño ve las de todas).
-        const tiendas = usuario?.roles.includes('dueno') ? Object.keys(TIENDAS) : [tienda];
-        return json({ ...await (await avisosPendientes(env)).json() as object, transferencias: await transferenciasPorValidar(env), ...await avisosDePedidos(env, tiendas) });
+        // #921: las transferencias son de la tienda que cobró; las ventas de ML, de Soledad (solo existencia de Soledad) y gerencia.
+        const gerencia = !!usuario?.roles.includes('dueno');
+        const tiendas = gerencia ? Object.keys(TIENDAS) : [tienda];
+        const ml = gerencia || tienda === TIENDA_CENTRAL ? await (await avisosPendientes(env)).json() as object : { ventas_ml: [] };
+        return json({ ...ml, transferencias: await transferenciasPorValidar(env, gerencia ? null : tiendas), ...await avisosDePedidos(env, tiendas) });
       }
       // #800: un toque cierra un aviso de apartado, a nombre de quien lo hace. Quien no es dueño solo marca lo de su tienda.
       const marcarPedido = pathname.match(/^\/api\/avisos\/pedidos\/(\d{1,9})\/([0-9a-f-]{36})\/(separar|mandar|llego|regreso)$/i);
@@ -2865,6 +2868,8 @@ export default {
       if (validarTransf && request.method === 'POST') return await validarTransferencia(env, Number(validarTransf[1]), correo);
       const atender = pathname.match(/^\/api\/avisos\/ml\/([^/]+)\/([^/]+)$/);
       if (atender && request.method === 'POST') {
+        // #921: Mercado Libre vende solo existencia de Soledad; una sucursal no las atiende.
+        if (!usuario?.roles.includes('dueno') && tienda !== TIENDA_CENTRAL) return json({ error: 'Las ventas de Mercado Libre se atienden en Soledad.' }, 403);
         return await atenderVentaML(env, decodeURIComponent(atender[1]), decodeURIComponent(atender[2]), correo);
       }
 
