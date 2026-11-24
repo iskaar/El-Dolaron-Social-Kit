@@ -2,7 +2,7 @@
 import { VENDIBLE, A_LA_VENTA, COLUMNAS_UBICACION, tiendasDe } from './catalogo.ts';
 import { CATEGORIAS, CLAVES_CATEGORIA } from '../public/categorias.js';
 import { TIENDA_CENTRAL, esTienda, type Tienda } from './cuentas.ts';
-import { telefonoInteresado } from '../public/vender.js';
+import { telefonoInteresado, pesos } from '../public/vender.js';
 import { apartarRevendedora, pedidosDeRevendedora, cancelarDeRevendedora } from './pedidos.ts';
 import { reportarPagoDeRevendedora, subirFotoDeRevendedora } from './pagos-reportados.ts';
 
@@ -33,14 +33,23 @@ interface Interesado {
   vendedora: string; estado: string; creado_en: string; actualizado_en: string;
 }
 
-/** Lo que se pide a la lista: `tienda` nula = todas las tiendas, como antes de #882. */
-interface Filtros { q: string; codigo: string | null; categoria: string | null; hoy: boolean; cursor: Cursor | null; tienda: Tienda | null }
+/** Lo que se pide a la lista: `tienda` nula = todas las tiendas, como antes de #882. `compartida` (#924) exige `tienda` y unidades también en otra. */
+interface Filtros { q: string; codigo: string | null; categoria: string | null; hoy: boolean; cursor: Cursor | null; tienda: Tienda | null; compartida?: boolean }
+
+/** #924: SQL (sobre `productos p`) de «hay unidades en `tienda` y en al menos otra». Soledad = `p.stock`; una sucursal, su fila en `existencia_tienda`. */
+function compartidaEn(tienda: Tienda): { sql: string; args: string[] } {
+  const fila = (extra: string) => `exists (select 1 from existencia_tienda x where x.producto_id = p.id and x.unidades > 0${extra})`;
+  return tienda === TIENDA_CENTRAL ? { sql: `(p.stock > 0 and ${fila('')})`, args: [] }
+    : { sql: `(${fila(' and x.tienda = ?')} and (p.stock > 0 or ${fila(' and x.tienda <> ?')}))`, args: [tienda, tienda] };
+}
 
 /**
  * Recorre candidatas en tramos de 24, hasta 240 por petición, y devuelve las elegibles con el cursor para seguir.
  * - Sin tienda: `productos` por `creado_en` (índice productos_propietario_creado).
  * - Soledad: lo mismo con `p.stock > 0`; su llegada es el alta (todo se captura ahí).
  * - Sucursal: `existencia_tienda` por `actualizado_en` (índice existencia_tienda_cambios); `tienda` siempre va ligada.
+ * - `compartida` (#924): en una sucursal, el mismo recorrido con un filtro más (la otra tienda). En Soledad parte de las piezas con fila en
+ *   `existencia_tienda` (unos cientos) en vez de recorrer `productos`, y como ahí ya filtra todo lo vendible no gasta tramos en descartes.
  * ponytail: la llegada a una sucursal es `actualizado_en`, que también sube cuando se vende o se ajusta una pieza con varias unidades.
  * Si estorba, columna `llegada_en` (migración) y este mismo orden sobre ella.
  */
@@ -48,7 +57,9 @@ async function recorrer(env: Env, f: Filtros): Promise<{ piezas: Pieza[]; siguie
   const { q, codigo, categoria, hoy } = f;
   let cursor = f.cursor;
   const sucursal = f.tienda !== null && f.tienda !== TIENDA_CENTRAL;
+  const enSoledadCompartida = !!f.compartida && f.tienda === TIENDA_CENTRAL;
   const fecha = sucursal ? 'e.actualizado_en' : 'p.creado_en';
+  const filtroElegible = `${VENDIBLE} ${categoria ? 'and p.categoria = ?' : ''} ${q && !codigo ? "and instr(lower(p.nombre), lower(?)) > 0" : ''}`;
   const dia = new Date(Date.now() - 6 * 3_600_000).toISOString().slice(0, 10);
   const apertura = `${dia}T06:00:00.000Z`;
   const cierre = new Date(Date.parse(apertura) + 86_400_000).toISOString();
@@ -61,17 +72,21 @@ async function recorrer(env: Env, f: Filtros): Promise<{ piezas: Pieza[]; siguie
     const { results } = await env.DB.prepare(`select p.rowid as fila, p.id, p.codigo, p.nombre, p.marca,
         p.talla, p.categoria, p.precio, p.precio_lista, p.estado_fisico, p.creado_en,
         p.recorte_estado, p.recorte_revision, ${COLUMNAS_UBICACION}, ${sucursal ? 'e.actualizado_en as llegada,' : ''}
-        (${VENDIBLE} ${categoria ? 'and p.categoria = ?' : ''}
-          ${q && !codigo ? "and instr(lower(p.nombre), lower(?)) > 0" : ''}) as elegible
+        ${enSoledadCompartida ? '1' : `(${filtroElegible})`} as elegible
       ${sucursal ? `from existencia_tienda e indexed by existencia_tienda_cambios join productos p on p.id = e.producto_id
-      where e.tienda = ? and e.unidades > 0 and p.propietario = 'dolaron' and p.sin_inventario = 0 and p.destino = 'etiqueta'`
+      where e.tienda = ? and e.unidades > 0 and p.propietario = 'dolaron' and p.sin_inventario = 0 and p.destino = 'etiqueta'
+        ${f.compartida ? 'and (p.stock > 0 or exists (select 1 from existencia_tienda x where x.producto_id = p.id and x.tienda <> e.tienda and x.unidades > 0))' : ''}`
+      : enSoledadCompartida ? `from (select e.producto_id from existencia_tienda e where e.unidades > 0 group by e.producto_id) c
+      cross join productos p on p.id = c.producto_id
+      where p.stock > 0 and p.propietario = 'dolaron' and p.sin_inventario = 0 and p.destino = 'etiqueta' and ${filtroElegible}`
       : `from productos p ${codigo ? '' : 'indexed by productos_propietario_creado'}
       where p.propietario = 'dolaron' and p.sin_inventario = 0 and p.destino = 'etiqueta' ${codigo ? 'and p.codigo = ?' : ''}
         ${f.tienda ? 'and p.stock > 0' : ''}`}
         ${hoy ? `and ${fecha} >= ? and ${fecha} < ?` : ''}
         ${cursor ? `${sucursal ? 'and e.actualizado_en <= ?' : ''} and (${fecha}, p.rowid) < (?, ?)` : ''}
       order by ${fecha} desc, p.rowid desc limit ?`)
-      .bind(...(categoria ? [categoria] : []), ...(q && !codigo ? [q] : []), ...(sucursal ? [f.tienda] : codigo ? [codigo] : []),
+      .bind(...(enSoledadCompartida ? [] : [...(categoria ? [categoria] : []), ...(q && !codigo ? [q] : [])]), ...(sucursal ? [f.tienda] : codigo ? [codigo] : []),
+        ...(enSoledadCompartida ? [...(categoria ? [categoria] : []), ...(q && !codigo ? [q] : [])] : []),
         ...(hoy ? [apertura, cierre] : []), ...(cursor ? [...(sucursal ? [cursor.fecha] : []), cursor.fecha, cursor.fila] : []), PAGINA)
       .all<Pieza>();
     hayMas = results.length === PAGINA;
@@ -131,8 +146,22 @@ function ventasRecientes(env: Env): Promise<VentaDe[]> {
 }
 const nombreCategoria = (clave: string) => CATEGORIAS.find(([c]) => c === clave)?.[1] ?? clave;
 
+/**
+ * De estos códigos (hasta CODIGOS_POR_CONSULTA), los que HOY se pueden ofrecer en `tienda`: VENDIBLE, con unidades ahí y, si se pide, también en otra.
+ * Recomendados y Llamativos guardan listas en memoria; esta es la comprobación que impide que salga una pieza ya vendida o movida.
+ */
+async function disponibles(env: Env, codigos: string[], tienda: Tienda, compartida: boolean): Promise<Pieza[]> {
+  const hay = tienda === TIENDA_CENTRAL ? 'p.stock > 0'
+    : 'exists (select 1 from existencia_tienda e where e.producto_id = p.id and e.tienda = ? and e.unidades > 0)';
+  const otra = compartida ? compartidaEn(tienda) : null;
+  return (await env.DB.prepare(`select p.rowid as fila, p.id, p.codigo, p.nombre, p.marca, p.talla, p.categoria, p.precio, p.precio_lista,
+      p.estado_fisico, p.creado_en, p.recorte_estado, p.recorte_revision, ${COLUMNAS_UBICACION}, 1 as elegible
+    from productos p where p.codigo in (${codigos.map(() => '?').join(',')}) and ${VENDIBLE} and ${hay}${otra ? ` and ${otra.sql}` : ''}`)
+    .bind(...codigos, ...(tienda === TIENDA_CENTRAL ? [] : [tienda]), ...(otra?.args ?? [])).all<Pieza>()).results;
+}
+
 /** Lo que conviene ofrecer en `tienda`: lo que ya se vendió ahí y sigue en existencia, luego lo de las categorías que más se venden. */
-async function recomendar(env: Env, tienda: Tienda, categoria: string | null, correo: string, revendedora: boolean): Promise<Response> {
+async function recomendar(env: Env, tienda: Tienda, categoria: string | null, compartida: boolean, correo: string, revendedora: boolean): Promise<Response> {
   const todas = await ventasRecientes(env);
   const propias = todas.filter((v) => v.tienda === tienda);
   const base = propias.reduce((suma, v) => suma + v.n, 0) >= MINIMO_UNIDADES ? 'tienda' : 'todas';
@@ -147,16 +176,11 @@ async function recomendar(env: Env, tienda: Tienda, categoria: string | null, co
   const aqui = base === 'tienda' ? 'Aquí ' : '';
   const motivos = new Map<string, string>();
   const elegidas: Pieza[] = [];
-  const hay = tienda === TIENDA_CENTRAL ? 'p.stock > 0'
-    : 'exists (select 1 from existencia_tienda e where e.producto_id = p.id and e.tienda = ? and e.unidades > 0)';
   // 1. Piezas que hoy hay en la tienda y ya se vendieron (en la tienda o, sin base propia, en todas), de más a menos unidades.
   // ponytail: se revisan hasta 400 códigos vendidos por petición; la mayoría de lo vendido ya no tiene existencia. Si se queda corto, un índice por venta.
   for (let desde = 0; desde < vendidas.length && desde < CODIGOS_POR_CONSULTA * CONSULTAS_MAX && elegidas.length < PAGINA; desde += CODIGOS_POR_CONSULTA) {
     const lote = vendidas.slice(desde, desde + CODIGOS_POR_CONSULTA);
-    const { results } = await env.DB.prepare(`select p.rowid as fila, p.id, p.codigo, p.nombre, p.marca, p.talla, p.categoria, p.precio, p.precio_lista,
-        p.estado_fisico, p.creado_en, p.recorte_estado, p.recorte_revision, ${COLUMNAS_UBICACION}, 1 as elegible
-      from productos p where p.codigo in (${lote.map(() => '?').join(',')}) and ${VENDIBLE} and ${hay}`)
-      .bind(...lote.map((v) => v.codigo), ...(tienda === TIENDA_CENTRAL ? [] : [tienda])).all<Pieza>();
+    const results = await disponibles(env, lote.map((v) => v.codigo), tienda, compartida);
     for (const v of lote) {
       const p = results.find((r) => r.codigo === v.codigo);
       if (!p || elegidas.length >= PAGINA) continue;
@@ -172,7 +196,7 @@ async function recomendar(env: Env, tienda: Tienda, categoria: string | null, co
   if (elegidas.length < PAGINA && mejores.length) {
     const usadas = new Set(elegidas.map((p) => p.id));
     const listas = await Promise.all(mejores.map(async (c) =>
-      (await recorrer(env, { q: '', codigo: null, categoria: c, hoy: false, cursor: null, tienda })).piezas.filter((p) => !usadas.has(p.id))));
+      (await recorrer(env, { q: '', codigo: null, categoria: c, hoy: false, cursor: null, tienda, compartida })).piezas.filter((p) => !usadas.has(p.id))));
     for (let ronda = 0; elegidas.length < PAGINA && listas.some((l) => ronda < l.length); ronda++) {
       listas.forEach((l, i) => {
         if (ronda >= l.length || elegidas.length >= PAGINA) return;
@@ -184,25 +208,78 @@ async function recomendar(env: Env, tienda: Tienda, categoria: string | null, co
   return json({ piezas: await aTarjetas(env, elegidas, correo, revendedora, motivos), siguiente: null, base });
 }
 
+/* ---------- Llamativos (#924) ---------- */
+
+/** Una candidata: lo que hace falta para filtrar sin volver a D1; `donde` son las tiendas donde había unidades al guardarla. */
+interface Llamativa { codigo: string; nombre: string; categoria: string; donde: string[] }
+// Las piezas con precio de lista mayor al precio, de más a menos ahorro (empate: recorte limpio aprobado, luego la más nueva): una sola lectura
+// de `productos` por hora y por instancia, no una por carga. Se guarda la promesa, como las ventas de Recomendados. Lo que se ofrece se comprueba
+// en D1 cada vez (`disponibles`); lo que llega nuevo tarda hasta una hora en entrar a Llamativos.
+// ponytail: memoria por instancia; si pesa, tope de candidatas en SQL o una tabla de resumen.
+let llamativasGuardadas: { hasta: number; filas: Promise<Llamativa[]> } | null = null;
+/** Para las pruebas: olvida lo guardado. */
+export const olvidarLlamativas = () => { llamativasGuardadas = null; };
+function llamativas(env: Env): Promise<Llamativa[]> {
+  if (!llamativasGuardadas || llamativasGuardadas.hasta <= Date.now()) {
+    const filas = env.DB.prepare(`select p.codigo, p.nombre, p.categoria, p.stock > 0 as en_soledad,
+        (select group_concat(e.tienda) from existencia_tienda e where e.producto_id = p.id and e.unidades > 0) as sucursales
+      from productos p where ${VENDIBLE} and p.precio_lista > p.precio
+      order by p.precio_lista - p.precio desc, (p.recorte_estado = 'listo' and p.recorte_revision = 'ok') desc, p.creado_en desc, p.codigo desc`)
+      .all<{ codigo: string; nombre: string; categoria: string; en_soledad: number; sucursales: string | null }>()
+      .then((r) => r.results.map(({ en_soledad, sucursales, ...p }) => ({ ...p, donde: [...(en_soledad ? [TIENDA_CENTRAL] : []), ...String(sucursales ?? '').split(',').filter(esTienda)] })));
+    llamativasGuardadas = { hasta: Date.now() + 3_600_000, filas };
+    filas.catch(() => { if (llamativasGuardadas?.filas === filas) llamativasGuardadas = null; });
+  }
+  return llamativasGuardadas.filas;
+}
+
+/** Lo que más ahorra contra su precio de lista en `tienda`: hasta 24, sin repetir nombre. */
+async function llamativos(env: Env, tienda: Tienda, categoria: string | null, compartida: boolean, correo: string, revendedora: boolean): Promise<Response> {
+  // Del mismo nombre se guardan 3 como máximo (la primera y dos de reserva por si se vendió): no hay que revisar 80 etiquetas de una misma pieza.
+  const porNombre = new Map<string, number>();
+  const candidatas = (await llamativas(env)).filter((c) => c.donde.includes(tienda) && (!compartida || c.donde.length > 1) && (!categoria || c.categoria === categoria))
+    .filter((c) => { const n = (porNombre.get(c.nombre.trim().toLowerCase()) ?? 0) + 1; porNombre.set(c.nombre.trim().toLowerCase(), n); return n <= 3; });
+  const motivos = new Map<string, string>();
+  const nombres = new Set<string>();
+  const elegidas: Pieza[] = [];
+  // ponytail: se revisan hasta 400 candidatas por petición, como en Recomendados; si la lista guardada se llena de piezas ya vendidas, se queda corta hasta la siguiente hora.
+  for (let desde = 0; desde < candidatas.length && desde < CODIGOS_POR_CONSULTA * CONSULTAS_MAX && elegidas.length < PAGINA; desde += CODIGOS_POR_CONSULTA) {
+    const lote = candidatas.slice(desde, desde + CODIGOS_POR_CONSULTA);
+    const vigentes = new Map((await disponibles(env, lote.map((c) => c.codigo), tienda, compartida)).map((p) => [p.codigo, p]));
+    for (const c of lote) {
+      const p = vigentes.get(c.codigo);
+      const nombre = c.nombre.trim().toLowerCase();
+      if (!p || p.precio_lista <= p.precio || nombres.has(nombre) || elegidas.length >= PAGINA) continue;
+      nombres.add(nombre);
+      elegidas.push(p);
+      motivos.set(p.id, `Ahorra ${pesos(Math.round((p.precio_lista - p.precio) / 100) * 100)}`);
+    }
+  }
+  return json({ piezas: await aTarjetas(env, elegidas, correo, revendedora, motivos), siguiente: null });
+}
+
 async function listarPiezas(env: Env, url: URL, correo: string, revendedora: boolean): Promise<Response> {
   const q = (url.searchParams.get('q') ?? '').trim();
   const categoria = url.searchParams.get('categoria');
   const hoy = url.searchParams.get('hoy');
   const claveTienda = url.searchParams.get('tienda');
   const orden = url.searchParams.get('orden');
+  const marca = url.searchParams.get('compartida');
   const cursor = leerCursor(url.searchParams.get('cursor'));
-  // Recomendados es de la tienda y de quien la atiende: la revendedora no lo ve (403 antes que cualquier otra validación).
-  if (orden !== null && revendedora) return json({ error: 'Recomendados es solo para la tienda.' }, 403);
+  // Recomendados, Llamativos y «también en otra tienda» son de la tienda y de quien la atiende: la revendedora no los ve (403 antes que cualquier otra validación).
+  if ((orden !== null || marca !== null) && revendedora) return json({ error: 'Esa vista es solo para la tienda.' }, 403);
   const tienda = claveTienda === null ? null : esTienda(claveTienda) ? claveTienda : false;
   if (q.length > 80 || (categoria !== null && !CLAVES_CATEGORIA.includes(categoria)) || tienda === false
       || (hoy !== null && hoy !== '1') || (url.searchParams.has('cursor') && !cursor)
-      || (orden !== null && (orden !== 'recomendado' || tienda === null || q || hoy !== null || cursor))) {
+      || (marca !== null && (marca !== '1' || tienda === null))
+      || (orden !== null && (!['recomendado', 'llamativo'].includes(orden) || tienda === null || q || hoy !== null || cursor))) {
     return json({ error: 'Filtros o cursor inválidos.' }, 400);
   }
-  if (orden !== null && tienda) return recomendar(env, tienda, categoria, correo, revendedora);
+  const compartida = marca === '1';
+  if (orden !== null && tienda) return (orden === 'llamativo' ? llamativos : recomendar)(env, tienda, categoria, compartida, correo, revendedora);
   const codigo = /^ED-\d{1,10}$/i.test(q) ? q.toUpperCase() : null;
   // Un código exacto ignora la tienda: la tarjeta dice dónde está, y prepararEnvio y «Me escribieron con un código» dependen de encontrarla.
-  const { piezas, siguiente } = await recorrer(env, { q, codigo, categoria, hoy: hoy !== null, cursor, tienda: codigo ? null : tienda });
+  const { piezas, siguiente } = await recorrer(env, { q, codigo, categoria, hoy: hoy !== null, cursor, tienda: codigo ? null : tienda, compartida: compartida && !codigo });
   return json({ piezas: await aTarjetas(env, piezas, correo, revendedora), siguiente });
 }
 

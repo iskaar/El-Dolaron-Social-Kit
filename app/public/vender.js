@@ -21,15 +21,17 @@ export function codigoDeRespuesta(texto) {
 
 /**
  * #882: lo que dice el título sobre las tarjetas (solo personal). `tienda` y `categoria` son nombres; vacío = todas.
- * Ejemplos: «Lo nuevo en Avenida Salk», «Recomendados para Avenida Salk», «Juguetes en todas las tiendas».
+ * #924: «Llamativos» y `compartida` (solo lo que también hay en otra tienda) al final.
+ * Ejemplos: «Lo nuevo en Avenida Salk», «Recomendados para Avenida Salk», «Llamativos en Soledad · también en otra tienda».
  */
-export function tituloLista({ orden = 'nuevo', tienda = '', categoria = '', q = '', hoy = false } = {}) {
+export function tituloLista({ orden = 'nuevo', tienda = '', categoria = '', q = '', hoy = false, compartida = false } = {}) {
   const donde = tienda || 'todas las tiendas';
-  const resto = categoria && (orden === 'recomendado' || q || hoy) ? ` · ${categoria}` : '';
+  const resto = (categoria && (orden !== 'nuevo' || q || hoy) ? ` · ${categoria}` : '') + (compartida ? ' · también en otra tienda' : '');
+  if (orden === 'llamativo') return `Llamativos en ${donde}${resto}`;
   if (orden === 'recomendado') return `Recomendados para ${donde}${resto}`;
   if (q) return `Resultados de «${q}» en ${donde}${resto}`;
   if (hoy) return `Ingresadas hoy en ${donde}${resto}`;
-  return `${categoria || 'Lo nuevo'} en ${donde}`;
+  return `${categoria || 'Lo nuevo'} en ${donde}${resto}`;
 }
 
 // Reglas de Isaac (22/10, #434): apartado = 7 días y envíos los viernes; anticipo de $100 fijos desde el 1/11 (#662).
