@@ -7,7 +7,7 @@
  * el aviso al dueno cuando algo no cuadra y el «validada a mano» del dueno. Nada de esto frena un cobro:
  * la transferencia ya esta registrada «por cajero» (migracion 060) y esto solo la confirma o la marca.
  */
-import { quienEsServicio } from './cuentas.ts';
+import { quienEsServicio, tiendaDeCaja } from './cuentas.ts';
 import { pushADuenos } from './push.ts';
 import { correoADuenos } from './avisos.ts';
 
@@ -95,14 +95,23 @@ async function avisarDueno(env: Env, origen: string, monto: number, estado: stri
   }
 }
 
-/** Las que Banxico no confirmo y nadie ha validado: /api/avisos (la caja las ve como aviso; el dueno las valida). Sin quien las capturo. */
-export async function transferenciasPorValidar(env: Env) {
+/**
+ * Las que Banxico no confirmo y nadie ha validado: /api/avisos (la caja las ve como aviso; el dueno las valida). Sin quien las capturo.
+ * #921: `tiendas` = null es gerencia (todas); si no, solo las cobradas en esas tiendas: de una venta, ventas.tienda; de un anticipo
+ * o abono, la tienda de la caja que recibio el dinero y, sin caja, donde se recoge el pedido.
+ */
+export async function transferenciasPorValidar(env: Env, tiendas: readonly string[] | null = null) {
   const { results } = await env.DB.prepare(
     `select t.id, t.clave_rastreo, t.monto, t.cep_estado, t.registrado_en, t.venta_id, t.comprobante_key is not null as con_comprobante,
-       (select folio from pedidos where id = t.pedido_id) as folio
-     from transferencias_spei t where t.cep_estado in ('no_encontrada', 'no_coincide') order by t.registrado_en`,
-  ).all<{ id: number; clave_rastreo: string; monto: number; cep_estado: string; registrado_en: string; venta_id: string | null; con_comprobante: number; folio: number | null }>();
-  return results.map((f) => ({
+       p.folio, coalesce(v.tienda, case when coalesce(m.caja, p.caja, '') != '' then null else p.recoge_en end) as tienda,
+       coalesce(m.caja, p.caja, '') as caja
+     from transferencias_spei t
+     left join ventas v on v.id = t.venta_id
+     left join pedidos p on p.id = t.pedido_id
+     left join pedido_movimientos m on m.id = t.movimiento_id
+     where t.cep_estado in ('no_encontrada', 'no_coincide') order by t.registrado_en`,
+  ).all<{ id: number; clave_rastreo: string; monto: number; cep_estado: string; registrado_en: string; venta_id: string | null; con_comprobante: number; folio: number | null; tienda: string | null; caja: string }>();
+  return results.filter((f) => !tiendas || tiendas.includes(f.tienda ?? tiendaDeCaja(f.caja))).map((f) => ({
     id: f.id, clave: f.clave_rastreo, monto: f.monto, estado: f.cep_estado, registrado_en: f.registrado_en, comprobante: f.con_comprobante === 1,
     donde: f.folio != null ? `Pedido P-${f.folio}` : `Ticket ${String(f.venta_id).slice(0, 8).toUpperCase()}`,
   }));
