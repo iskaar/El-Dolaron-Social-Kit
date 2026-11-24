@@ -110,6 +110,10 @@
   #titulo-lista { margin: 4px 0 8px; font-size: 20px; }
   .donde .chip { margin-right: 6px; }
   .motivo { margin-top: 4px; font-size: 16px; }
+  /* #924: tres botones de orden; si no caben en una fila (390 px) pasan a la siguiente y se estiran, sin achicar la letra. */
+  .ordenes { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ordenes button { flex: 1 1 auto; }
+  #vacio-tienda button { margin: 4px 8px 4px 0; }
   .guia ol { margin: 8px 0 0; padding-left: 24px; }
   .guia li { margin: 8px 0; }
   .guia .cab { flex-wrap: nowrap; justify-content: space-between; }
@@ -164,7 +168,8 @@
     <section id="vista-tienda" class="panel" aria-label="Qué piezas ver" hidden>
       <div><label for="vista-tienda-sel">Tienda</label><select id="vista-tienda-sel"></select></div>
       <div><label for="vista-categoria">Categoría</label><select id="vista-categoria"><option value="">Todas</option></select></div>
-      <div class="dos"><button id="orden-nuevo" type="button" aria-pressed="true">Lo nuevo</button><button id="orden-recomendado" type="button" aria-pressed="false">Recomendados</button></div>
+      <label class="check"><input id="vista-compartida" type="checkbox"><span>Solo lo que también hay en otra tienda</span></label>
+      <div class="ordenes"><button id="orden-nuevo" type="button" aria-pressed="true">Lo nuevo</button><button id="orden-recomendado" type="button" aria-pressed="false">Recomendados</button><button id="orden-llamativo" type="button" aria-pressed="false">Llamativos</button></div>
     </section>
     <details id="det-filtros" class="panel plegable" open>
       <summary>Buscar una pieza</summary>
@@ -180,7 +185,7 @@
     <h2 id="titulo-lista" hidden></h2>
     <p id="nota-base" class="nota" hidden></p>
     <div id="piezas"></div>
-    <div id="vacio-tienda" class="panel" hidden><p id="texto-vacio"></p><button id="ver-todas" type="button">Ver todas las tiendas</button><button id="ver-nuevo" type="button">Ver lo nuevo</button></div>
+    <div id="vacio-tienda" class="panel" hidden><p id="texto-vacio"></p><button id="ver-todas" type="button">Ver todas las tiendas</button><button id="ver-nuevo" type="button">Ver lo nuevo</button><button id="ver-todo-tienda" type="button"></button></div>
     <div class="fila"><button id="anterior" type="button" disabled>Anterior</button><button id="siguiente" type="button" disabled>Ver más piezas</button></div>
     <div class="fila"><button id="abrir-bienvenida" class="texto" type="button" hidden>¿Cómo funciona?</button></div>
   </section>
@@ -331,25 +336,29 @@ function pintarTitulo() {
   if (!conVista()) return;
   const tienda = nombreDe(consulta.get('tienda'));
   $('titulo-lista').textContent = tituloLista({ orden: consulta.get('orden') ?? 'nuevo', tienda, categoria: nombreCategoria(consulta.get('categoria')),
-    q: consulta.get('q') ?? '', hoy: consulta.has('hoy') });
+    q: consulta.get('q') ?? '', hoy: consulta.has('hoy'), compartida: consulta.has('compartida') });
   if (consulta.get('orden') === 'recomendado' && baseDe === 'todas') {
     $('nota-base').textContent = `En ${tienda} se ha vendido poco con etiqueta: se muestra lo que más se vende en todas las tiendas y que hay en ${tienda}.`;
     $('nota-base').hidden = false;
   }
 }
-// Una lista vacía con tienda elegida (o sin recomendados) explica por qué y ofrece la salida. Devuelve si lo explicó.
+// Una lista vacía con tienda elegida (o sin recomendados / llamativos) explica por qué y ofrece la salida. Devuelve si lo explicó.
 function pintarVacio() {
-  const tienda = nombreDe(consulta.get('tienda')), recomendados = consulta.get('orden') === 'recomendado';
-  const explicar = conVista() && !piezas.length && !siguiente && (tienda || recomendados);
+  const tienda = nombreDe(consulta.get('tienda')), orden = consulta.get('orden') ?? 'nuevo', compartida = consulta.has('compartida');
+  const explicar = conVista() && !piezas.length && !siguiente && (tienda || orden !== 'nuevo');
   $('vacio-tienda').hidden = !explicar;
   if (!explicar) return false;
   const categoria = nombreCategoria(consulta.get('categoria'));
-  $('texto-vacio').textContent = recomendados
-    ? `Todavía no hay recomendados para ${tienda}${categoria ? ` en ${categoria}` : ''}. Toca «Lo nuevo» para ver lo último en llegar.`
+  const lugar = categoria ? ` en ${categoria}` : '';
+  $('texto-vacio').textContent = compartida ? `No hay piezas de ${tienda} que también estén en otra tienda.`
+    : orden === 'recomendado' ? `Todavía no hay recomendados para ${tienda}${lugar}. Toca «Lo nuevo» para ver lo último en llegar.`
+    : orden === 'llamativo' ? `Todavía no hay llamativos para ${tienda}${lugar}. Toca «Lo nuevo» para ver lo último en llegar.`
     : `No hay piezas ${consulta.has('q') || consulta.has('hoy') || categoria ? 'así ' : ''}en ${tienda}.`
       + (consulta.get('tienda') === 'soledad' ? '' : ` En ${tienda} solo salen las piezas con foto que llegan en bulto desde Soledad.`);
-  $('ver-todas').hidden = recomendados;
-  $('ver-nuevo').hidden = !recomendados;
+  $('ver-todas').hidden = compartida || orden !== 'nuevo';
+  $('ver-nuevo').hidden = compartida || orden === 'nuevo';
+  $('ver-todo-tienda').hidden = !compartida;
+  $('ver-todo-tienda').textContent = `Ver todo lo de ${tienda}`;
   return true;
 }
 function pintarPiezas() {
@@ -411,13 +420,21 @@ function consultaDePersonal() {
   const porCodigo = orden === 'nuevo' && /^ED-\d+$/.test(buscado.q);
   if (!porCodigo && $('vista-tienda-sel').value) params.set('tienda', $('vista-tienda-sel').value);
   if (!porCodigo && $('vista-categoria').value) params.set('categoria', $('vista-categoria').value);
+  if (!porCodigo && $('vista-tienda-sel').value && $('vista-compartida').checked) params.set('compartida', '1');   // #924: solo con tienda; un código exacto la ignora
   if (orden === 'recomendado') params.set('orden', 'recomendado');
+  if (orden === 'llamativo') params.set('orden', 'llamativo');
   return params;
 }
+// Los tres botones de orden y la casilla (que solo vale con una tienda) reflejan `orden` y la tienda elegida.
+function pintarControles() {
+  for (const o of ['nuevo', 'recomendado', 'llamativo']) $(`orden-${o}`).setAttribute('aria-pressed', String(orden === o));
+  const hayTienda = !!$('vista-tienda-sel').value;
+  $('vista-compartida').disabled = !hayTienda;
+  if (!hayTienda) $('vista-compartida').checked = false;
+}
 function cambiarVista() {
+  pintarControles();
   if (cargando) { vistaPendiente = true; return; }   // los controles ya cambiaron: se aplica al terminar la carga
-  $('orden-nuevo').setAttribute('aria-pressed', String(orden === 'nuevo'));
-  $('orden-recomendado').setAttribute('aria-pressed', String(orden === 'recomendado'));
   consulta = consultaDePersonal();
   cursores = [null];
   cargarPiezas();
@@ -428,13 +445,16 @@ $('vista-tienda-sel').addEventListener('change', () => {
 });
 $('vista-categoria').addEventListener('change', cambiarVista);
 $('orden-nuevo').addEventListener('click', () => { orden = 'nuevo'; cambiarVista(); });
-$('orden-recomendado').addEventListener('click', () => {
-  orden = 'recomendado';
+// Recomendados y Llamativos son de una tienda y no se buscan por nombre ni por día.
+for (const o of ['recomendado', 'llamativo']) $(`orden-${o}`).addEventListener('click', () => {
+  orden = o;
   if (!$('vista-tienda-sel').value) $('vista-tienda-sel').value = miTienda || listaTiendas[0].clave;
-  buscado = { q: '', hoy: false };   // Recomendados no se busca por nombre ni por día
+  buscado = { q: '', hoy: false };
   $('q').value = ''; $('hoy').checked = false;
   cambiarVista();
 });
+$('vista-compartida').addEventListener('change', cambiarVista);
+$('ver-todo-tienda').addEventListener('click', () => { $('vista-compartida').checked = false; cambiarVista(); });
 $('ver-todas').addEventListener('click', () => { $('vista-tienda-sel').value = ''; cambiarVista(); });
 $('ver-nuevo').addEventListener('click', () => { orden = 'nuevo'; cambiarVista(); });
 async function cargarPiezas() {
@@ -470,11 +490,10 @@ $('filtros').addEventListener('submit', (e) => {
   if ($('categoria').value) consulta.set('categoria', $('categoria').value);
   if ($('hoy').checked) consulta.set('hoy', '1');
   if (conVista()) {
-    // Buscar regresa a «Lo nuevo»; la tienda y la categoría de arriba se conservan.
+    // Buscar regresa a «Lo nuevo»; la tienda, la categoría y la casilla de arriba se conservan.
     buscado = { q: consulta.get('q') ?? '', hoy: consulta.has('hoy') };
     orden = 'nuevo';
-    $('orden-nuevo').setAttribute('aria-pressed', 'true');
-    $('orden-recomendado').setAttribute('aria-pressed', 'false');
+    pintarControles();
     consulta = consultaDePersonal();
   }
   cursores = [null];
