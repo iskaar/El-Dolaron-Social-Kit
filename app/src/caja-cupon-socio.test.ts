@@ -38,12 +38,12 @@ test('varios cupones viajan en lista; solo cupones por teléfono no mandan el c�
   const varios = montar(SOCIO, [CUPON, CUPON_2], 'DC-x');
   await varios.cobrar({ id: 'f2', dolarones: 1200 });
   assert.deepEqual(varios.enviadas[0].codigo_vale, [CUPON.codigo, CUPON_2.codigo]);
-  assert.equal('codigo_socio' in varios.enviadas[0], false, 'los cupones cubren todo: la cuenta no se toca');
+  assert.equal(varios.enviadas[0].codigo_socio, 'DC-x', 'con socio real el código viaja siempre, como en main (entra al hash del folio)');
 
   const telefono = montar({ ...SOCIO, maximo: undefined, expira_en: undefined }, [CUPON], '');
   const r = await telefono.cobrar({ id: 'f3', dolarones: 1000 });
   assert.ok(r, 'el cupón solo no pide código');
-  assert.deepEqual(telefono.enviadas[0], { id: 'f3', dolarones: 1000, codigo_vale: CUPON.codigo });
+  assert.deepEqual(telefono.enviadas[0], { id: 'f3', dolarones: 1000, codigo_vale: CUPON.codigo, codigo_socio: '' });
   // Pero la cuenta sí: pedir más que el cupón sin código no sale.
   const mas = montar({ ...SOCIO, maximo: undefined, expira_en: undefined }, [CUPON], '');
   assert.equal(await mas.cobrar({ id: 'f4', dolarones: 1500 }), false);
@@ -69,7 +69,8 @@ test('el formulario de una pieza de un ticket con cupón solo ofrece el cupón; 
   const solo = formularioPieza(12, 2, 100, 'efectivo', true);
   assert.match(solo, /data-cupon-linea="12"/);
   assert.match(solo, /solo se devuelve en cupón/);
-  assert.doesNotMatch(solo, /data-confirmar-linea|Devolver dinero/);
+  assert.doesNotMatch(solo, /Devolver dinero/);
+  assert.match(solo, /class="cancelar-normal" hidden[\s\S]*data-confirmar-linea="12"[\s\S]*Cancelar la pieza/, 'la cancelación normal está escondida hasta que el servidor diga «Cancélalas normal»');
   assert.match(solo, /cantidad-cancelar/);
   const normal = formularioPieza(12, 2, 100, 'efectivo');
   assert.match(normal, /data-confirmar-linea="12"/);
@@ -81,4 +82,11 @@ test('pagoConDolarones con cupones y cuenta a la vez devuelve el reparto que la 
   const p = pagoConDolarones({ socio: SOCIO, vales: [CUPON], codigoSocio: 'DC-x', total: 25000, usados: 3000 });
   assert.deepEqual({ ...p.reparto }, { papel: 1000, cuenta: 2000 });
   assert.equal(p.autorizado, true);
+});
+
+test('socio sin cupones: el cuerpo del cobro es el mismo de siempre (el código viaja y entra al hash del folio) (#927)', async () => {
+  const c = montar(SOCIO, [], 'DC-x');
+  await c.cobrar({ id: 'f7', dolarones: 1000 });
+  assert.deepEqual(c.enviadas[0], { id: 'f7', dolarones: 1000, codigo_socio: 'DC-x' });
+  assert.deepEqual(Object.keys(c.enviadas[0]).sort(), ['codigo_socio', 'dolarones', 'id']);
 });

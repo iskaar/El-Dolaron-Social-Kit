@@ -830,11 +830,11 @@ export const ESCENARIOS = [
       'Si dice «Este ticket usó saldo de un pedido; por ahora no se cancela en la caja. Avisa a gerencia.», no se devuelve en la caja: toca «Ayuda».',
       'El encargado da un cupón por el importe y lo anota para corregir el sistema.',
     ],
-    ojo: 'Los apartados no tienen devolución; solo el supervisor puede hacer una excepción. Con socio y cupón, lo que pagó la cuenta regresa a su saldo y lo que pagó el cupón sale en el cupón nuevo; si dice «Cancela el ticket completo.», toda la pieza se pagó con Dolarones y solo se cancela el ticket completo. Con piezas ya devueltas en cupón el ticket no se cancela completo: sigue pieza por pieza.',
+    ojo: 'Los apartados no tienen devolución; solo el supervisor puede hacer una excepción. Con socio y cupón, lo que pagó la cuenta regresa a su saldo y lo que pagó el cupón sale en el cupón nuevo; si dice «Cancélalas normal.», toda la pieza se pagó con Dolarones de la cuenta: en ese mismo formulario aparece «Cancelar la pieza» y los Dolarones regresan a su saldo. Con piezas ya devueltas en cupón el ticket no se cancela completo: sigue pieza por pieza.',
     ver: ['socio-con-cupon', 'cancelar-venta-reciente', 'cancelar-despues-de-5-minutos'],
     pantalla: 'caja',
     textos: ['Devolución', 'Ventas de hoy', 'Ventas de hoy (toca un ticket para ver el desglose)', ['srv-devoluciones', 'Este ticket se pagó con un vale: cancélalo completo.'], ['srv-devoluciones', 'Este ticket se pagó con un vale o cupón: devuelve la pieza en cupón o cancélalo completo.'],
-      ['srv-devoluciones', 'Cancela el ticket completo.'], ['ticket', 'Devolver en cupón'], ['ticket', 'Cancelar todo lo que queda'],
+      ['srv-devoluciones', 'Cancélalas normal.'], ['ticket', 'Cancelar la pieza'], ['ticket', 'Devolver en cupón'], ['ticket', 'Cancelar todo lo que queda'],
       ['srv-pedidos', 'Este ticket usó saldo de un pedido; por ahora no se cancela en la caja. Avisa a gerencia.'], 'Ayuda'],
   },
 

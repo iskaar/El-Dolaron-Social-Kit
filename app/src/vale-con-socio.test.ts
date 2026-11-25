@@ -544,21 +544,91 @@ test('si el cupón viejo pagó todo y la pieza no mueve dinero, igual queda un c
   } finally { t.db.close(); }
 });
 
-test('si el cupón nuevo saldría en cero (la cuenta pagó la pieza) se pide cancelar el ticket completo; sin socio un ticket de vale sigue bloqueado (#927)', async () => {
+test('si el cupón nuevo saldría en cero (la cuenta pagó la pieza) el servidor lo dice y la pieza se cancela normal; sin socio un ticket de vale sigue bloqueado (#927)', async () => {
   const t = abrir();
   try {
     const m = await ticketMixto(t, 2, 5000, 45000);             // 50 D de cupón viejo + 450 D de cuenta: $0 en dinero
     const antes = t.foto();
     const r = await m.devolver();
     assert.equal(r.status, 409);
-    assert.equal(r.cuerpo.error, 'Esas piezas se pagaron con Dolarones de la cuenta: no hay nada que pasar a cupón. Cancela el ticket completo.');
+    assert.equal(r.cuerpo.error, 'Esas piezas se pagaron con Dolarones: no hay dinero que pasar a cupón. Cancélalas normal.');
     assert.equal(t.foto(), antes);
-    assert.equal((await t.pedir(`/api/ventas/${m.id}/cancelar`, { motivo: 'prueba', caja: 'Caja 1' })).status, 200, 'sí se cancela completo');
+    // «Cancélalas normal» sí tiene salida: la pieza no mueve dinero y la cuenta cubre todo.
+    const normal = await t.pedir(`/api/ventas/${m.id}/lineas/${m.lineas[0].id}/cancelar`, { id: crypto.randomUUID(), cantidad: 1, motivo: 'x', caja: 'Caja 1' });
+    assert.equal(normal.status, 201, JSON.stringify(normal.cuerpo));
+    assert.deepEqual([normal.cuerpo.devuelto, normal.cuerpo.dolarones], [0, 25000]);
+    assert.equal(t.lote(m.s.lote).restante, 5000 + 25000);
+    assert.equal((await t.pedir(`/api/ventas/${m.id}/cancelar`, { motivo: 'prueba', caja: 'Caja 1' })).status, 200, 'y el ticket aún se cancela completo');
 
     const w = await t.vale();
     const solo = await t.pedir('/api/ventas', t.venta({ codigo_vale: w.codigo, dolarones: 500, efectivo: 24500 }));
     const r2 = await t.pedir(`/api/ventas/${solo.cuerpo.id}/cupon`, { id: crypto.randomUUID(), lineas: 'todo', motivo: 'x', caja: 'Caja 1' });
     assert.equal(r2.status, 409);
     assert.equal(r2.cuerpo.error, 'Este ticket se pagó con un vale: cancélalo completo, en dinero.');
+  } finally { t.db.close(); }
+});
+
+test('callejón sin salida cerrado: cupón → pieza pagada por la cuenta (cancelación normal) → pieza pagada por el cupón viejo (cupón nuevo); el dinero de una pieza no sale en ningún paso (#927)', async () => {
+  const t = abrir();
+  try {
+    // 3 piezas de $250 iguales: una tercera parte en dinero, una de la cuenta y una del cupón.
+    const m = await ticketMixto(t, 3, 25000, 25000);
+    const viejo = () => t.db.prepare('select restante from vales_dolarones where id = ?').get(m.cupon.id)!.restante as number;
+    const dinero = () => t.pedir(`/api/ventas/${m.id}/lineas/${m.lineas[0].id}/cancelar`, { id: crypto.randomUUID(), cantidad: 1, motivo: 'x', caja: 'Caja 1' });
+    const completo = () => t.pedir(`/api/ventas/${m.id}/cancelar`, { motivo: 'prueba', caja: 'Caja 1' });
+    const MSG = 'Este ticket se pagó con un vale o cupón: devuelve la pieza en cupón o cancélalo completo.';
+    assert.deepEqual(m.venta(), { total: 75000, dolarones: 50000, devuelto: 0, devuelto_cupon: 0, dolarones_devueltos: 0 });
+    assert.equal(t.lote(m.s.lote).restante, 5000);
+
+    // Paso 0: aún hay dinero; devolver dinero de una pieza sigue rechazado.
+    const antes = t.foto();
+    const r0 = await dinero();
+    assert.equal(r0.status, 409);
+    assert.equal(r0.cuerpo.error, MSG);
+    assert.equal(t.foto(), antes);
+
+    // Paso 1 (A): la pieza va a cupón con el dinero que sí se pagó.
+    const a = await m.devolver();
+    assert.equal(a.status, 201, JSON.stringify(a.cuerpo));
+    assert.equal(a.cuerpo.cupon.importe, 25000);
+    assert.deepEqual(m.venta(), { total: 75000, dolarones: 50000, devuelto: 25000, devuelto_cupon: 25000, dolarones_devueltos: 0 });
+
+    // Paso 2 (B): el dinero ya se acabó y la cuenta cubre toda la pieza: en cupón no hay nada que dar («Cancélalas normal»)...
+    const b0 = await m.devolver();
+    assert.equal(b0.status, 409);
+    assert.match(b0.cuerpo.error, /Cancélalas normal/);
+    // ...y la cancelación normal sí pasa: sin dinero ni cupón, los Dolarones regresan a la cuenta.
+    const b = await dinero();
+    assert.equal(b.status, 201, JSON.stringify(b.cuerpo));
+    assert.deepEqual([b.cuerpo.devuelto, b.cuerpo.dolarones], [0, 25000]);
+    assert.equal(t.lote(m.s.lote).restante, 30000);
+    assert.deepEqual(m.venta(), { total: 75000, dolarones: 50000, devuelto: 25000, devuelto_cupon: 25000, dolarones_devueltos: 25000 });
+    assert.equal(viejo(), 0);
+    assert.equal(bitacoraVieja(t, m.cupon.id, 'reverso_canje') + bitacoraVieja(t, m.cupon.id, 'retiro'), 0, 'el cupón viejo ni se toca');
+    assert.equal(nuevosCupones(t), 1);
+
+    // Paso 3 (C): lo que queda lo pagó el cupón viejo. El dinero de la pieza sigue rechazado y la salida es un cupón nuevo con esa parte.
+    const antesC = t.foto();
+    const rC = await dinero();
+    assert.equal(rC.status, 409);
+    assert.equal(rC.cuerpo.error, MSG);
+    assert.equal(t.foto(), antesC);
+    const c = await m.devolver();
+    assert.equal(c.status, 201, JSON.stringify(c.cuerpo));
+    assert.equal(c.cuerpo.cupon.importe, 25000);
+    assert.deepEqual([c.cuerpo.dolarones, c.cuerpo.dolarones_cuenta, c.cuerpo.cupon_papel], [25000, 0, 25000]);
+
+    // Saldos finales.
+    assert.equal(t.lote(m.s.lote).restante, 30000, 'la cuenta recuperó lo que gastó, una sola vez');
+    assert.equal(viejo(), 0, 'el cupón viejo no se restaura');
+    assert.deepEqual([bitacoraVieja(t, m.cupon.id, 'canje'), bitacoraVieja(t, m.cupon.id, 'reverso_canje'), bitacoraVieja(t, m.cupon.id, 'retiro')], [-25000, 25000, -25000]);
+    assert.deepEqual(m.venta(), { total: 75000, dolarones: 50000, devuelto: 25000, devuelto_cupon: 25000, dolarones_devueltos: 50000 });
+    assert.equal(nuevosCupones(t), 2);
+    assert.deepEqual(t.db.prepare("select importe, restante from vales_dolarones where origen = 'devolucion' order by creado_en, rowid").all().map((x) => ({ ...x })),
+      [{ importe: 25000, restante: 25000 }, { importe: 25000, restante: 25000 }]);
+    assert.deepEqual(t.db.prepare('select cupon, dolarones, importe, vale_id is not null as con_cupon from devoluciones where venta_id = ? order by rowid').all(m.id).map((d) => ({ ...d })),
+      [{ cupon: 25000, dolarones: 0, importe: 0, con_cupon: 1 }, { cupon: 0, dolarones: 25000, importe: 0, con_cupon: 0 }, { cupon: 0, dolarones: 25000, importe: 0, con_cupon: 1 }]);
+    // Ya con tres piezas devueltas, el dinero y la cancelación completa siguen sin pasar.
+    assert.equal((await completo()).status, 409);
   } finally { t.db.close(); }
 });

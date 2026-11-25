@@ -1794,7 +1794,7 @@ async function cobrarConDolarones(venta, t, boton = 'el mismo botón de cobro') 
     respuesta = await fetch('/api/ventas', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...venta,
         ...(valesCargados.length ? { codigo_vale:valesCargados.length > 1 ? valesCargados.map((v) => v.codigo) : valesCargados[0].codigo } : {}),
-        ...(!socio.vale && pago.reparto.cuenta > 0 ? { codigo_socio:codigoSocio } : {}) }),
+        ...(!socio.vale ? { codigo_socio:codigoSocio } : {}) }),
       signal: AbortSignal.timeout(15000),
     });
   } catch (error) {
@@ -2759,6 +2759,8 @@ $('ticket-contenido').addEventListener('click', async (e) => {
       for (const b of form.querySelectorAll('button')) b.disabled = false;
       $('ticket-aviso').textContent = cuerpo.error ?? 'No se pudo dar el cupón.';
       $('ticket-aviso').style.color = '#D72B32';
+      // Pieza pagada toda con Dolarones de la cuenta en un ticket con cupón (#927): no hay cupón que dar, pero sí se cancela normal. El formulario trae ese botón escondido.
+      if (r.status === 409 && /Cancélalas normal/.test(cuerpo.error ?? '')) form.querySelector('.cancelar-normal')?.removeAttribute('hidden');
       return;
     }
     idCancelacion = null;

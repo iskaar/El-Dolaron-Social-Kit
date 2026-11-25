@@ -164,6 +164,10 @@ export function formularioPieza(lineaId, quedan, cupon = null, forma = 'efectivo
       <input type="text" class="motivo-cancelar" maxlength="200" placeholder="Motivo de la cancelación">
       ${botonCupon(cupon, `data-cupon-linea="${lineaId}"`)}
       <small>Este ticket se pagó con vale o cupón: la pieza solo se devuelve en cupón (lo que pagó la cuenta regresa a su saldo). Para devolver dinero hay que cancelar el ticket completo.</small>
+      <div class="cancelar-normal" hidden>
+        <small>Esta pieza se pagó con Dolarones de la cuenta: no hay dinero ni cupón que dar. Se cancela normal y los Dolarones regresan a su saldo.</small>
+        <button type="button" class="secundario" data-confirmar-linea="${lineaId}">Cancelar la pieza</button>
+      </div>
       <div class="botones"><button type="button" class="secundario" data-volver>Volver</button></div>
     </div>`;
   // Con tarjeta o transferencia, el cajero dice por donde regresa el dinero: el corte lo cuenta asi.

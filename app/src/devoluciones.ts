@@ -135,11 +135,11 @@ async function prepararPieza(env: Env, ventaId: string, lineaId: number, p: Pedi
   if (venta.cancelada) return falla(409, 'El ticket ya estaba cancelado completo.');
   // Devolver dinero de un ticket que uso saldo de pedido descuadra el corte de dos cajas (pedidos.ts).
   if (venta.anticipo > 0) return falla(409, TICKET_CON_ANTICIPO);
-  // Un ticket que pagó algo con vale o cupón (PR #134) se cancela completo; con socio (#927) la pieza solo se devuelve en cupón (devolverEnCupon):
-  // el dinero de una pieza no se reparte entre papel y cuenta.
-  if (await ticketConPapel(env, venta)) return falla(409, venta.cliente_id
-    ? 'Este ticket se pagó con un vale o cupón: devuelve la pieza en cupón o cancélalo completo.'
-    : 'Este ticket se pagó con un vale: cancélalo completo.');
+  // Un ticket que pagó algo con vale o cupón (PR #134) se cancela completo. Con socio (#927) la pieza se devuelve en cupón (devolverEnCupon), y solo
+  // por esta ruta se acepta una pieza sin dinero y pagada toda con lo que la CUENTA aún tiene canjeado en el ticket (más abajo): el dinero de una pieza
+  // no se reparte entre papel y cuenta.
+  const conPapel = await ticketConPapel(env, venta);
+  if (conPapel && !venta.cliente_id) return falla(409, 'Este ticket se pagó con un vale: cancélalo completo.');
 
   const linea = await env.DB.prepare(
     `select l.id, l.producto_id, l.nombre, l.precio, l.cantidad, l.cancelada_cantidad
@@ -163,6 +163,10 @@ async function prepararPieza(env: Env, ventaId: string, lineaId: number, p: Pedi
     importe, pagado, devuelto: venta.devuelto,
     dolarones: venta.dolarones, dolaronesDevueltos: venta.dolarones_devueltos,
   });
+  // Ticket con papel: solo pasa una pieza que no mueve dinero y cuyos Dolarones regresan todos a la cuenta (sin tocar un cupón). Es la pieza que
+  // devolverEnCupon no puede dar en cupón («Cancélalas normal») y que de otro modo no tendría salida: cancelar completo ya no se puede tras un cupón.
+  if (conPapel && !(importe > 0 && reparto.dinero === 0 && reparto.dolarones === importe && importe <= await canjeDeCuentaPendiente(env, ventaId)))
+    return falla(409, 'Este ticket se pagó con un vale o cupón: devuelve la pieza en cupón o cancélalo completo.');
   return { venta, linea, devolverEn, pagado, reparto };
 }
 
@@ -485,9 +489,7 @@ export async function devolverEnCupon(ventaId: string, request: Request, env: En
   const papel = Math.min(Math.max(0, dolaronesDelta - cuentaPendiente), papelPendiente);
   const importeCupon = Math.round((base * porcentaje) / 100) + papel;
   if (importeCupon <= 0) {
-    return json({ error: papelPendiente > 0
-      ? 'Esas piezas se pagaron con Dolarones de la cuenta: no hay nada que pasar a cupón. Cancela el ticket completo.'
-      : 'Esas piezas se pagaron con Dolarones: no hay dinero que pasar a cupón. Cancélalas normal.' }, 409);
+    return json({ error: 'Esas piezas se pagaron con Dolarones: no hay dinero que pasar a cupón. Cancélalas normal.' }, 409);
   }
   const { cupon, sentencia } = nuevoCupon(env, {
     id, origen: 'devolucion', importe: importeCupon, ahora, ventaOrigen: ventaId, motivo, autor: correo,
