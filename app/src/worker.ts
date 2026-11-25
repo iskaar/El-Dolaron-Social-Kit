@@ -51,7 +51,7 @@ import { reporteCapturas } from './reportes-capturas.ts';
 import { reporteControl } from './reportes-control.ts';
 import { reporteDolarones } from './reportes-dolarones.ts';
 import { rutaPlano } from './plano.ts';
-import { misRetos, otorgarLogros, esCorridaDiaria } from './retos.ts';
+import { misRetos, metaCaja, otorgarLogros, esCorridaDiaria } from './retos.ts';
 import { rutaTablero } from './tablero.ts';
 import { diaTienda, hoyTienda, rangoDias, rangoDe, delDia, DIA, reportes, RangoInvalido } from './reportes.ts';
 import { reporteResumen } from './reportes-resumen.ts';
@@ -2841,6 +2841,8 @@ export default {
 
       // Mis retos (Issue #752): solo lo de quien pregunta; el correo es el del servidor (PIN del cajero o su cuenta).
       if (pathname === '/api/retos/mios' && request.method === 'GET') return await misRetos(env, correo);
+      // Franja de metas de la caja (#935): solo porcentajes de la tienda de la cuenta de Access (nunca la que mande el navegador).
+      if (pathname === '/api/caja/meta' && request.method === 'GET') return await metaCaja(env, tienda);
       // Plano del local (Issue #756): áreas por letrero; leer es de piso, escribir solo del dueño.
       if (pathname === '/api/plano') return await rutaPlano(request, env, usuario, correo);
       // Centro de avisos (Issue #429): ventas de ML por atender, a nombre del cajero que la marca.
