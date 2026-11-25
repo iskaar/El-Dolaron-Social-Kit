@@ -352,7 +352,7 @@ function montarEscaneo() {
   const $ = (id: string) => (id === 'sugerencias' ? sugerencias : codigo);
   const catalogo = [{ codigo: 'ED-000001', nombre: 'Bufanda roja', precio: 5000 }, { codigo: 'ED-000002', nombre: 'Bufanda azul', precio: 6000 }];
   const contexto = {
-    $, leerMultiplicador, escapar: String, pesos: String, precioHoy: (p: any) => p.precio, TONO_PIEZA: {}, TONO_RECHAZO: {}, sonar() {},
+    $, cerrarPaneles() {}, leerMultiplicador, escapar: String, pesos: String, precioHoy: (p: any) => p.precio, TONO_PIEZA: {}, TONO_RECHAZO: {}, sonar() {},
     moverSugerencia, esBusquedaPorTexto, codigoDeDigitos,
     buscarPieza: (t: string) => catalogo.find((p) => p.codigo === t.trim().toUpperCase()),
     buscarPorTexto: (t: string) => catalogo.filter((p) => p.nombre.toLowerCase().includes(t.trim().toLowerCase())),

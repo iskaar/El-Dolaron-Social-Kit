@@ -55,7 +55,7 @@ function montar(piezas: any[], { enLinea = true } = {}) {
   const pintados: number[] = [];
   const red = { onLine: enLinea };
   const contexto: Record<string, unknown> = {
-    $, catalogo, agregarYMarcar, leerMultiplicador, codigoDeDigitos, avisoExistencia, avisoDondeHay, fetch: () => new Promise(() => {}), puedeVenderEnMano, MOTIVOS_EN_MANO, SIN_RED_EN_MANO, Map, Date, Math,
+    $, cerrarPaneles() {}, catalogo, agregarYMarcar, leerMultiplicador, codigoDeDigitos, avisoExistencia, avisoDondeHay, fetch: () => new Promise(() => {}), puedeVenderEnMano, MOTIVOS_EN_MANO, SIN_RED_EN_MANO, Map, Date, Math,
     precioHoy: (p: any) => p.precio, navigator: red, cargarPedido() {}, buscarSocio() {}, cargarCatalogo: async () => {},
     pintar: () => pintados.push(1), sonar() {}, TONO_RECHAZO: {}, escapar: String, pesos: String, moverSugerencia, esBusquedaPorTexto, TONO_PIEZA: {}, document: { createElement: () => elemento() },
   };

@@ -147,6 +147,10 @@ test('#931 Esc que cierra un panel NUNCA cuenta para el doble Esc que borra el t
   q.clic('abrir-mas');
   q.tecla('Escape', { timeStamp: 10200 });   // cierra «Más»: no es el segundo Esc
   assert.equal(q.estado.cancelados, 0);
+  q.tecla('Escape', { timeStamp: 10300 });   // un Esc suelto dentro de la ventana: el panel ya reinició el reloj, así que tampoco cancela
+  assert.equal(q.estado.cancelados, 0, 'Esc, abrir «Más», Esc, Esc no borra el ticket');
+  q.tecla('Escape', { timeStamp: 10400 });   // este sí es el segundo Esc seguido de verdad
+  assert.equal(q.estado.cancelados, 1);
 });
 
 test('#931 los paneles no son <dialog>: el lector sigue activo con uno abierto, el escaneo no se pierde y cae en #codigo; un escaneo los cierra sin mover el foco', () => {
@@ -190,8 +194,10 @@ test('#931 cobro: efectivo, rápidos, cambio y los botones de cobro están junto
   for (const id of ['socio', 'dolarones', 'pedido-cargado', 'datos-transferencia', 'vendedora', 'mas-opciones']) assert.ok(medio.includes(`id="${id}"`), `${id} se desplaza`);
   for (const id of ['efectivo', 'rapidos', 'cambio', 'cobrar-efectivo', 'cobrar-tarjeta', 'cobrar-transferencia', 'cobrar-sin-dinero', 'aviso-remoto', 'cancelar', 'abrir-cajon', 'abrir-devolucion', 'pedir-descuento'])
     assert.ok(pago.includes(`id="${id}"`), `${id} no se desplaza`);
-  assert.match(fuente, /#cobro-medio \{ flex: 1 1 auto; min-height: 0; overflow-y: auto;/);
-  assert.match(fuente, /#cobro \{ overflow: hidden; \}/);
+  // Si ni así cabe (ventana baja, zoom), la columna entera se desplaza: la parte de en medio tiene su mínimo y #cobro su respaldo.
+  assert.match(fuente, /#cobro-medio \{ flex: 1 1 auto; min-height: 130px; overflow-y: auto;/);
+  assert.match(fuente, /#cobro \{ overflow-y: auto; \}/);
+  assert.doesNotMatch(fuente, /#cobro \{ overflow: hidden; \}/);
   // Sin forma de pago por omisión: ningún botón de cobro lleva `autofocus` ni deja de ignorar el Enter del lector.
   assert.doesNotMatch(pago, /autofocus/);
 });
@@ -212,4 +218,62 @@ test('#931 «Imprimir en otra caja» vive en «Más opciones», pero con el modo
   assert.equal(el['aviso-remoto'].hidden, true);
   assert.equal(el['aviso-remoto'].textContent, '');
   assert.ok(entre('<div id="cobro-medio">', '<div id="cobro-pago">').includes('id="modo-remoto"'));
+});
+
+test('#931 un escaneo cierra los paneles aunque el foco ya esté en #codigo (el evento `lectura` no cubre ese caso) y no mueve el foco', () => {
+  const llamadas: unknown[] = [];
+  const escanear = runInNewContext(`${entre('function escanear(', '// Sugerencia resaltada')}; escanear`, {
+    cerrarPaneles: (o: unknown) => llamadas.push(o), agregarCodigo: () => true, sonar() {}, TONO_PIEZA: {}, TONO_RECHAZO: {},
+  });
+  escanear('7501234567890');
+  assert.deepEqual(JSON.parse(JSON.stringify(llamadas)), [{ enfocar: false }]);
+  // Con el panel real abierto y el foco ya en #codigo, el escaneo lo cierra y el foco queda donde estaba.
+  const p = montarPaneles();
+  p.clic('abrir-avisos');
+  p.mundo.activo = 'codigo';
+  const cerrar = runInNewContext(`${entre('const PANELES =', '// Estado de lo que pide atención')}; cerrarPaneles`, { $: p.$, document: p.doc });
+  cerrar({ enfocar: false });
+  assert.equal(p.$('panel-avisos').hidden, true);
+  assert.equal(p.mundo.activo, 'codigo');
+});
+
+test('#931 «Avisos» dice con palabras «venta rechazada» y se pone rojo mientras haya una; sin ellas vuelve a lo normal; nada toma el foco', () => {
+  const el: Record<string, any> = {};
+  const nodo = () => ({ children: [] as any[], className: '', textContent: '', append(...h: any[]) { this.children.push(...h); }, set href(_v: string) {} });
+  const $ = (id: string) => (el[id] ??= {
+    hidden: id === 'promo-cupo' || id === 'buenfin', textContent: '', dataset: {}, atributos: {} as Record<string, string>, clases: new Set<string>(), foco: 0,
+    classList: { toggle(c: string, v: boolean) { v ? el[id].clases.add(c) : el[id].clases.delete(c); } },
+    setAttribute(k: string, v: string) { this.atributos[k] = v; }, removeAttribute(k: string) { delete this.atributos[k]; },
+    replaceChildren(...h: any[]) { this.hijos = h; }, focus() { this.foco++; },
+  });
+  const pintarAvisos = runInNewContext(`${entre('const senales =', '// Lo que una acción revela')}; pintarAvisos`, {
+    $, resumenAvisos, document: { createElement: nodo }, JSON, Object,
+  });
+  pintarAvisos({ rechazadas: 1 });
+  assert.equal($('avisos-rechazo').hidden, false);
+  assert.equal($('avisos-rechazo').textContent, '· venta rechazada');
+  assert.ok($('abrir-avisos').clases.has('urgente'));
+  assert.match($('abrir-avisos').atributos['aria-label'], /hay una venta rechazada.*ya cobrado/);
+  assert.equal($('avisos-n').textContent, '1');
+  pintarAvisos({ rechazadas: 3 });
+  assert.equal($('avisos-rechazo').textContent, '· ventas rechazadas');
+  assert.match($('abrir-avisos').atributos['aria-label'], /hay 3 ventas rechazadas/);
+  pintarAvisos({ rechazadas: 0 });
+  assert.equal($('avisos-rechazo').hidden, true);
+  assert.ok(!$('abrir-avisos').clases.has('urgente'));
+  assert.equal('aria-label' in $('abrir-avisos').atributos, false);
+  assert.equal(Object.values(el).reduce((n: number, e: any) => n + e.foco, 0), 0, 'pintarAvisos nunca enfoca nada');
+  assert.match(fuente, /<span id="avisos-rechazo" hidden><\/span>/);
+});
+
+test('#931 franja: sin promo ni barra de meta a la vista no ocupa lugar; con cualquiera reaparece (regla CSS sobre sus hijos)', () => {
+  assert.match(fuente, /#franja:not\(:has\(> :not\(\[hidden\]\)\)\) \{ display: none; \}/);
+  assert.match(fuente, /<div id="franja">\s*<div id="franja-meta" hidden><\/div>\s*<span id="promo-cupo" role="status" hidden><\/span>\s*<span id="buenfin" role="status" hidden><\/span>/);
+});
+
+test('#931 lo que una acción revela se acerca a la vista dentro de la parte que se desplaza, sin tocar el foco', () => {
+  const bloque = entre('// Lo que una acción revela', 'contarAvisos();');
+  assert.match(bloque, /\['datos-transferencia', 'descuento-form', 'pagar-dolarones'\]/);
+  assert.match(bloque, /scrollIntoView\(\{ block: 'nearest' \}\)/);
+  assert.doesNotMatch(bloque, /\.focus\(/);
 });

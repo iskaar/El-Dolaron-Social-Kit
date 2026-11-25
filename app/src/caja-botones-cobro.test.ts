@@ -675,3 +675,10 @@ for (const forma of ['con red', 'sin red (se encola)']) {
     assert.deepEqual(c.impresos[0][1].map((l: any) => l.codigo), ['ED-A', 'ED-B', 'ED-C'], 'el ticket impreso lleva el mismo orden');
   });
 }
+
+test('#931 pantalla: con el reloj atrasado (sello en el futuro) ningún renglón se resalta ni fija el scroll arriba', () => {
+  const futuro = Date.now() + 3_600_000;
+  const c = armar({ lineas: TICKET_931.map((l) => ({ ...l, tocada: futuro })) });
+  assert.equal((c.$('ticket').innerHTML.match(/renglon nuevo/g) ?? []).length, 0);
+  assert.equal(c.$('ticket').scrollTop, undefined);
+});
