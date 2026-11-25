@@ -37,6 +37,17 @@ export async function usadosEnVenta(env: Env, id: string) {
   return { vale_usado:vales[0] ?? null, vales_usados:vales };
 }
 
+/** Lo que de `ventas.dolarones` (la suma) se pagó con papel: vales y cupones. El resto salió de la cuenta del socio (#927). Se lee de la bitácora. */
+export async function papelDeVenta(env: Env, ventaId: string): Promise<number> {
+  return (await env.DB.prepare(`select coalesce(-sum(importe), 0) as papel from vales_movimientos where venta_id = ? and tipo = 'canje'`)
+    .bind(ventaId).first<{ papel:number }>())?.papel ?? 0;
+}
+
+/** ¿Algún vale o cupón pagó parte de este ticket? Entonces solo se cancela completo (no hay reparto parcial entre papel y cuenta). */
+export async function pagoConPapel(env: Env, ventaId: string): Promise<boolean> {
+  return !!await env.DB.prepare(`select 1 from vales_movimientos where venta_id = ? and tipo = 'canje' limit 1`).bind(ventaId).first();
+}
+
 // ponytail: tope de vales por ticket, para que una lista enorme no arme un batch enorme.
 export const MAXIMO_VALES = 10;
 
@@ -65,23 +76,39 @@ export async function reimprimirVale(env: Env, id: string): Promise<Response> {
   return json(vale);
 }
 
-type Resultado = { ok:true; sentencias:D1PreparedStatement[]; emitido:Vale | null }
+/** Cupón = vale sin compra (`origen` devolucion o manual). El origen sale de D1, nunca del navegador; un código que no existe tampoco pasa. */
+async function todosSonCupones(env: Env, codigos: string[]): Promise<boolean> {
+  const { results } = await env.DB.prepare(`select origen from vales_dolarones where codigo in (${codigos.map(() => '?').join(',')})`)
+    .bind(...codigos).all<{ origen:string }>();
+  return results.length === new Set(codigos).size && results.every((k) => k.origen !== 'compra');
+}
+
+type Resultado = { ok:true; sentencias:D1PreparedStatement[]; emitido:Vale | null; papel:number }
   | { ok:false; error:string; status:number };
 
-/** Emisión y canje van en el mismo batch que dinero, stock y venta. */
+/**
+ * Emisión y canje van en el mismo batch que dinero, stock y venta.
+ *
+ * `dolarones` es el importe TOTAL pagado con Dolarones: papel y cuenta (#927; con socio, el papel son solo cupones). El servidor lo reparte, nunca la caja: el papel va
+ * primero (hasta su saldo vigente) y lo que sobre lo paga la cuenta del socio. `papel` es lo que salió de vales y cupones; quien
+ * llama paga el resto con `sentenciasDeVenta`. Sin socio todo el importe tiene que salir del papel.
+ */
 export async function sentenciasVale(env: Env, p: {
   ventaId:string; clienteId:string | null; codigo:unknown; dolarones:number; total:number; autor:string; ahora:Date;
 }): Promise<Resultado> {
-  if (!Number.isSafeInteger(p.total) || p.total < 0 || !Number.isSafeInteger(p.dolarones) || p.dolarones < 0 || p.dolarones > p.total)
-    return { ok:false, status:400, error:'Importe de Dolarones inválido.' };
-  // Uno (texto, como siempre) o varios vales juntos (lista); nunca con membresía.
+  // Sin vales, el importe lo valida sentenciasDeVenta (socio) con su propio aviso: aquí solo se emite.
+  // Uno (texto, como siempre) o varios vales juntos (lista). Con socio solo entran cupones (#927): un vale de compra no se junta con una membresía.
   const codigos = (Array.isArray(p.codigo) ? p.codigo : p.codigo ? [p.codigo] : []).map(String);
-  if (codigos.length && (p.clienteId || codigos.some((c) => !codigoValeValido(env, c))))
-    return { ok:false, status:400, error:'Usa vales o una membresía, no ambos en el mismo ticket.' };
+  const NO_JUNTOS = 'Usa vales o una membresía, no ambos en el mismo ticket.';
+  if (codigos.length && (codigos.some((c) => !codigoValeValido(env, c)) || (p.clienteId && !(await todosSonCupones(env, codigos)))))
+    return { ok:false, status:400, error:NO_JUNTOS };
   if (new Set(codigos).size !== codigos.length || codigos.length > MAXIMO_VALES)
     return { ok:false, status:400, error:`Cada vale una sola vez, hasta ${MAXIMO_VALES} por ticket.` };
+  if (codigos.length && (!Number.isSafeInteger(p.total) || p.total < 0 || !Number.isSafeInteger(p.dolarones) || p.dolarones < 0 || p.dolarones > p.total))
+    return { ok:false, status:400, error:'Importe de Dolarones inválido.' };
   const ahora = p.ahora.toISOString();
   const sentencias:D1PreparedStatement[] = [];
+  let papel = 0;
   if (codigos.length && p.dolarones > 0) {
     const { results:vales } = await env.DB.prepare(`select k.id, k.restante from vales_dolarones k
       left join ventas v on v.id = k.venta_id
@@ -89,10 +116,12 @@ export async function sentenciasVale(env: Env, p: {
       and k.disponible_desde <= ? and k.vence_en > ? order by k.vence_en, k.id`)
       .bind(...codigos, ahora, ahora).all<{ id:string; restante:number }>();
     const saldo = vales.reduce((suma, k) => suma + k.restante, 0);
-    if (vales.length !== codigos.length || saldo < p.dolarones)
+    if (vales.length !== codigos.length || (!p.clienteId && saldo < p.dolarones))
       return { ok:false, status:409, error:'Vale no disponible o saldo insuficiente. Vuelve a escanearlo.' };
+    // Papel primero (bases, punto 8); con socio, lo que el papel no cubre lo paga su cuenta.
+    papel = Math.min(p.dolarones, saldo);
     // Primero se gasta el que vence antes (bases, punto 8); uno que no hace falta no se toca.
-    let falta = p.dolarones;
+    let falta = papel;
     for (const vale of vales) {
       const usa = Math.min(vale.restante, falta);
       if (usa === 0) break;
@@ -120,7 +149,7 @@ export async function sentenciasVale(env: Env, p: {
         values (?, ?, 'emision', ?, ?, ?)`).bind(emitido.id, p.ventaId, ganados, p.autor, ahora),
     );
   }
-  return { ok:true, sentencias, emitido };
+  return { ok:true, sentencias, emitido, papel };
 }
 
 /** Retira lo ganado de más; importe original y vencimiento quedan intactos. Un vale ya pasado a una
@@ -146,14 +175,54 @@ export async function retirarVale(env: Env, ventaId:string, autor:string, ahora:
   ];
 }
 
-/** Cancelar la venta completa: lo gastado en ella regresa al vale o cupón del que salió, con su vencimiento. */
+/** Lo que de los vales o cupones usados en la venta sigue gastado (canje menos lo ya reasignado), por vale; el que vence al último primero (igual que las cuentas). */
+async function papelGastado(env: Env, ventaId: string) {
+  const { results } = await env.DB.prepare(`select m.vale_id, -sum(m.importe) as importe
+    from vales_movimientos m join vales_dolarones k on k.id = m.vale_id
+    where m.venta_id = ? and m.tipo in ('canje', 'reverso_canje') group by m.vale_id having sum(m.importe) < 0
+    order by max(k.vence_en) desc, m.vale_id`).bind(ventaId).all<{ vale_id:string; importe:number }>();
+  return results;
+}
+
+/** Cuánto del papel usado en la venta todavía puede reasignarse en un cupón nuevo (#927). */
+export async function papelPorReemitir(env: Env, ventaId: string): Promise<number> {
+  return (await papelGastado(env, ventaId)).reduce((suma, v) => suma + v.importe, 0);
+}
+
+const SUMA_AL_MOVIMIENTO = `on conflict (vale_id, venta_id, tipo) do update set importe = importe + excluded.importe,
+  autor = excluded.autor, creado_en = excluded.creado_en`;
+
+/**
+ * Devolución parcial en cupón de un ticket con socio que usó cupones (#927): la parte de la pieza que pagó un cupón viejo NO regresa a ese cupón;
+ * se suma 1:1 al cupón nuevo. Aquí solo queda asentado en la bitácora del cupón viejo, sin tocar su `restante`: un `reverso_canje` (lo gastado en
+ * este ticket baja) y un `retiro` igual de signo contrario (ese valor ya salió en el cupón nuevo). Así lo canjeado neto de la venta sigue cuadrando
+ * con `ventas.dolarones - dolarones_devueltos` y una cancelación completa posterior no lo devuelve dos veces (reponerValesUsados descuenta lo reasignado).
+ * Los renglones se suman si hay varias devoluciones (índice único vale, venta y tipo).
+ */
+export async function sentenciasPapelReemitido(env: Env, ventaId: string, importe: number, autor: string, ahora: string): Promise<D1PreparedStatement[]> {
+  const sentencias: D1PreparedStatement[] = [];
+  let falta = importe;
+  for (const v of await papelGastado(env, ventaId)) {
+    if (falta <= 0) break;
+    const toma = Math.min(v.importe, falta);
+    falta -= toma;
+    sentencias.push(
+      env.DB.prepare(`insert into vales_movimientos (vale_id, venta_id, tipo, importe, autor, creado_en) values (?, ?, 'reverso_canje', ?, ?, ?) ${SUMA_AL_MOVIMIENTO}`)
+        .bind(v.vale_id, ventaId, toma, autor, ahora),
+      env.DB.prepare(`insert into vales_movimientos (vale_id, venta_id, tipo, importe, autor, creado_en) values (?, ?, 'retiro', ?, ?, ?) ${SUMA_AL_MOVIMIENTO}`)
+        .bind(v.vale_id, ventaId, -toma, autor, ahora),
+    );
+  }
+  if (falta > 0) throw new Error('papel por reasignar mayor que lo gastado');
+  return sentencias;
+}
+
+/** Cancelar la venta completa: lo gastado en ella regresa al vale o cupón del que salió, con su vencimiento (menos lo ya reasignado a un cupón nuevo). */
 export async function reponerValesUsados(env: Env, ventaId:string, autor:string, ahora:string): Promise<D1PreparedStatement[]> {
-  const { results:canjes } = await env.DB.prepare(`select vale_id, -importe as importe from vales_movimientos
-    where venta_id = ? and tipo = 'canje'`).bind(ventaId).all<{ vale_id:string; importe:number }>();
-  return canjes.flatMap((c) => [
+  return (await papelGastado(env, ventaId)).flatMap((c) => [
     env.DB.prepare('update vales_dolarones set restante = restante + ? where id = ?').bind(c.importe, c.vale_id),
     env.DB.prepare(`insert into vales_movimientos (vale_id, venta_id, tipo, importe, autor, creado_en)
-      values (?, ?, 'reverso_canje', ?, ?, ?)`).bind(c.vale_id, ventaId, c.importe, autor, ahora),
+      values (?, ?, 'reverso_canje', ?, ?, ?) ${SUMA_AL_MOVIMIENTO}`).bind(c.vale_id, ventaId, c.importe, autor, ahora),
   ]);
 }
 

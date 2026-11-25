@@ -546,7 +546,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, montoTransferidoRazonable, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, TOPE_DESCUENTO_CAJERO, TICKET_VIGENTE_MS, huellaTicket, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, montoTransferidoRazonable, dolaronesGanados, pagoConDolarones, conflictoSocioVale, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, TOPE_DESCUENTO_CAJERO, TICKET_VIGENTE_MS, huellaTicket, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
   esBusquedaPorTexto, avisoExistencia, avisoDondeHay, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo,
   MOTIVOS_EN_MANO, SIN_RED_EN_MANO, puedeVenderEnMano, LIBRE_ID, LIBRE_PRECIO_MIN, LIBRE_PRECIO_MAX, descripcionLibre } from '/venta.js';
 import { abrirCamara } from '/camara.js';
@@ -663,9 +663,12 @@ let pedidoCargado = null;
 let socio = null;
 let codigoSocio = '';
 let codigoLlegada = '';   // código DC- escaneado de un socio con la llegada pendiente (#839)
-let valesCargados = [];          // vales impresos juntos en este ticket: { codigo, disponible, expira_en } (Isaac, 17/10)
+// Vales impresos juntos en este ticket: { codigo, disponible, expira_en, completo } (Isaac, 17/10). Con o sin socio (#927):
+// - solo vales: `socio` es la suma de ellos (`vale: true`), como siempre;
+// - socio y vales: `socio` es el socio (sin `vale`) y el papel va aparte, aquí. El papel se gasta primero; la cuenta pone el resto.
+let valesCargados = [];
 // Ticket vacío + «Usar todos»: se recuerda la elección y pintar() reaplica el máximo en cada cambio
-// (nunca más que maximoCanje, así no se cobra de más). Se apaga al teclear a mano o quitar socio.
+// (nunca más que el máximo de pagoConDolarones, así no se cobra de más). Se apaga al teclear a mano o quitar socio.
 let usarTodos = false;
 let busquedaSocio = 0;
 // La configuración cambia en el servidor; sin consulta vigente sigue desconocida.
@@ -1004,7 +1007,7 @@ function pintar() {
 
   // «Usar todos» elegido en el pop-up: el campo sigue al máximo mientras cambie el ticket.
   if (usarTodos && socio) {
-    const m = maximoCanje(socio, totalNeto());
+    const m = pagoConDolarones({ socio, vales: valesCargados, codigoSocio, total: totalNeto() }).maximo;
     $('dolarones').value = m ? String(m / 100) : '';
   }
   const efectivo = Math.round(Number($('efectivo').value || 0) * 100);
@@ -1028,10 +1031,11 @@ function pintar() {
     anticipo ? `Anticipo P-${pedidoCargado.folio} −${pesos(anticipo)}` : '',
     usados || anticipo ? `A pagar ${pesos(t.aPagar)}` : '',
   ].filter(Boolean).join(' · ');
-  const canjeable = saldoCanjeable(socio, t.total);
-  // Con la respuesta de este folio en duda (#817), el código se sigue dando por bueno: el servidor contesta `duplicada` sin validarlo.
-  const autorizado = !usados || (codigoSocio && usados <= socio.maximo && ((folioIncierto && folioIncierto === idVenta) || Date.parse(socio.expira_en) > Date.now()));
-  $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
+  // Con la respuesta de este folio en duda (#817), el código se sigue dando por bueno: el servidor contesta `duplicada` sin validarlo (ahora = 0).
+  const pago = pagoConDolarones({ socio, vales: valesCargados, codigoSocio, total: t.total, usados, ahora: folioIncierto && folioIncierto === idVenta ? 0 : Date.now() });
+  const canjeable = pago.canjeable;
+  const autorizado = pago.autorizado;
+  $('usar-maximo').disabled = cobrando || pago.maximo === 0;
   for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'llegada-pendiente', 'dolarones', 'efectivo', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido', 'banco-emisor', 'comprobante', 'sin-etiqueta']) $(id).disabled = cobrando;
   // Transferencia desde $300 (#593): aparecen la clave de rastreo y el monto del comprobante.
   // Los datos aparecen con el primer clic en «Transferencia» (cobrar()); aquí se esconden si ya no hacen falta, y con el ticket vacío no queda nada de la anterior.
@@ -1048,14 +1052,21 @@ function pintar() {
   for (const id of ['cobrar-efectivo', 'cobrar-tarjeta', 'cobrar-transferencia', 'cobrar-sin-dinero']) $(id).disabled = sinCobro || (!!incierto && $(id).dataset.forma !== incierto.boton);
   $('rapidos').innerHTML = montosRapidos(t.aPagar).map((m) =>
     `<button type="button" data-centavos="${m.centavos}"${cobrando ? ' disabled' : ''}>${m.exacto ? 'Exacto' : pesos(m.centavos)}</button>`).join('');
-  $('codigo-autorizacion').textContent = socio?.vale
-    ? `${valesCargados.length > 1 ? `${valesCargados.length} vales impresos` : 'Vale impreso'}: ${dolares(socio.disponible)}.`
-      + ` ${valesCargados.length > 1 ? 'El más próximo vence' : 'Vence'} ${new Date(socio.expira_en).toLocaleString('es-MX')}.`
-      + ' Escanea otro vale para sumarlo.'
+  // Papel y cuenta, cada uno con lo suyo (#927): el papel no pide código; la cuenta del socio sí.
+  // Con un socio en el ticket el papel son cupones (los vales de compra no se juntan con una membresía).
+  const conSocio = !!socio && !socio.vale;
+  const textoPapel = valesCargados.length
+    ? `${valesCargados.length > 1 ? `${valesCargados.length} ${conSocio ? 'cupones' : 'vales impresos'}` : conSocio ? 'Cupón' : 'Vale impreso'}: ${dolares(pago.enTicket)}.`
+      + ` ${valesCargados.length > 1 ? 'El más próximo vence' : 'Vence'} ${new Date(pago.vence).toLocaleString('es-MX')}.`
+      + (conSocio ? ' Escanea otro cupón para sumarlo.' : ' Escanea otro vale para sumarlo.')
+    : '';
+  const textoCuenta = !socio || socio.vale ? ''
     : codigoSocio
     ? `El cliente autorizó hasta ${dolares(socio.maximo)}. Su código vence a las ${new Date(socio.expira_en).toLocaleTimeString('es-MX')}.`
       + (!autorizado ? ' Pide otro código o reduce los D solicitados.' : '')
+    : valesCargados.length ? 'Para gastar de su cuenta, escanea el código que el cliente genera en su portal.'
     : 'Para gastar, escanea el código que el cliente genera en su cuenta.';
+  $('codigo-autorizacion').textContent = [textoPapel, textoCuenta].filter(Boolean).join(' ') || 'Para gastar, escanea el código que el cliente genera en su cuenta.';
   $('regla-regalo').hidden = !socio?.regalo_disponible;
   $('regla-regalo').textContent = socio?.regalo_disponible
     ? `${dolares(socio.regalo_disponible)} de apertura: ticket mínimo de ${pesos(MINIMO_REGALO)} MXN antes de descontar Dolarones. Puedes usar ${dolares(Math.min(canjeable, t.total))} en este ticket.`
@@ -1495,13 +1506,24 @@ pintarTopeDescuento();
 function pintarSocio() {
   $('quitar-socio').hidden = !socio;
   $('llegada-pendiente').hidden = !socio || !codigoLlegada;
-  $('pagar-dolarones').hidden = !socio || socio.disponible === 0;
-  $('socio-info').innerHTML = socio
-    ? (socio.vale ? `<b>${valesCargados.length > 1 ? `${valesCargados.length} vales impresos` : 'Vale impreso'}</b>`
-      : `<b>#${socio.numero} · ${escapar(socio.nombre)}</b>`) + ` — ${dolares(socio.disponible)} disponibles`
+  $('pagar-dolarones').hidden = !socio || (socio.disponible === 0 && !valesCargados.length);
+  // Socio y/o vales (#927): una línea para cada uno. Con varios vales se dice cuánto tiene cada uno.
+  const lineaSocio = socio && !socio.vale
+    ? `<b>#${socio.numero} · ${escapar(socio.nombre)}</b> — ${dolares(socio.disponible)} disponibles`
       + (socio.por_liberar ? ` (+${dolares(socio.por_liberar)} desde mañana)` : '')
     : '';
+  const lineaPapel = valesCargados.length
+    ? `<b>${valesCargados.length > 1 ? `${valesCargados.length} ${lineaSocio ? 'cupones' : 'vales impresos'}` : lineaSocio ? 'Cupón' : 'Vale impreso'}</b> — `
+      + (valesCargados.length > 1 ? `${valesCargados.map((v) => dolares(v.disponible)).join(' + ')} = ` : '')
+      + `${dolares(valesCargados.reduce((suma, v) => suma + v.disponible, 0))} disponibles`
+    : '';
+  $('socio-info').innerHTML = [lineaSocio, lineaPapel].filter(Boolean).map((l) => `<div>${l}</div>`).join('');
 }
+
+/** `socio` cuando solo hay vales (lo que era antes de #927): su suma. Sirve también para volver a eso si buscar al socio no sale. */
+const sumaDeVales = (vales) => ({ vale: true, disponible: vales.reduce((suma, v) => suma + v.disponible, 0),
+  maximo: vales.reduce((suma, v) => suma + v.disponible, 0), por_liberar: 0, regalo_disponible: 0,
+  expira_en: vales.map((v) => v.expira_en).sort((a, b) => Date.parse(a) - Date.parse(b))[0] });
 
 function quitarSocio() {
   socio = null;
@@ -1515,7 +1537,7 @@ function quitarSocio() {
   pintarSocio();
 }
 
-/** Los vales y cupones no se combinan con una membresía (bases, puntos 6 quater y 8): se pregunta antes de quitar uno por otro (#758). */
+/** Los vales de compra no se combinan con una membresía (bases, puntos 6 quater y 8); los cupones sí (#927). Se pregunta antes de quitar uno por otro (#758). */
 function confirmarReemplazo(texto, boton) {
   const d = $('dlg-reemplazo');
   if (d.open) return Promise.resolve(false);
@@ -1532,27 +1554,32 @@ async function buscarSocio() {
   const q = codigoDeDigitos($('socio').value) ?? $('socio').value.trim();
   if (!q) return;
   const esVale = q.startsWith('DP-') || (valesPrueba && /^\d{6}$/.test(q));
-  // Vale sobre socio, o socio sobre vale: nunca se quita uno en silencio. Cancelar deja el ticket intacto.
-  if (esVale && socio && !socio.vale) {
-    const sigue = await confirmarReemplazo(`Ya hay un socio en el ticket (#${socio.numero} · ${socio.nombre}). Los vales y cupones no se combinan con una membresía en el mismo ticket.`
-      + ' Si sigues, se quita al socio y se usa el vale.', 'Quitar al socio y usar el vale');
-    if (!sigue) { $('socio').value = '#' + socio.numero; $('codigo').focus(); return; }
-  } else if (!esVale && socio?.vale) {
-    const varios = valesCargados.length > 1;
-    const sigue = await confirmarReemplazo(`${varios ? `Hay ${valesCargados.length} vales` : 'Hay un vale'} en el ticket (${dolares(socio.disponible)}). Los vales y cupones no se combinan con una membresía en el mismo ticket.`
-      + ` Si sigues, ${varios ? 'los vales salen' : 'el vale sale'} del ticket (puedes volver a escanear${varios ? 'los' : 'lo'}). ${guiaVale(valesCargados)}`,
-      varios ? 'Quitar los vales y buscar al socio' : 'Quitar el vale y buscar al socio');
-    if (!sigue) { $('socio').value = ''; $('codigo').focus(); return; }
-  }
-  // Otro vale con un vale ya cargado se suma (Isaac, 17/10); un socio o un vale sobre un socio reemplaza.
-  const sumar = esVale && !!socio?.vale;
-  if (sumar && valesCargados.some((v) => v.codigo === q)) {
+  // Solo los cupones se juntan con un socio (#927): un cupón se SUMA a lo que ya haya y buscar al socio lo conserva. Un vale de compra no:
+  // se pregunta antes de quitar uno por otro, y cancelar deja el ticket intacto (#758). Un vale con otros vales siempre se suma (Isaac, 17/10).
+  const sumar = esVale && !!socio;
+  if (esVale && valesCargados.some((v) => v.codigo === q)) {
     $('socio').value = '';
     $('aviso').textContent = 'Ese vale ya está en el ticket.';
     return;
   }
+  let vales = valesCargados;
+  if (!esVale) {
+    const c = conflictoSocioVale({ socio, vales, esVale: false });
+    if (c.pregunta) {
+      const varios = c.quitar.length > 1;
+      const sigue = await confirmarReemplazo(`${varios ? `Hay ${c.quitar.length} vales de compra` : 'Hay un vale de compra'} en el ticket (${dolares(c.quitar.reduce((suma, v) => suma + v.disponible, 0))}). Los vales de compra no se combinan con una membresía en el mismo ticket (los cupones sí).`
+        + ` Si sigues, ${varios ? 'los vales salen' : 'el vale sale'} del ticket (puedes volver a escanear${varios ? 'los' : 'lo'}). ${guiaVale(c.quitar)}`,
+        varios ? 'Quitar los vales y buscar al socio' : 'Quitar el vale y buscar al socio');
+      if (!sigue) { $('socio').value = ''; $('codigo').focus(); return; }
+      vales = c.quedan;   // solo salen los vales de compra: los cupones se quedan
+    }
+  }
   if (sumar) busquedaSocio++;
-  else quitarSocio();
+  else {
+    quitarSocio();
+    // Buscar al socio con cupones ya cargados los conserva: mientras llega la respuesta el ticket sigue siendo de cupones.
+    if (!esVale && vales.length) { valesCargados = vales; socio = sumaDeVales(vales); codigoSocio = vales[0].codigo; }
+  }
   const busqueda = busquedaSocio;
   idVenta = null;
   pintar();
@@ -1571,6 +1598,13 @@ async function buscarSocio() {
       $('aviso').style.color = '#D72B32';
       return;
     }
+    if (!r.ok && vales.length) {
+      // El socio no se encontró: los vales siguen en el ticket y el error va aparte, sin tapar lo que ya hay.
+      pintarSocio();
+      $('aviso').textContent = cuerpo.error ?? 'No se encontró el socio.';
+      $('aviso').style.color = '#D72B32';
+      return;
+    }
     if (!r.ok) {
       socio = null;
       pintarSocio();
@@ -1578,12 +1612,28 @@ async function buscarSocio() {
       $('socio-info').style.color = '#D72B32';
       return;
     }
-    if (esVale) valesCargados.push({ codigo:q, disponible:cuerpo.disponible, expira_en:cuerpo.expira_en, completo:cuerpo.completo });
-    socio = sumar ? { ...socio, disponible:socio.disponible + cuerpo.disponible, maximo:socio.maximo + cuerpo.maximo,
-      expira_en:Date.parse(cuerpo.expira_en) < Date.parse(socio.expira_en) ? cuerpo.expira_en : socio.expira_en } : cuerpo;
-    codigoSocio = sumar ? codigoSocio : esCodigo ? q : '';
+    let cambiaSocio = false;   // un vale de compra que sustituye al socio
+    if (sumar && !socio.vale && conflictoSocioVale({ socio, vales: valesCargados, esVale: true, origen: cuerpo.origen }).pregunta) {
+      const sigue = await confirmarReemplazo(`Ya hay un socio en el ticket (#${socio.numero} · ${socio.nombre}). Los vales de compra no se combinan con una membresía en el mismo ticket (los cupones sí).`
+        + ` Si sigues, se quita al socio y se usa el vale. ${guiaVale([{ codigo:q, completo:cuerpo.completo, expira_en:cuerpo.expira_en }])}`, 'Quitar al socio y usar el vale');
+      if (busqueda !== busquedaSocio) return;
+      if (!sigue) { $('socio').value = '#' + socio.numero; $('codigo').focus(); return; }
+      cambiaSocio = true;
+      const cupones = valesCargados;   // los cupones ya cargados se quedan junto al vale: sin socio todo se suma
+      quitarSocio();
+      valesCargados = cupones;
+    }
+    if (esVale) valesCargados.push({ codigo:q, disponible:cuerpo.disponible, expira_en:cuerpo.expira_en, completo:cuerpo.completo, origen:cuerpo.origen });
+    if (cambiaSocio) {
+      socio = valesCargados.length > 1 ? sumaDeVales(valesCargados) : cuerpo;
+      codigoSocio = valesCargados[0].codigo;
+    } else
+    // Con un socio en el ticket el cupón entra aparte y el socio no cambia (#927); con vales solos se suman; si no, entra lo que llegó.
+    socio = !sumar ? cuerpo : !socio.vale ? socio : { ...socio, disponible:socio.disponible + cuerpo.disponible, maximo:socio.maximo + cuerpo.maximo,
+      expira_en:Date.parse(cuerpo.expira_en) < Date.parse(socio.expira_en) ? cuerpo.expira_en : socio.expira_en };
+    if (!cambiaSocio) codigoSocio = sumar ? codigoSocio : esCodigo ? q : '';
     // #839: un código escaneado de un socio con la llegada pendiente ofrece acreditarla en la ventana de alta.
-    codigoLlegada = !esVale && esCodigo && cuerpo.llegada_pendiente ? q : '';
+    if (!sumar) codigoLlegada = !esVale && esCodigo && cuerpo.llegada_pendiente ? q : '';
     // Vacío con vale: el siguiente vale se escanea aquí mismo.
     $('socio').value = esVale ? '' : '#' + socio.numero;
     $('dolarones').value = '';
@@ -1597,6 +1647,7 @@ async function buscarSocio() {
     if (busqueda !== busquedaSocio) return;
     if (sumar) { $('socio').value = ''; avisoRojo('Sin red: no se pudo sumar el vale.'); return; }
     // Sin red no hay saldo que consultar: la venta se cobra sin socio y no gana.
+    if (vales.length) { pintarSocio(); avisoRojo('Sin red: no se pueden buscar socios. Cobra sin socio.'); return; }
     $('socio-info').textContent = 'Sin red: no se pueden buscar socios. Cobra sin socio.';
     $('socio-info').style.color = '#D72B32';
   }
@@ -1686,12 +1737,18 @@ $('dolarones').addEventListener('input', () => { usarTodos = false; idVenta = nu
 /** Pop-up al cargar socio con código o vale: sólo si realmente puede gastar. */
 function preguntarDolarones() {
   const total = totalNeto();
-  if (!socio || !codigoSocio || cobrando || !(socio.maximo > 0) || !(socio.disponible > 0)) return;
-  const usable = total ? maximoCanje(socio, total) : Math.min(socio.disponible, socio.maximo);
+  if (!socio || cobrando) return;
+  // Papel (vales) y cuenta (con su código): el papel se gasta primero (#927). La cuenta de un socio sin código no se ofrece.
+  const { papel, maximo } = pagoConDolarones({ socio, vales: valesCargados, codigoSocio, total });
+  const cuentaGastable = !socio.vale && codigoSocio && socio.maximo > 0;
+  const cuenta = cuentaGastable ? Math.min(socio.disponible, socio.maximo) : 0;
+  const disponible = papel + (cuentaGastable ? socio.disponible : 0);
+  if (!(disponible > 0)) return;
+  const usable = total ? maximo : papel + cuenta;
   if (!usable) return;
-  $('dlg-texto').textContent = `El cliente tiene ${dolares(socio.disponible)} disponibles.`
+  $('dlg-texto').textContent = `El cliente tiene ${dolares(disponible)} disponibles${papel && cuenta ? ` (${dolares(papel)} en vales impresos y el resto en su cuenta)` : ''}.`
     + (total
-      ? (usable < socio.disponible ? ` En este ticket puede usar ${dolares(usable)}.` : '')
+      ? (usable < disponible ? ` En este ticket puede usar ${dolares(usable)}.` : '')
       : ' Aún no hay piezas en el ticket: si los usas todos, se aplicarán hasta cubrir el total al escanearlas.');
   $('dlg-todos').textContent = `Usar todos (${dolares(usable)})`;
   $('dlg-dolarones').showModal();
@@ -1711,7 +1768,7 @@ $('dlg-no').addEventListener('click', () => cerrarDialogo('no'));
 // Escape = «No usar» (el campo ya está vacío).
 $('dlg-dolarones').addEventListener('cancel', () => $('codigo').focus());
 $('usar-maximo').addEventListener('click', () => {
-  $('dolarones').value = String(maximoCanje(socio, totalNeto()) / 100);
+  $('dolarones').value = String(pagoConDolarones({ socio, vales: valesCargados, codigoSocio, total: totalNeto() }).maximo / 100);
   idVenta = null;
   pintar();
 });
@@ -1725,7 +1782,9 @@ async function cobrarConDolarones(venta, t, boton = 'el mismo botón de cobro') 
   // Si la respuesta de este folio se perdió, reintentar va al servidor con el mismo folio y el mismo código aunque aquí parezca vencido
   // (#817): pedir un código nuevo cambiaría el folio y una venta ya registrada se registraría dos veces.
   const incierto = folioIncierto === venta.id;
-  if (!codigoSocio || venta.dolarones > socio.maximo || (!incierto && Date.parse(socio.expira_en) <= Date.now())) {
+  // Papel primero y la cuenta pone el resto, solo con su código (#927). El servidor hace su propio reparto: esto solo evita salir con lo que sabe que no pasa.
+  const pago = pagoConDolarones({ socio, vales: valesCargados, codigoSocio, total: t.total, usados: venta.dolarones, ahora: incierto ? 0 : Date.now() });
+  if (!pago.autorizado) {
     $('aviso').textContent = 'El cliente debe autorizar este importe y mostrar un código vigente desde su cuenta.';
     $('aviso').style.color = '#D72B32';
     return false;
@@ -1734,8 +1793,8 @@ async function cobrarConDolarones(venta, t, boton = 'el mismo botón de cobro') 
   try {
     respuesta = await fetch('/api/ventas', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...venta,
-        ...(socio.vale ? { codigo_vale:valesCargados.length > 1 ? valesCargados.map((v) => v.codigo) : codigoSocio }
-          : { codigo_socio:codigoSocio }) }),
+        ...(valesCargados.length ? { codigo_vale:valesCargados.length > 1 ? valesCargados.map((v) => v.codigo) : valesCargados[0].codigo } : {}),
+        ...(!socio.vale && pago.reparto.cuenta > 0 ? { codigo_socio:codigoSocio } : {}) }),
       signal: AbortSignal.timeout(15000),
     });
   } catch (error) {
@@ -1762,11 +1821,13 @@ async function cobrarConDolarones(venta, t, boton = 'el mismo botón de cobro') 
   venta.vale_emitido = cuerpo.vale_emitido;
   venta.vale_usado = cuerpo.vale_usado;
   venta.vales_usados = cuerpo.vales_usados;
+  // Lo que del total fue papel (el servidor lo reparte); un reenvío o un servidor sin el dato usa la cuenta local.
+  venta.dolarones_papel = cuerpo.dolarones_papel ?? pago.reparto.papel;
   venta.saldo_pedido = cuerpo.saldo_pedido;
   venta.excedente_transferencia = cuerpo.excedente_transferencia;
   venta.referido_liberado = cuerpo.referido_liberado ?? 0;
   if (socio.vale) return { vale:true };
-  const saldo = cuerpo.saldo ?? { disponible: socio.disponible - venta.dolarones };
+  const saldo = cuerpo.saldo ?? { disponible: socio.disponible - (venta.dolarones - venta.dolarones_papel) };
   return { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), bono_promo: cuerpo.bono_promo ?? 0, saldo: saldo.disponible };
 }
 
@@ -1880,10 +1941,13 @@ async function cobrarConPedido(venta, boton = 'el mismo botón de cobro') {
 // Sin socio real la venta no gana Dolarones y no se puede ligar despues (#730). Devuelve la opcion elegida o '' si cierra.
 function preguntarSocio() {
   const d = $('dlg-socio');
+  const soloCupones = valesCargados.length > 0 && conflictoSocioVale({ socio, vales: valesCargados, esVale: false }).quitar.length === 0;
   $('dlg-socio-texto').textContent = 'Esta venta no tiene socio, así que no ganaría Dolarones.'
-    + (socio?.vale ? ` Los vales no se juntan con una membresía: si buscas al socio, ${valesCargados.length > 1 ? 'los vales salen' : 'el vale sale'} del ticket (puedes volver a escanear${valesCargados.length > 1 ? 'los' : 'lo'}). ${guiaVale(valesCargados)}` : '')
+    + (socio?.vale ? (soloCupones
+      ? ` Si buscas al socio, ${valesCargados.length > 1 ? 'los cupones se quedan en el ticket (se gastan primero' : 'el cupón se queda en el ticket (se gasta primero'} y la cuenta del socio paga el resto).`
+      : ` Los vales de compra no se juntan con una membresía: si buscas al socio, ${valesCargados.length > 1 ? 'los vales salen' : 'el vale sale'} del ticket (puedes volver a escanear${valesCargados.length > 1 ? 'los' : 'lo'}). ${guiaVale(valesCargados)}`) : '')
     + ' Para darlo de alta se abre una ventana y esta venta se queda aquí.';
-  d.querySelector('[value="cobrar"]').textContent = socio?.vale ? (valesCargados.length > 1 ? 'Usar los vales sin socio' : 'Usar el vale sin socio') : 'No quiere ser socio: cobrar así';
+  d.querySelector('[value="cobrar"]').textContent = socio?.vale ? (soloCupones ? (valesCargados.length > 1 ? 'Usar los cupones sin socio' : 'Usar el cupón sin socio') : valesCargados.length > 1 ? 'Usar los vales sin socio' : 'Usar el vale sin socio') : 'No quiere ser socio: cobrar así';
   d.returnValue = '';
   d.showModal();
   return new Promise((listo) => d.addEventListener('close', () => listo(d.returnValue), { once: true }));
@@ -1962,7 +2026,7 @@ async function cobrar(forma) {
   }
   const anticipo = pedidoCargado ? anticipoDePedido(pedidoCargado.saldo, totalNeto(), usados) : 0;
   const t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual(), anticipo);
-  if (usados > saldoCanjeable(socio, t.total)) {
+  if (usados > pagoConDolarones({ socio, vales: valesCargados, total: t.total }).canjeable) {
     $('aviso').textContent = 'Los regalos de apertura requieren un ticket de $1,000 MXN o más antes de descontar Dolarones. Revisa el importe solicitado.';
     $('aviso').style.color = '#D72B32';
     $('codigo').focus();
@@ -2516,7 +2580,7 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     idCancelacion = crypto.randomUUID();
     const destino = d.cancelarLinea ? $(`form-linea-${d.cancelarLinea}`) : $('form-todo');
     const celda = d.cancelarLinea ? destino.firstElementChild : destino;
-    celda.innerHTML = d.cancelarLinea ? formularioPieza(d.cancelarLinea, Number(d.quedan), cuponPorcentaje, ticketAbierto.forma_pago) : formularioTodo(cuponPorcentaje);
+    celda.innerHTML = d.cancelarLinea ? formularioPieza(d.cancelarLinea, Number(d.quedan), cuponPorcentaje, ticketAbierto.forma_pago, !!ticketAbierto.socio && ticketAbierto.dolarones_papel > 0) : formularioTodo(cuponPorcentaje);
     destino.hidden = false;
     celda.querySelector('.motivo-cancelar').focus();
     return;
@@ -2703,7 +2767,8 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     pintarImpresora();
     $('ticket-aviso').textContent = `Cupón de ${dolares(cuerpo.cupon.importe)} ${impreso ? 'impreso' : 'listo, pero no se imprimió: usa «Reimprimir cupón»'}.`
       + ' No sale dinero del cajón: regresa la pieza al anaquel y entrega el cupón.'
-      + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} pagados con Dolarones regresaron al socio.` : '');
+      + ((cuerpo.dolarones_cuenta ?? cuerpo.dolarones) ? ` Los ${dolares(cuerpo.dolarones_cuenta ?? cuerpo.dolarones)} pagados con Dolarones regresaron al socio.` : '')
+      + (cuerpo.cupon_papel ? ` Los ${dolares(cuerpo.cupon_papel)} que pagó el cupón anterior van en este cupón nuevo.` : '');
     $('ticket-aviso').style.color = impreso ? '#1f7a4d' : '#D72B32';
     await cargarTickets();
     await actualizarCorte();

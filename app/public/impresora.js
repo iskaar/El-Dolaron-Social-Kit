@@ -261,7 +261,7 @@ export function imprimirVale(vale) {
 
 /**
  * @param venta {{ total: number, forma_pago: 'efectivo'|'tarjeta'|'transferencia', efectivo: number, cambio: number, creado_en: string,
- *   dolarones?: number, socio?: { numero: number, ganados: number, bono_promo?: number, saldo: number } | null }}
+ *   dolarones?: number, dolarones_papel?: number, socio?: { numero: number, ganados: number, bono_promo?: number, saldo: number } | null }}
  * @param lineas {{ nombre: string, precio: number, cantidad: number }[]}
  */
 export async function imprimirTicket(venta, lineas) {
@@ -296,7 +296,12 @@ export async function imprimirTicket(venta, lineas) {
   }
   partes.push(renglonMonto('TOTAL', pesos(venta.total)));
   // Issue #269: lo pagado con el saldo de un pedido (reimpresion: viene del detalle de la venta).
-  if (venta.dolarones > 0) partes.push(renglonMonto('Dolarones', `-${pesos(venta.dolarones)}`));
+  // Con vale impreso y cuenta de socio juntos (#927) se dice cuánto fue de cada uno; con uno solo, el renglón de siempre.
+  const papel = Math.min(venta.dolarones_papel || 0, venta.dolarones || 0);
+  if (papel > 0 && venta.dolarones > papel) {
+    partes.push(renglonMonto('Vale impreso', `-${pesos(papel)}`));
+    partes.push(renglonMonto('Dolarones de cuenta', `-${pesos(venta.dolarones - papel)}`));
+  } else if (venta.dolarones > 0) partes.push(renglonMonto('Dolarones', `-${pesos(venta.dolarones)}`));
   if (venta.anticipo > 0) partes.push(renglonMonto(venta.pedido_folio ? `Anticipo P-${venta.pedido_folio}` : 'Anticipo', `-${pesos(venta.anticipo)}`));
   if (venta.dolarones > 0 || venta.anticipo > 0) {
     partes.push(renglonMonto('A pagar', pesos(venta.total - (venta.dolarones || 0) - (venta.anticipo || 0))));

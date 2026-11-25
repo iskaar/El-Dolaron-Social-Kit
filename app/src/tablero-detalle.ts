@@ -45,11 +45,16 @@ export function repartirCanales(filas: FilaCanal[], periodo: 'mes' | 'semana') {
   };
 }
 
-/** Cuantos socios distintos pagaron con Dolarones en [desde, hasta) (solo se cuentan, nunca se nombran). */
+/**
+ * Cuantos socios distintos pagaron con Dolarones de SU CUENTA en [desde, hasta) (solo se cuentan, nunca se nombran).
+ * `ventas.dolarones` suma cuenta y papel (#927): el papel que un socio presenta junto a su cuenta se resta con la bitacora de vales.
+ */
 const sociosConDolarones = (env: Env, desde: string, hasta: string, soloCaja: boolean) => env.DB.prepare(
-  `select count(distinct cliente_id) as n, coalesce(sum(dolarones - dolarones_devueltos), 0) as importe
-   from ventas where cancelada = 0 and dolarones > 0 and cliente_id is not null and creado_en >= ? and creado_en < ?
-     ${soloCaja ? 'and pedido_id is null' : ''}`,
+  `select count(distinct cliente_id) as n, coalesce(sum(dolarones - dolarones_devueltos - papel), 0) as importe
+   from (select v.cliente_id, v.dolarones, v.dolarones_devueltos,
+       coalesce((select -sum(m.importe) from vales_movimientos m where m.venta_id = v.id and m.tipo = 'canje'), 0) as papel
+     from ventas v where v.cancelada = 0 and v.dolarones > 0 and v.cliente_id is not null and v.creado_en >= ? and v.creado_en < ?
+       ${soloCaja ? 'and v.pedido_id is null' : ''}) where dolarones - papel > 0`,
 ).bind(desde, hasta).first<{ n: number; importe: number }>();
 
 // --- Ventas

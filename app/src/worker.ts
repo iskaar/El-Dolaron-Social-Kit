@@ -67,7 +67,7 @@ export { hoyTienda, rangoDias };
 import { portal, llegada } from './portal.ts';
 import { mensajesApi, responderApi } from './mensajes.ts';
 import { rutaAsistente } from './asistente.ts';
-import { sentenciasVale, buscarVale, valeDeVenta, usadosEnVenta, reimprimirVale, valesAbiertos, emitirCuponManual, porcentajeCupon } from './vales.ts';
+import { sentenciasVale, buscarVale, valeDeVenta, usadosEnVenta, papelDeVenta, reimprimirVale, valesAbiertos, emitirCuponManual, porcentajeCupon } from './vales.ts';
 import { catalogoPublico, revisionCatalogo, COLUMNAS_UBICACION, tiendasDe } from './catalogo.ts';
 import { rescatarPendientes, esCorridaSemanal, reportarHuerfanosR2 } from './huerfanos.ts';
 import { procesarRecortes, revisarRecortes, ajustarRecortesViejos, reiniciarRecorte, rutaRecortesAdmin } from './recortes.ts';
@@ -2012,7 +2012,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     const respuesta = json({ id, duplicada:true, imprimir_en:previo.imprimir_en, ganados:ganado?.importe ?? 0,
       referido_liberado:referido?.importe ?? 0, bono_promo:bono?.importe ?? 0,
       anticipo:previo.anticipo, saldo_pedido:previo.pedido_id ? await saldoDe(env, previo.pedido_id) : null,
-      excedente_transferencia:await excedenteDe(env, 'venta', id),
+      excedente_transferencia:await excedenteDe(env, 'venta', id), dolarones_papel:await papelDeVenta(env, id),
       vale_emitido:await valeDeVenta(env, id), ...(await usadosEnVenta(env, id)) }, 200);
     respuesta.headers.set('cache-control', 'no-store');
     return respuesta;
@@ -2115,15 +2115,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   // dia y fuera de los reportes y de la ventana de cancelacion. Una venta sin red conserva su hora.
   const creadoEn = new Date(horaVenta).toISOString();
 
-  // Valida socio, código y saldo; consumo y venta se confirman en el mismo batch.
-  const recompensa = await sentenciasDeVenta(env, {
-    ventaId: id, clienteId, dolarones:codigoVale.length ? 0 : dolarones, codigo: String(venta.codigo_socio ?? ''), total, autor: correo, ahora: momento, hora: new Date(horaVenta),
-  });
-  if (!recompensa.ok) {
-    const concurrente = await reintento();
-    if (concurrente) return concurrente;
-    return json({ error: recompensa.error }, recompensa.status);
-  }
+  // Papel (vales y cupones) y cuenta del socio se pagan en el mismo batch (#927). `dolarones` es el importe TOTAL que manda la caja: el servidor
+  // lo reparte, nunca el navegador. Primero el papel (hasta su saldo vigente); lo que sobre lo paga la cuenta, con el código del portal.
   const vale = await sentenciasVale(env, {
     ventaId:id, clienteId, codigo:codigoVale, dolarones, total, autor:correo, ahora:momento,
   });
@@ -2131,6 +2124,15 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     const concurrente = await reintento();
     if (concurrente) return concurrente;
     return json({ error:vale.error }, vale.status);
+  }
+  // Valida socio, código y saldo de la cuenta; consumo y venta se confirman en el mismo batch.
+  const recompensa = await sentenciasDeVenta(env, {
+    ventaId: id, clienteId, dolarones:dolarones - vale.papel, papel:vale.papel, codigo: String(venta.codigo_socio ?? ''), total, autor: correo, ahora: momento, hora: new Date(horaVenta),
+  });
+  if (!recompensa.ok) {
+    const concurrente = await reintento();
+    if (concurrente) return concurrente;
+    return json({ error: recompensa.error }, recompensa.status);
   }
 
   const conPedido = pedidoId ? await sentenciasDePedido(env, { pedidoId, ventaId: id, anticipo, ahora, tienda, total, porPagar, lineas: preparado.lineas }) : null;
@@ -2224,6 +2226,7 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
     anticipo, saldo_pedido: pedidoId ? await saldoDe(env, pedidoId) : null,
     excedente_transferencia: transf?.ok ? transf.excedente : 0,
     saldo: clienteId ? await saldo(env, clienteId, ahora) : null,
+    dolarones_papel: vale.papel,
     vale_emitido:vale.emitido,
     ...(await usadosEnVenta(env, id)),
   }, 201);

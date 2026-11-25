@@ -15,7 +15,7 @@
 
 import { sentenciasDeDevolucion, sentenciasDeCancelacion, sentenciasDeReversoPromo } from './dolarones.ts';
 import { sentenciasDeReversoReferido } from './referidos.ts';
-import { reponerValesUsados, retirarVale } from './vales.ts';
+import { reponerValesUsados, retirarVale, sentenciasPapelReemitido } from './vales.ts';
 
 export interface ContextoReverso {
   ventaId: string;
@@ -28,8 +28,10 @@ export interface ContextoReverso {
   clienteId?: string | null;
   /** Solo en parcial: lo que sigue cobrado en dinero tras esta devolucion. */
   pagadoRestante?: number;
-  /** Solo en parcial: Dolarones usados que regresan al saldo en esta devolucion. */
+  /** Solo en parcial: Dolarones usados que regresan al saldo de la CUENTA en esta devolucion. */
   dolarones?: number;
+  /** Solo en parcial (#927): lo que pagó un cupón usado en el ticket y no regresa a él: sale en el cupón nuevo (devolverEnCupon). */
+  papel?: number;
 }
 
 type Sentencias = D1PreparedStatement[] | Promise<D1PreparedStatement[]>;
@@ -91,7 +93,8 @@ export const PROGRAMAS: Programa[] = [
     nombre: 'vales-usados',
     tiposVale: ['canje', 'reverso_canje'],
     completa: (env, c) => reponerValesUsados(env, c.ventaId, c.autor, c.ahora),
-    parcial: { nada: 'Bloqueado antes del batch: un ticket pagado con vale solo se cancela completo (cancelarPieza, devolverEnCupon).' },
+    // Solo devolverEnCupon llega aquí con papel (#927). cancelarPieza y el dinero de una pieza se bloquean antes si el ticket usó papel.
+    parcial: (env, c) => c.papel ? sentenciasPapelReemitido(env, c.ventaId, c.papel, c.autor, c.ahora) : [],
   },
   {
     // Retos individuales (#752): el cron paga a los 8-10 dias y solo cuenta ventas sin devolucion ni cancelacion.
