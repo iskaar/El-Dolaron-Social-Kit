@@ -231,28 +231,40 @@ test('ligar la cuenta de socia por telefono: el cron acredita ahi y no crea una 
   } finally { t.db.close(); }
 });
 
-test('/api/retos/mios: la meta de la tienda sale solo como porcentaje, nunca el total en pesos', async () => {
+test('/api/retos/mios: el avance de la tienda de quien pregunta sale solo como porcentajes, nunca pesos', async () => {
   const { t, config, empleado, vender, mios } = escenario();
   try {
-    config({ bono_tienda_meta_semana: 50000, bono_tienda_pb: 150 });
+    // La linea de Soledad vale 2 tickets de 25,000; la meta tope, 6; la de Salk, otra.
+    config({ bono_tienda_linea_soledad: 50000, bono_tienda_meta_tope: 150000, bono_tienda_linea_salk: 90000, bono_tienda_pb: 150 });
     await empleado('Ana', 'ana@prueba.mx');
     await vender('beto@prueba.mx', hoyTienda());   // 25,000 centavos de la semana, atendidos por otra persona
-    const m = (await mios('ana@prueba.mx')).cuerpo;
+    const m = (await mios('ana@prueba.mx')).cuerpo;   // cuenta sin tienda: Soledad
     assert.equal(m.tienda_pct, 50);
     assert.equal(Number.isInteger(m.tienda_pct), true);
     assert.equal(m.tienda_alcanzada, false);
     assert.equal(m.bono_pct, 1.5);
-    // Ni el total (25000), ni la meta (50000), ni llaves con su nombre: con el porcentaje y la meta se despejaria el total.
+    // Cinco metas a pasos iguales entre la linea y el tope (50k, 75k, 100k, 125k, 150k), solo con numero, porcentaje y si ya se logro.
+    assert.deepEqual(m.metas, [{ n: 1, pct: 50, lograda: false }, { n: 2, pct: 33, lograda: false }, { n: 3, pct: 25, lograda: false },
+      { n: 4, pct: 20, lograda: false }, { n: 5, pct: 16, lograda: false }]);
+    // Ni el total (25000), ni la linea (50000) ni el tope (150000), ni llaves con su nombre.
     const texto = JSON.stringify(m);
-    assert.equal(texto.includes('25000'), false);
-    assert.equal(texto.includes('50000'), false);
-    assert.deepEqual(Object.keys(m).filter((k) => /meta|total/.test(k) && k !== 'tienda_alcanzada'), []);
+    for (const prohibido of ['25000', '50000', '75000', '100000', '125000', '150000', '90000']) assert.equal(texto.includes(prohibido), false, prohibido);
+    assert.deepEqual(Object.keys(m).filter((k) => /meta|total|linea/.test(k) && !['tienda_alcanzada', 'metas'].includes(k)), []);
     assert.equal(m.semana.ventas, 0);   // lo de Ana, no lo de la tienda
-    // Superar la meta: pasa de 100 y se marca alcanzada.
+    // Llegar a la linea y pasarla: pasa de 100, se marca alcanzada y quedan logradas las metas 1 y 2.
     await vender('beto@prueba.mx', hoyTienda()); await vender('beto@prueba.mx', hoyTienda());
     const arriba = (await mios('ana@prueba.mx')).cuerpo;
     assert.equal(arriba.tienda_pct, 150);
     assert.equal(arriba.tienda_alcanzada, true);
+    assert.deepEqual(arriba.metas.map((x: { lograda: boolean }) => x.lograda), [true, true, false, false, false]);
+    // Otra tienda tiene su propio avance: Beto es de Salk y lo vendido en Soledad no cuenta para su linea.
+    t.db.prepare(`update usuarios set tienda = 'salk' where correo = 'beto@prueba.mx'`).run();
+    const salk = (await mios('beto@prueba.mx')).cuerpo;
+    assert.equal(salk.tienda_pct, 0);
+    assert.equal(salk.tienda_alcanzada, false);
+    t.db.prepare(`update usuarios set tienda = 'romero' where correo = 'beto@prueba.mx'`).run();
+    const sinLinea = (await mios('beto@prueba.mx')).cuerpo;   // Romero no tiene linea: bono apagado
+    assert.deepEqual([sinLinea.tienda_pct, sinLinea.tienda_alcanzada, sinLinea.metas], [0, false, []]);
   } finally { t.db.close(); }
 });
 

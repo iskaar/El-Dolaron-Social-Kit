@@ -31,9 +31,9 @@ test('lunesDe y semanasCerradas: lunes a domingo, la semana en curso no cuenta',
 
 function escenario() {
   const t = tienda();
-  const usuario = (correo: string, roles: string) => t.db.prepare(
-    `insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values (?, ?, ?, 1, '', '')`).run(correo, correo.split('@')[0], roles);
-  usuario('ana@prueba.mx', 'cajero'); usuario('beto@prueba.mx', 'capturista'); usuario('rev@prueba.mx', 'revendedora');
+  const usuario = (correo: string, roles: string, tiendaCuenta = '') => t.db.prepare(
+    `insert into usuarios (correo, nombre, roles, activo, tienda, creado_en, actualizado_en) values (?, ?, ?, 1, ?, '', '')`).run(correo, correo.split('@')[0], roles, tiendaCuenta);
+  usuario('ana@prueba.mx', 'cajero'); usuario('beto@prueba.mx', 'capturista', 'salk'); usuario('rev@prueba.mx', 'revendedora');
   const empleado = async (nombre: string, correo?: string) => {
     const id = crypto.randomUUID();
     const r = await t.pedir(`/api/nomina/empleados/${id}`, { nombre, periodo: 'diario', pago_dia: 30000, dias: [1, 2, 3], pin: '123456', ...(correo === undefined ? {} : { correo }) });
@@ -42,71 +42,151 @@ function escenario() {
   const dias = (id: string, desde: string, n: number) => {
     for (let i = 0; i < n; i++) t.db.prepare(`insert into asistencias (empleado_id, fecha, entrada, origen) values (?, ?, '', 'manual')`).run(id, sumar(desde, i));
   };
-  // Tres tickets atendidos por ana; el reloj de la venta se mueve a un miercoles de la semana LUNES.
-  const vender = async (cuando = `${sumar(LUNES, 2)}T18:00:00.000Z`) => {
-    for (let i = 0; i < 3; i++) {
+  // `n` tickets atendidos por ana y cobrados en `deTienda`; el reloj de la venta se mueve a un miercoles de la semana LUNES. Devuelve lo vendido.
+  const vender = async (cuando = `${sumar(LUNES, 2)}T18:00:00.000Z`, deTienda = 'soledad', n = 3) => {
+    let suma = 0;
+    for (let i = 0; i < n; i++) {
       const id = crypto.randomUUID();
       assert.equal((await t.pedir('/api/ventas', { id, lineas: [{ producto_id: PRODUCTO, cantidad: 1 }], forma_pago: 'efectivo', efectivo: 25000, vendedora: 'ana@prueba.mx' })).status, 201);
-      t.db.prepare('update ventas set creado_en = ? where id = ?').run(cuando, id);
+      t.db.prepare('update ventas set creado_en = ?, tienda = ? where id = ?').run(cuando, deTienda, id);
+      suma += (t.db.prepare('select total - devuelto - dolarones_devueltos as n from ventas where id = ?').get(id) as { n: number }).n;
     }
-    return (t.db.prepare('select sum(total - devuelto - dolarones_devueltos) as n from ventas').get() as { n: number }).n;
+    return suma;
   };
+  const config = (c: Record<string, number>) => t.pedir('/api/config', c, 'PUT');
   const bono = (semana: string) => t.pedir('/api/reportes/equipo/bono', { semana });
+  const semana = async (lunes = LUNES) => (await t.pedir('/api/reportes/equipo')).cuerpo.semanas.find((s: { lunes: string }) => s.lunes === lunes) as
+    { tiendas: { tienda: string; ventas: number; linea: number; alcanzada: boolean; bolsa: number; record: boolean; partes: { nombre: string; dias: number; importe: number; d: number; registrado: boolean }[] }[] };
+  const deTienda = (s: Awaited<ReturnType<typeof semana>>, clave: string) => s.tiendas.find((x) => x.tienda === clave)!;
   const movimientos = () => t.db.prepare(`select * from nomina_movimientos where tipo = 'bono' order by empleado_id`).all();
-  return { t, empleado, dias, vender, bono, movimientos };
+  const lotes = () => t.db.prepare(`select * from dolarones_lotes where id like 'bono-tienda:%' order by id`).all() as { id: string; importe: number; origen: string }[];
+  return { t, empleado, dias, vender, config, bono, semana, deTienda, movimientos, lotes };
 }
 
-test('la semana que pasa la meta reparte la bolsa por dias de esa semana y registra una sola vez', async () => {
-  const { t, empleado, dias, vender, bono, movimientos } = escenario();
+test('cada tienda tiene su linea: la bolsa es el porcentaje de lo vendido arriba de ella, repartida entre las de ESA tienda', async () => {
+  const { t, empleado, dias, vender, config, bono, semana, deTienda, movimientos } = escenario();
   try {
-    const ana = await empleado('Ana', 'ana@prueba.mx');
-    const beto = await empleado('Beto', 'beto@prueba.mx');
+    const ana = await empleado('Ana', 'ana@prueba.mx');      // cuenta sin tienda: cuenta como la central
+    const beto = await empleado('Beto', 'beto@prueba.mx');   // cuenta de Salk
     const sinCuenta = await empleado('Carla');
     assert.equal(ana.status, 201); assert.equal(sinCuenta.status, 201);
-    dias(ana.id, LUNES, 1); dias(beto.id, LUNES, 2); dias(sinCuenta.id, LUNES, 5);
+    dias(ana.id, LUNES, 2); dias(beto.id, LUNES, 3); dias(sinCuenta.id, LUNES, 5);
     dias(ana.id, sumar(LUNES, 7), 3);   // dias de OTRA semana no cuentan
-    const total = await vender();
-    await t.pedir('/api/config', { bono_tienda_meta_semana: 40000, bono_tienda_pb: 101 }, 'PUT');
-    const bolsa = Math.floor(total * 101 / 10000);
+    const soledad = await vender(undefined, 'soledad', 3);
+    const salk = await vender(undefined, 'salk', 2);
+    // Soledad rebasa su linea por 10,000 centavos; Salk se queda corta; Romero no tiene linea.
+    await config({ bono_tienda_pb: 1000, bono_tienda_linea_soledad: soledad - 10000, bono_tienda_linea_salk: salk + 5000 });
 
-    const semana = (await t.pedir('/api/reportes/equipo')).cuerpo.semanas.find((s: { lunes: string }) => s.lunes === LUNES);
-    assert.equal(semana.ventas, total);
-    assert.equal(semana.alcanzada, true);
-    assert.equal(semana.bolsa, bolsa);
-    assert.deepEqual(semana.partes.map((p: { nombre: string }) => p.nombre).sort(), ['Ana', 'Beto']);   // Carla sin cuenta: fuera
-    assert.equal(semana.partes.reduce((s: number, p: { importe: number }) => s + p.importe, 0), bolsa);
+    const s = await semana();
+    const sol = deTienda(s, 'soledad'), sal = deTienda(s, 'salk'), rom = deTienda(s, 'romero');
+    assert.deepEqual([sol.ventas, sol.linea, sol.alcanzada, sol.bolsa], [soledad, soledad - 10000, true, 1000]);
+    assert.deepEqual(sol.partes.map((p) => [p.nombre, p.importe]), [['Ana', 1000]]);   // Carla sin cuenta: fuera; Beto es de otra tienda
+    assert.deepEqual([sal.ventas, sal.alcanzada, sal.bolsa], [salk, false, 0]);         // una tienda no arrastra a la otra
+    assert.deepEqual(sal.partes.map((p) => [p.nombre, p.importe]), [['Beto', 0]]);
+    assert.deepEqual([rom.linea, rom.alcanzada, rom.bolsa, rom.partes], [0, false, 0, []]);   // sin linea = apagada
 
     const primera = await bono(LUNES);
     assert.equal(primera.status, 201);
-    assert.equal(primera.cuerpo.creados.length, 2);
+    assert.deepEqual(primera.cuerpo.creados.map((c: { nombre: string; importe: number }) => [c.nombre, c.importe]), [['Ana', 1000]]);
     const filas = movimientos() as { fecha: string; nota: string; importe: number; creado_por: string }[];
-    assert.equal(filas.length, 2);
+    assert.equal(filas.length, 1);
     assert.ok(filas.every((f) => f.nota === `bono tienda semana ${LUNES}` && f.fecha === sumar(LUNES, 6) && f.creado_por === 'dueno@prueba.mx'));
-    assert.equal(filas.reduce((s, f) => s + f.importe, 0), bolsa);
 
     const segunda = await bono(LUNES);   // repetir no duplica
     assert.equal(segunda.cuerpo.creados.length, 0);
-    assert.equal(segunda.cuerpo.ya_estaban.length, 2);
-    assert.equal(movimientos().length, 2);
-    const despues = (await t.pedir('/api/reportes/equipo')).cuerpo.semanas.find((s: { lunes: string }) => s.lunes === LUNES);
-    assert.ok(despues.partes.every((p: { registrado: boolean }) => p.registrado));
+    assert.equal(segunda.cuerpo.ya_estaban.length, 1);
+    assert.equal(movimientos().length, 1);
+    assert.ok(deTienda(await semana(), 'soledad').partes.every((p) => p.registrado));
   } finally { t.db.close(); }
 });
 
-test('semana bajo la meta: bolsa 0 y no se registra nada', async () => {
-  const { t, empleado, dias, vender, bono, movimientos } = escenario();
+test('reparto por dias dentro de la tienda: piso por dias y el resto a quien mas dias tuvo, suma exacta', async () => {
+  const { t, empleado, dias, vender, config, semana, deTienda } = escenario();
+  try {
+    const ana = await empleado('Ana', 'ana@prueba.mx');
+    t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, tienda, creado_en, actualizado_en) values ('zoe@prueba.mx', 'zoe', 'cajero', 1, 'soledad', '', '')`).run();
+    const zoe = await empleado('Zoe', 'zoe@prueba.mx');
+    assert.equal(zoe.status, 201);
+    const total = await vender();
+    dias(ana.id, LUNES, 1); dias(zoe.id, LUNES, 2);
+    await config({ bono_tienda_pb: 757, bono_tienda_linea_soledad: total - 10000 });   // bolsa: floor(10000 x 7.57 %) = 757
+    const sol = deTienda(await semana(), 'soledad');
+    assert.equal(sol.bolsa, 757);
+    assert.deepEqual(sol.partes.map((p) => [p.nombre, p.dias, p.importe]).sort(), [['Ana', 1, 252], ['Zoe', 2, 505]]);
+  } finally { t.db.close(); }
+});
+
+test('semana justo en la linea o bajo ella, y tienda sin linea: bolsa 0 y no se registra nada', async () => {
+  const { t, empleado, dias, vender, config, bono, semana, deTienda, movimientos } = escenario();
   try {
     const ana = await empleado('Ana', 'ana@prueba.mx');
     dias(ana.id, LUNES, 3);
-    await vender();   // meta por omision: $100,000
-    const semana = (await t.pedir('/api/reportes/equipo')).cuerpo.semanas.find((s: { lunes: string }) => s.lunes === LUNES);
-    assert.equal(semana.alcanzada, false);
-    assert.equal(semana.bolsa, 0);
-    assert.ok(semana.partes.every((p: { importe: number }) => p.importe === 0));
+    const total = await vender();
+    // Sin ninguna linea configurada (el estado inicial): apagado.
+    assert.ok((await semana()).tiendas.every((x) => x.bolsa === 0 && x.linea === 0 && !x.alcanzada && x.partes.length === 0));
+    await config({ bono_tienda_linea_soledad: total });   // exactamente en la linea: llego, pero no hay excedente
+    const justo = deTienda(await semana(), 'soledad');
+    assert.deepEqual([justo.alcanzada, justo.bolsa], [true, 0]);
+    await config({ bono_tienda_linea_soledad: total + 1 });
+    const bajo = deTienda(await semana(), 'soledad');
+    assert.deepEqual([bajo.alcanzada, bajo.bolsa], [false, 0]);
     const r = await bono(LUNES);
     assert.equal(r.status, 200);
     assert.deepEqual(r.cuerpo.creados, []);
     assert.equal(movimientos().length, 0);
+  } finally { t.db.close(); }
+});
+
+test('Dolarones del bono: 1 D por cada tanto de bono con tope semanal, lote de id fijo y doble asentado sin duplicar', async () => {
+  const { t, empleado, dias, vender, config, bono, semana, deTienda, lotes } = escenario();
+  try {
+    const ana = await empleado('Ana', 'ana@prueba.mx');
+    dias(ana.id, LUNES, 2);
+    const total = await vender();
+    // Bolsa de 1,000 centavos; 1 D por cada 100 centavos = 10 D, pero el tope semanal es 4.
+    await config({ bono_tienda_pb: 1000, bono_tienda_linea_soledad: total - 10000, bono_d_cada: 100, bono_d_tope: 4 });
+    const parte = deTienda(await semana(), 'soledad').partes[0];
+    assert.deepEqual([parte.importe, parte.d, parte.registrado], [1000, 4, false]);
+
+    assert.equal((await bono(LUNES)).status, 201);
+    assert.equal((await bono(LUNES)).status, 200);   // segunda vez: nada nuevo
+    assert.deepEqual(lotes().map((l) => [l.id, l.importe, l.origen]), [[`bono-tienda:${LUNES}:${ana.id}`, 400, 'reto']]);
+    const cliente = (t.db.prepare('select cliente_id from empleados where id = ?').get(ana.id) as { cliente_id: string }).cliente_id;
+    assert.ok(cliente);
+    assert.equal((t.db.prepare(`select count(*) as n from dolarones_movimientos where cliente_id = ? and tipo = 'reto'`).get(cliente) as { n: number }).n, 1);
+    assert.equal(deTienda(await semana(), 'soledad').partes[0].registrado, true);
+    // Con el tope en 0 no hay Dolarones del bono.
+    await config({ bono_d_tope: 0 });
+    assert.equal(deTienda(await semana(), 'soledad').partes[0].d, 0);
+  } finally { t.db.close(); }
+});
+
+test('semana record: premio fijo solo si fue la mejor de la tienda y no llego a su linea', async () => {
+  const { t, empleado, dias, vender, config, bono, semana, deTienda, lotes, movimientos } = escenario();
+  try {
+    const beto = await empleado('Beto', 'beto@prueba.mx');   // Salk
+    dias(beto.id, LUNES, 2); dias(beto.id, sumar(LUNES, -7), 1);
+    await vender(`${sumar(LUNES, -5)}T18:00:00.000Z`, 'salk', 1);   // la semana anterior: 1 ticket
+    const ahora = await vender(undefined, 'salk', 2);                // esta semana: 2 tickets, mejor que la anterior
+    await config({ bono_tienda_linea_salk: ahora + 100000, bono_d_record: 7 });
+    let sal = deTienda(await semana(), 'salk');
+    assert.deepEqual([sal.alcanzada, sal.record, sal.bolsa], [false, true, 0]);
+    assert.deepEqual(sal.partes.map((p) => [p.importe, p.d]), [[0, 7]]);
+    assert.equal(deTienda(await semana(sumar(LUNES, -7)), 'salk').record, false);   // la primera semana con ventas no tiene con quien compararse
+
+    assert.equal((await bono(LUNES)).status, 201);
+    assert.equal((await bono(LUNES)).status, 200);
+    assert.deepEqual(lotes().map((l) => l.importe), [700]);
+    assert.equal(movimientos().length, 0);   // sin bolsa no hay efectivo
+
+    // Si la tienda llega a su linea ya no es «record»: cobra el bono normal.
+    await config({ bono_tienda_linea_salk: ahora - 1000 });
+    sal = deTienda(await semana(), 'salk');
+    assert.deepEqual([sal.alcanzada, sal.record], [true, false]);
+    // Y una semana peor que la mejor anterior tampoco lo es.
+    await vender(`${sumar(LUNES, -12)}T18:00:00.000Z`, 'salk', 4);
+    await config({ bono_tienda_linea_salk: ahora + 100000 });
+    assert.equal(deTienda(await semana(), 'salk').record, false);
   } finally { t.db.close(); }
 });
 

@@ -2890,7 +2890,11 @@ export default {
         }
         const config = await leerConfig(env);
         // El tope de retiros sin aprobacion (#846) es politica de efectivo: lo ve el dueno, no quien captura ni FEP.
-        if (!usuario?.roles.includes('dueno')) delete config[CLAVE_TOPE_RETIRO];
+        // Lo mismo la linea de ventas de cada tienda y los valores del bono (#930): con ellas y el porcentaje de /retos se despejaria la venta de la tienda.
+        if (!usuario?.roles.includes('dueno')) {
+          delete config[CLAVE_TOPE_RETIRO];
+          for (const clave of Object.keys(config)) if (/^bono_(tienda|d)_/.test(clave)) delete config[clave];
+        }
         return json(config);
       }
 

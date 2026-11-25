@@ -1,12 +1,16 @@
 /**
- * Equipo en /reportes (Issue #751, Fase 1 de #749): lo que hizo cada persona en el rango y el bono semanal de la tienda.
- * Bono: si las ventas netas de una semana cerrada (lunes a domingo, fecha de tienda) SUPERAN la meta, la bolsa es
- * `bono_tienda_pb` puntos base (100 = 1 %) de esas ventas y se reparte por dias trabajados de ESA semana. Sin ranking.
- * Todo en centavos enteros; el bono se paga como `nomina_movimientos` tipo 'bono' (nomina.ts).
+ * Equipo en /reportes (Issue #751, Fase 1 de #749): lo que hizo cada persona en el rango y el bono semanal POR TIENDA (#930).
+ * Bono: cada tienda tiene su linea semanal (`bono_tienda_linea_<tienda>`; sin linea = apagado). Si las ventas netas de una semana
+ * cerrada (lunes a domingo, fecha de tienda, `ventas.tienda`) superan la linea, la bolsa es `bono_tienda_pb` puntos base (100 = 1 %)
+ * de lo vendido ARRIBA de la linea y se reparte entre las empleadas de ESA tienda por dias trabajados de ESA semana. Sin ranking.
+ * Encima del efectivo van Dolarones: 1 D por cada `bono_d_cada` centavos de bono (tope semanal por persona `bono_d_tope`) y un premio fijo
+ * `bono_d_record` si la semana fue la mejor de la tienda y no llego a su linea. Todo en centavos enteros; el bono se paga como
+ * `nomina_movimientos` tipo 'bono' (nomina.ts) y los Dolarones como lotes 'reto' de id fijo (dolarones.ts).
  */
 import { lineasNetas } from './netas.ts';
 import { atiende } from './cajeros.ts';
-import { leerRoles, esTienda, type Tienda } from './cuentas.ts';
+import { leerRoles, esTienda, TIENDAS, TIENDA_CENTRAL, type Tienda } from './cuentas.ts';
+import { acreditarReto } from './dolarones.ts';
 import { delDia, diaTienda, hoyTienda, rangoDe } from './reportes.ts';
 import { COMPARACIONES, GRANOS, granoEfectivo, ventanaComparacion } from '../public/reportes-resumen.js';
 import { armarEquipo } from '../public/reportes-equipo.js';
@@ -22,6 +26,7 @@ export const lunesDe = (dia: string) => sumarDias(dia, -((new Date(`${dia}T12:00
 export const semanasCerradas = (hoy: string, n = 8) =>
   Array.from({ length: n }, (_, i) => sumarDias(lunesDe(hoy), -7 * (i + 1)));
 export const notaBono = (lunes: string) => `bono tienda semana ${lunes}`;
+export const loteBono = (lunes: string, empleado: string) => `bono-tienda:${lunes}:${empleado}`;
 
 /**
  * Reparte `bolsa` centavos por dias trabajados: floor(bolsa x dias / total) a cada quien y el resto a quien mas dias tiene (empate: orden alfabetico de correo). Siempre suma exactamente `bolsa`.
@@ -35,63 +40,87 @@ export function repartirBono<T extends { correo: string; dias: number }>(bolsa: 
   return partes;
 }
 
-interface ConfigBono { pb: number; meta: number }
+const TIENDAS_CLAVES = Object.keys(TIENDAS) as Tienda[];
+export const claveLinea = (t: string) => `bono_tienda_linea_${t}`;
+/** Todo en centavos enteros salvo `pb` (puntos base) y los Dolarones (`d_*`, enteros). Cero = apagado. */
+interface ConfigBono { pb: number; lineas: Record<Tienda, number>; tope: number; d_cada: number; d_tope: number; d_record: number }
 export async function configBono(env: Env): Promise<ConfigBono> {
-  const { results } = await env.DB.prepare(`select clave, valor from config where clave in ('bono_tienda_pb', 'bono_tienda_meta_semana')`)
+  const { results } = await env.DB.prepare(`select clave, valor from config where clave like 'bono\\_tienda\\_%' escape '\\' or clave like 'bono\\_d\\_%' escape '\\'`)
     .all<{ clave: string; valor: string }>();
   const v = (clave: string, omision: number) => {
     const n = Number(results.find((f) => f.clave === clave)?.valor);
     return Number.isInteger(n) && n >= 0 ? n : omision;
   };
-  return { pb: v('bono_tienda_pb', 100), meta: v('bono_tienda_meta_semana', 10_000_000) };
+  return {
+    pb: v('bono_tienda_pb', 100), tope: v('bono_tienda_meta_tope', 0), d_cada: v('bono_d_cada', 0), d_tope: v('bono_d_tope', 0), d_record: v('bono_d_record', 0),
+    lineas: Object.fromEntries(TIENDAS_CLAVES.map((t) => [t, v(claveLinea(t), 0)])) as Record<Tienda, number>,
+  };
 }
 
-/** Para cada lunes: ventas netas (mismo neto que el Resumen), meta, bolsa y la parte de cada empleada ligada. */
-export async function semanasBono(env: Env, lunes: string[], config?: ConfigBono) {
+/**
+ * Para cada lunes y cada tienda: ventas netas (mismo neto que el Resumen, por `ventas.tienda`), linea, bolsa y la parte de cada empleada ligada a
+ * una cuenta de ESA tienda (`usuarios.tienda`; '' = la central). `alcanzada` = ventas >= linea (justo en la linea no hay bolsa: el excedente es 0).
+ * `record`: la semana supero a todas las anteriores de la tienda (y la tienda no llego a su linea). Solo se calcula con `d_record` > 0 y lee todo
+ * el historico de la tienda, por eso `retos.ts` (que solo necesita el avance de la semana en curso) pide `sinHistorial`.
+ */
+export async function semanasBono(env: Env, lunes: string[], config?: ConfigBono, sinHistorial = false) {
   config ??= await configBono(env);
+  const conRecord = config.d_record > 0 && !sinHistorial;
   const primero = [...lunes].sort()[0];
   const ultimo = sumarDias([...lunes].sort().at(-1)!, 7);   // el lunes siguiente: limite exclusivo
   const { results: ventas } = await env.DB.prepare(
     `${lineasNetas('v.creado_en >= ? and v.creado_en < ?')}
-     select date(datetime(creado_en, '-6 hours'), 'weekday 0', '-6 days') as lunes, coalesce(sum(neta), 0) as total
-     from netas where propietario = 'dolaron' group by lunes`,
-  ).bind(delDia(primero)[0], delDia(ultimo)[0]).all<{ lunes: string; total: number }>();
+     select date(datetime(n.creado_en, '-6 hours'), 'weekday 0', '-6 days') as lunes, v.tienda, coalesce(sum(n.neta), 0) as total
+     from netas n join ventas v on v.id = n.venta where n.propietario = 'dolaron' group by 1, 2`,
+  ).bind(conRecord ? '' : delDia(primero)[0], delDia(ultimo)[0]).all<{ lunes: string; tienda: string; total: number }>();
   const { results: asistencias } = await env.DB.prepare(
-    `select e.id, e.nombre, e.correo, a.fecha from asistencias a join empleados e on e.id = a.empleado_id
+    `select e.id, e.nombre, e.correo, a.fecha, coalesce(nullif(u.tienda, ''), ?) as tienda
+     from asistencias a join empleados e on e.id = a.empleado_id left join usuarios u on u.correo = e.correo
      where e.activo = 1 and e.correo <> '' and a.fecha >= ? and a.fecha < ?`,
-  ).bind(primero, ultimo).all<{ id: string; nombre: string; correo: string; fecha: string }>();
-  const { results: hechos } = await env.DB.prepare(
-    `select empleado_id, nota from nomina_movimientos where tipo = 'bono' and nota like 'bono tienda semana %'`,
-  ).all<{ empleado_id: string; nota: string }>();
+  ).bind(TIENDA_CENTRAL, primero, ultimo).all<{ id: string; nombre: string; correo: string; fecha: string; tienda: string }>();
+  const [{ results: hechos }, { results: lotes }] = await Promise.all([
+    env.DB.prepare(`select empleado_id, nota from nomina_movimientos where tipo = 'bono' and nota like 'bono tienda semana %'`).all<{ empleado_id: string; nota: string }>(),
+    env.DB.prepare(`select id from dolarones_lotes where id >= 'bono-tienda:' and id < 'bono-tienda;'`).all<{ id: string }>(),
+  ]);
   const registrados = new Set(hechos.map((h) => `${h.nota}|${h.empleado_id}`));
+  const conLote = new Set(lotes.map((l) => l.id));
+  const totalDe = (dia: string, t: string) => ventas.find((v) => v.lunes === dia && v.tienda === t)?.total ?? 0;
 
-  return lunes.map((dia) => {
-    const total = ventas.find((v) => v.lunes === dia)?.total ?? 0;
-    const alcanzada = total > config.meta;
-    const bolsa = alcanzada ? Math.floor(total * config.pb / 10_000) : 0;
-    const dias = new Map<string, { id: string; nombre: string; correo: string; dias: number }>();
-    for (const a of asistencias) {
-      if (a.fecha < dia || a.fecha > sumarDias(dia, 6)) continue;
-      const p = dias.get(a.id) ?? { id: a.id, nombre: a.nombre, correo: a.correo, dias: 0 };
-      p.dias++;
-      dias.set(a.id, p);
-    }
-    const partes = repartirBono(bolsa, [...dias.values()]).map((p) => ({
-      empleado_id: p.id, nombre: p.nombre, correo: p.correo, dias: p.dias, importe: p.importe,
-      registrado: registrados.has(`${notaBono(dia)}|${p.id}`),
-    }));
-    return { lunes: dia, domingo: sumarDias(dia, 6), ventas: total, meta: config.meta, alcanzada, bolsa, partes };
-  });
+  return lunes.map((dia) => ({
+    lunes: dia, domingo: sumarDias(dia, 6),
+    tiendas: TIENDAS_CLAVES.map((t) => {
+      const total = totalDe(dia, t);
+      const linea = config.lineas[t];
+      const bolsa = linea > 0 && total > linea ? Math.floor((total - linea) * config.pb / 10_000) : 0;
+      const mejorAntes = conRecord ? Math.max(0, ...ventas.filter((v) => v.tienda === t && v.lunes < dia).map((v) => v.total)) : 0;
+      const record = conRecord && linea > 0 && total < linea && mejorAntes > 0 && total > mejorAntes;
+      const dias = new Map<string, { id: string; nombre: string; correo: string; dias: number }>();
+      if (linea > 0) for (const a of asistencias) {
+        if (a.tienda !== t || a.fecha < dia || a.fecha > sumarDias(dia, 6)) continue;
+        const p = dias.get(a.id) ?? { id: a.id, nombre: a.nombre, correo: a.correo, dias: 0 };
+        p.dias++;
+        dias.set(a.id, p);
+      }
+      const partes = repartirBono(bolsa, [...dias.values()]).map((p) => {
+        const d = (config.d_cada > 0 ? Math.min(Math.floor(p.importe / config.d_cada), config.d_tope) : 0) + (record ? config.d_record : 0);
+        return {
+          empleado_id: p.id, nombre: p.nombre, correo: p.correo, dias: p.dias, importe: p.importe, d,
+          registrado: (p.importe === 0 || registrados.has(`${notaBono(dia)}|${p.id}`)) && (d === 0 || conLote.has(loteBono(dia, p.id))),
+        };
+      });
+      return { tienda: t, nombre: TIENDAS[t].nombre, ventas: total, linea, alcanzada: linea > 0 && total >= linea, bolsa, record, partes };
+    }),
+  }));
 }
 
 /**
  * GET /api/reportes/equipo?dias=N | desde=&hasta=[&comparar=&grano=]: tabla por persona del rango, la serie por cubeta (dia, semana o mes)
  * contra la comparacion elegida y las ultimas 8 semanas cerradas del bono. Los campos de siempre (`personas`, `semanas`, `config`, `dias`,
  * `dia_desde`, `dia_hasta`) no cambian; lo demas se agrega (#802). Sin subconsultas por pieza: «vendidas a 14 dias» sale de UNA pasada
- * agrupada por producto, como Capturas. Todo por dia de la tienda; 10 consultas (en paralelo) mas las 3 del bono: 13.
+ * agrupada por producto, como Capturas. Todo por dia de la tienda; 10 consultas (en paralelo) mas las 4 del bono: 14.
  * `tienda=` (#802, A1) acota lo que tiene tienda: ventas, tickets, cancelaciones, apartados y desde cuando hay ventas atribuidas (`ventas.tienda`).
- * Socios, capturas y asistencias no se registran por tienda: no se filtran y la pantalla lo dice. El bono (`semanas`) es del negocio completo
- * y no cambia con la tienda (lo leen tambien retos.ts y el pago de nomina).
+ * Socios, capturas y asistencias no se registran por tienda: no se filtran y la pantalla lo dice. El bono (`semanas`, una entrada por tienda) es de cada tienda
+ * y no cambia con el filtro `tienda=` (lo lee tambien retos.ts).
  */
 export async function reporteEquipo(url: URL, env: Env, ahora = Date.now()): Promise<Response> {
   const rango = rangoDe(url, ahora);
@@ -177,9 +206,9 @@ export async function reporteEquipo(url: URL, env: Env, ahora = Date.now()): Pro
 }
 
 /**
- * POST /api/reportes/equipo/bono { semana: 'YYYY-MM-DD' (lunes) }: asienta el bono de una semana CERRADA.
- * Un movimiento por empleada, fechado el domingo de esa semana, con id fijo y nota `bono tienda semana <lunes>`:
- * repetir la llamada (o dos a la vez) no duplica; lo que ya estaba se reporta aparte.
+ * POST /api/reportes/equipo/bono { semana: 'YYYY-MM-DD' (lunes) }: asienta el bono de una semana CERRADA, de todas las tiendas.
+ * Un movimiento por empleada, fechado el domingo de esa semana, con id fijo y nota `bono tienda semana <lunes>`, y su lote de
+ * Dolarones con id fijo `bono-tienda:<lunes>:<empleada>`: repetir la llamada (o dos a la vez) no duplica; lo que ya estaba se reporta aparte.
  */
 export async function registrarBonoSemana(request: Request, env: Env, correo: string, ahora = Date.now()): Promise<Response> {
   const { semana } = await request.json().catch(() => ({})) as { semana?: unknown };
@@ -187,17 +216,26 @@ export async function registrarBonoSemana(request: Request, env: Env, correo: st
       || Number.isNaN(Date.parse(`${semana}T12:00:00Z`))) return json({ error: 'La semana debe ser un lunes (AAAA-MM-DD).' }, 400);
   if (sumarDias(semana, 6) >= hoyTienda(ahora)) return json({ error: 'Esa semana aún no termina.' }, 400);
   const [plan] = await semanasBono(env, [semana]);
-  const pendientes = plan.partes.filter((p) => p.importe > 0);
-  if (!plan.bolsa) return json({ semana, bolsa: 0, alcanzada: plan.alcanzada, creados: [], ya_estaban: [] });
-  const nuevos = pendientes.filter((p) => !p.registrado);
-  const creado = new Date().toISOString();
-  if (nuevos.length) {
-    await env.DB.batch(nuevos.map((p) => env.DB.prepare(
-      `insert into nomina_movimientos (id, empleado_id, fecha, tipo, importe, nota, creado_por, creado_en)
-       values (?, ?, ?, 'bono', ?, ?, ?, ?) on conflict(id) do nothing`,
-    ).bind(`bono-tienda:${semana}:${p.empleado_id}`, p.empleado_id, plan.domingo, p.importe, notaBono(semana), correo, creado)));
+  const resumen = (t: string, p: { nombre: string; importe: number; d: number }) => ({ tienda: t, nombre: p.nombre, importe: p.importe, d: p.d });
+  const creados: ReturnType<typeof resumen>[] = [];
+  const yaEstaban: ReturnType<typeof resumen>[] = [];
+  const creado = new Date(ahora).toISOString();
+  for (const t of plan.tiendas) {
+    for (const p of t.partes.filter((x) => x.importe > 0 || x.d > 0)) {
+      if (p.registrado) { yaEstaban.push(resumen(t.tienda, p)); continue; }
+      if (p.importe > 0) {
+        await env.DB.prepare(
+          `insert into nomina_movimientos (id, empleado_id, fecha, tipo, importe, nota, creado_por, creado_en)
+           values (?, ?, ?, 'bono', ?, ?, ?, ?) on conflict(id) do nothing`,
+        ).bind(`bono-tienda:${semana}:${p.empleado_id}`, p.empleado_id, plan.domingo, p.importe, notaBono(semana), correo, creado).run();
+      }
+      if (p.d > 0) {
+        const emp = (await env.DB.prepare('select cliente_id from empleados where id = ?').bind(p.empleado_id).first<{ cliente_id: string }>())!;
+        await acreditarReto(env, { id: p.empleado_id, nombre: p.nombre, correo: p.correo, cliente_id: emp.cliente_id }, loteBono(semana, p.empleado_id), p.d * 100, ahora);
+      }
+      creados.push(resumen(t.tienda, p));
+    }
   }
-  const nombre = (p: { nombre: string; importe: number }) => ({ nombre: p.nombre, importe: p.importe });
-  return json({ semana, bolsa: plan.bolsa, alcanzada: true, creados: nuevos.map(nombre),
-    ya_estaban: pendientes.filter((p) => p.registrado).map(nombre) }, nuevos.length ? 201 : 200);
+  const bolsa = plan.tiendas.reduce((suma, t) => suma + t.bolsa, 0);
+  return json({ semana, bolsa, alcanzada: plan.tiendas.some((t) => t.alcanzada), creados, ya_estaban: yaEstaban }, creados.length ? 201 : 200);
 }
