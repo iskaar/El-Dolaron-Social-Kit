@@ -6,7 +6,7 @@ import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
 import { otorgarLogros } from './retos.ts';
 import { repartir } from './dolarones.ts';
 import { hoyTienda } from './reportes.ts';
-import { sumarDias } from './equipo.ts';
+import { sumarDias, lunesDe } from './equipo.ts';
 
 const DIA_MS = 86_400_000;
 const D8 = sumarDias(hoyTienda(), -8);   // el dia que evalua el cron de hoy
@@ -235,7 +235,7 @@ test('/api/retos/mios: el avance de la tienda de quien pregunta sale solo como p
   const { t, config, empleado, vender, mios } = escenario();
   try {
     // La linea de Soledad vale 2 tickets de 25,000; la meta tope, 6; la de Salk, otra.
-    config({ bono_tienda_linea_soledad: 50000, bono_tienda_meta_tope: 150000, bono_tienda_linea_salk: 90000, bono_tienda_pb: 150 });
+    config({ bono_tienda_desde: Number(sumarDias(lunesDe(hoyTienda()), -7).replaceAll('-', '')), bono_tienda_linea_soledad: 50000, bono_tienda_meta_tope: 150000, bono_tienda_linea_salk: 90000, bono_tienda_pb: 150 });
     await empleado('Ana', 'ana@prueba.mx');
     await vender('beto@prueba.mx', hoyTienda());   // 25,000 centavos de la semana, atendidos por otra persona
     const m = (await mios('ana@prueba.mx')).cuerpo;   // cuenta sin tienda: Soledad
@@ -251,12 +251,12 @@ test('/api/retos/mios: el avance de la tienda de quien pregunta sale solo como p
     for (const prohibido of ['25000', '50000', '75000', '100000', '125000', '150000', '90000']) assert.equal(texto.includes(prohibido), false, prohibido);
     assert.deepEqual(Object.keys(m).filter((k) => /meta|total|linea/.test(k) && !['tienda_alcanzada', 'metas'].includes(k)), []);
     assert.equal(m.semana.ventas, 0);   // lo de Ana, no lo de la tienda
-    // Llegar a la linea y pasarla: pasa de 100, se marca alcanzada y quedan logradas las metas 1 y 2.
+    // Pasar la linea: pasa de 100 y se marca alcanzada. Una meta se logra al SUPERARLA: con exactamente 75,000 la meta 2 aun no.
     await vender('beto@prueba.mx', hoyTienda()); await vender('beto@prueba.mx', hoyTienda());
     const arriba = (await mios('ana@prueba.mx')).cuerpo;
     assert.equal(arriba.tienda_pct, 150);
     assert.equal(arriba.tienda_alcanzada, true);
-    assert.deepEqual(arriba.metas.map((x: { lograda: boolean }) => x.lograda), [true, true, false, false, false]);
+    assert.deepEqual(arriba.metas.map((x: { lograda: boolean }) => x.lograda), [true, false, false, false, false]);
     // Otra tienda tiene su propio avance: Beto es de Salk y lo vendido en Soledad no cuenta para su linea.
     t.db.prepare(`update usuarios set tienda = 'salk' where correo = 'beto@prueba.mx'`).run();
     const salk = (await mios('beto@prueba.mx')).cuerpo;

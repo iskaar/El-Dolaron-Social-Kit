@@ -595,11 +595,15 @@ export async function clienteDe(env: Env, e: Empleada, ahora: string): Promise<s
   await env.DB.batch([
     env.DB.prepare(
       `insert into clientes (id, numero, nombre, telefono, bases_version, registrado_por, creado_en)
-       select ?, coalesce(max(numero), 0) + 1, ?, ?, ?, 'retos', ? from clientes`,
+       select ?, coalesce(max(numero), 0) + 1, ?, ?, ?, 'retos', ? from clientes where 1 on conflict do nothing`,
     ).bind(id, e.nombre, `retos-${e.id}`, env.BASES_APROBADAS_VERSION || 'retos', ahora),
-    env.DB.prepare(`update empleados set cliente_id = ? where id = ? and cliente_id = ''`).bind(id, e.id),
+    // Con dos corridas a la vez gana la primera fila del telefono de relleno (unico): la otra no falla y se queda con esa cuenta.
+    env.DB.prepare(`update empleados set cliente_id = (select id from clientes where telefono = ?) where id = ? and cliente_id = ''
+      and exists (select 1 from clientes where telefono = ?)`).bind(`retos-${e.id}`, e.id, `retos-${e.id}`),
   ]);
-  return (await env.DB.prepare('select cliente_id from empleados where id = ?').bind(e.id).first<{ cliente_id: string }>())!.cliente_id;
+  const cliente = (await env.DB.prepare('select cliente_id from empleados where id = ?').bind(e.id).first<{ cliente_id: string }>())?.cliente_id;
+  if (!cliente) throw new Error('No se pudo crear la cuenta de socio de la empleada; reintenta.');
+  return cliente;
 }
 
 /** Lote `origen = 'reto'` con id fijo: repetir la llamada no duplica ni el lote ni su movimiento. Devuelve la cuenta. */

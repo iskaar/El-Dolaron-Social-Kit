@@ -5,9 +5,11 @@ import assert from 'node:assert/strict';
 import { tienda, PRODUCTO } from './prueba-d1.ts';
 import { repartirBono, lunesDe, semanasCerradas } from './equipo.ts';
 import { hoyTienda } from './reportes.ts';
+import { acreditarReto } from './dolarones.ts';
 
 const sumar = (dia: string, n: number) => new Date(Date.parse(`${dia}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const LUNES = sumar(lunesDe(hoyTienda()), -14);   // una semana cerrada
+const DESDE = Number(sumar(LUNES, -35).replaceAll('-', ''));   // primera semana del bono por tienda: un lunes de antes
 
 test('repartirBono: piso por dias, el resto al de mas dias (empate: correo), suma exacta', () => {
   const dos = repartirBono(757, [{ correo: 'a@x', dias: 1 }, { correo: 'b@x', dias: 2 }]);
@@ -33,6 +35,7 @@ function escenario() {
   const t = tienda();
   const usuario = (correo: string, roles: string, tiendaCuenta = '') => t.db.prepare(
     `insert into usuarios (correo, nombre, roles, activo, tienda, creado_en, actualizado_en) values (?, ?, ?, 1, ?, '', '')`).run(correo, correo.split('@')[0], roles, tiendaCuenta);
+  t.db.prepare(`insert into config (clave, valor) values ('bono_tienda_desde', ?)`).run(String(DESDE));
   usuario('ana@prueba.mx', 'cajero'); usuario('beto@prueba.mx', 'capturista', 'salk'); usuario('rev@prueba.mx', 'revendedora');
   const empleado = async (nombre: string, correo?: string) => {
     const id = crypto.randomUUID();
@@ -70,6 +73,9 @@ test('cada tienda tiene su linea: la bolsa es el porcentaje de lo vendido arriba
     const beto = await empleado('Beto', 'beto@prueba.mx');   // cuenta de Salk
     const sinCuenta = await empleado('Carla');
     assert.equal(ana.status, 201); assert.equal(sinCuenta.status, 201);
+    const fantasma = await empleado('Fabia');   // con un correo que no es de ninguna cuenta: tampoco cobra
+    t.db.prepare(`update empleados set correo = 'fantasma@prueba.mx' where id = ?`).run(fantasma.id);
+    dias(fantasma.id, LUNES, 4);
     dias(ana.id, LUNES, 2); dias(beto.id, LUNES, 3); dias(sinCuenta.id, LUNES, 5);
     dias(ana.id, sumar(LUNES, 7), 3);   // dias de OTRA semana no cuentan
     const soledad = await vender(undefined, 'soledad', 3);
@@ -126,7 +132,7 @@ test('semana justo en la linea o bajo ella, y tienda sin linea: bolsa 0 y no se 
     assert.ok((await semana()).tiendas.every((x) => x.bolsa === 0 && x.linea === 0 && !x.alcanzada && x.partes.length === 0));
     await config({ bono_tienda_linea_soledad: total });   // exactamente en la linea: llego, pero no hay excedente
     const justo = deTienda(await semana(), 'soledad');
-    assert.deepEqual([justo.alcanzada, justo.bolsa], [true, 0]);
+    assert.deepEqual([justo.alcanzada, justo.bolsa], [false, 0]);   // llegar no es pasar: sin excedente no hay bolsa ni «Hay bono»
     await config({ bono_tienda_linea_soledad: total + 1 });
     const bajo = deTienda(await semana(), 'soledad');
     assert.deepEqual([bajo.alcanzada, bajo.bolsa], [false, 0]);
@@ -147,6 +153,10 @@ test('Dolarones del bono: 1 D por cada tanto de bono con tope semanal, lote de i
     await config({ bono_tienda_pb: 1000, bono_tienda_linea_soledad: total - 10000, bono_d_cada: 100, bono_d_tope: 4 });
     const parte = deTienda(await semana(), 'soledad').partes[0];
     assert.deepEqual([parte.importe, parte.d, parte.registrado], [1000, 4, false]);
+    // Con el tope en 0 no hay Dolarones del bono (antes de asentar: lo asentado ya no se recalcula).
+    await config({ bono_d_tope: 0 });
+    assert.equal(deTienda(await semana(), 'soledad').partes[0].d, 0);
+    await config({ bono_d_tope: 4 });
 
     assert.equal((await bono(LUNES)).status, 201);
     assert.equal((await bono(LUNES)).status, 200);   // segunda vez: nada nuevo
@@ -155,9 +165,6 @@ test('Dolarones del bono: 1 D por cada tanto de bono con tope semanal, lote de i
     assert.ok(cliente);
     assert.equal((t.db.prepare(`select count(*) as n from dolarones_movimientos where cliente_id = ? and tipo = 'reto'`).get(cliente) as { n: number }).n, 1);
     assert.equal(deTienda(await semana(), 'soledad').partes[0].registrado, true);
-    // Con el tope en 0 no hay Dolarones del bono.
-    await config({ bono_d_tope: 0 });
-    assert.equal(deTienda(await semana(), 'soledad').partes[0].d, 0);
   } finally { t.db.close(); }
 });
 
@@ -187,6 +194,90 @@ test('semana record: premio fijo solo si fue la mejor de la tienda y no llego a 
     await vender(`${sumar(LUNES, -12)}T18:00:00.000Z`, 'salk', 4);
     await config({ bono_tienda_linea_salk: ahora + 100000 });
     assert.equal(deTienda(await semana(), 'salk').record, false);
+  } finally { t.db.close(); }
+});
+
+test('cambiar la config despues de asentar no cambia lo pagado, ni se paga otra vez ni se muestra otro importe', async () => {
+  const { t, empleado, dias, vender, config, bono, semana, deTienda, movimientos, lotes } = escenario();
+  try {
+    const ana = await empleado('Ana', 'ana@prueba.mx');
+    dias(ana.id, LUNES, 2);
+    const total = await vender();
+    await config({ bono_tienda_pb: 1000, bono_tienda_linea_soledad: total - 10000, bono_d_cada: 100, bono_d_tope: 4 });
+    assert.equal((await bono(LUNES)).status, 201);
+    assert.deepEqual([(movimientos() as { importe: number }[])[0].importe, lotes()[0].importe], [1000, 400]);
+
+    // Gerencia sube el porcentaje y los Dolarones: lo pagado se queda y no hay nada nuevo que registrar.
+    await config({ bono_tienda_pb: 5000, bono_d_cada: 50, bono_d_tope: 9 });
+    const otra = await bono(LUNES);
+    assert.equal(otra.status, 200);
+    assert.deepEqual([otra.cuerpo.creados.length, otra.cuerpo.ya_estaban.length], [0, 1]);
+    assert.deepEqual([(movimientos() as { importe: number }[])[0].importe, lotes()[0].importe, lotes().length], [1000, 400, 1]);
+    const parte = deTienda(await semana(), 'soledad').partes[0];
+    assert.deepEqual([parte.importe, parte.d, parte.registrado], [1000, 4, true]);   // se muestra lo pagado, no el recalculo
+  } finally { t.db.close(); }
+});
+
+test('una semana anterior a la fecha de inicio (o sin fecha) no se asienta ni paga Dolarones, tampoco la pagada con el esquema anterior', async () => {
+  const { t, empleado, dias, vender, config, bono, semana, movimientos, lotes } = escenario();
+  try {
+    const ana = await empleado('Ana', 'ana@prueba.mx');
+    dias(ana.id, LUNES, 2);
+    const total = await vender();
+    await config({ bono_tienda_pb: 1000, bono_tienda_linea_soledad: total - 10000, bono_d_cada: 100, bono_d_tope: 4 });
+    // Un movimiento del esquema anterior (misma nota y mismo id fijo) de esa semana.
+    t.db.prepare(`insert into nomina_movimientos (id, empleado_id, fecha, tipo, importe, nota, creado_por, creado_en)
+      values (?, ?, ?, 'bono', 777, ?, 'dueno@prueba.mx', '')`).run(`bono-tienda:${LUNES}:${ana.id}`, ana.id, sumar(LUNES, 6), `bono tienda semana ${LUNES}`);
+
+    await config({ bono_tienda_desde: Number(sumar(LUNES, 7).replaceAll('-', '')) });   // el esquema nuevo empieza una semana despues
+    const antes = await bono(LUNES);
+    assert.equal(antes.status, 400);
+    assert.match(antes.cuerpo.error, /empieza en la semana/);
+    assert.deepEqual([lotes().length, movimientos().length], [0, 1]);
+    assert.ok((await semana()).tiendas.every((x) => x.linea === 0 && x.bolsa === 0 && x.partes.length === 0));   // para la tabla, esa semana ya no tiene bono
+
+    await config({ bono_tienda_desde: 0 });   // sin fecha: apagado para todas las semanas
+    assert.equal((await bono(LUNES)).status, 400);
+    assert.equal(lotes().length, 0);
+    // La fecha debe ser un lunes real.
+    for (const malo of [20260101, 20261301, 'x', 1.5, '', true]) assert.equal((await config({ bono_tienda_desde: malo as number })).status, 400, String(malo));
+    assert.equal((await config({ bono_tienda_desde: Number(LUNES.replaceAll('-', '')) })).status, 200);
+  } finally { t.db.close(); }
+});
+
+test('si el asentado se corto despues de la nomina y antes del lote de Dolarones, repetirlo completa el lote sin duplicar la nomina', async () => {
+  const { t, empleado, dias, vender, config, bono, movimientos, lotes } = escenario();
+  try {
+    const ana = await empleado('Ana', 'ana@prueba.mx');
+    dias(ana.id, LUNES, 2);
+    const total = await vender();
+    await config({ bono_tienda_pb: 1000, bono_tienda_linea_soledad: total - 10000, bono_d_cada: 100, bono_d_tope: 4 });
+    assert.equal((await bono(LUNES)).status, 201);
+    t.db.prepare(`delete from dolarones_movimientos where lote_id like 'bono-tienda:%'`).run();   // como si el corte hubiera sido antes del lote
+    t.db.prepare(`delete from dolarones_lotes where id like 'bono-tienda:%'`).run();
+    assert.equal(lotes().length, 0);
+    const retry = await bono(LUNES);
+    assert.equal(retry.status, 201);
+    assert.deepEqual([retry.cuerpo.creados.length, movimientos().length, lotes().map((l) => l.importe)], [1, 1, [400]]);
+    assert.equal((await bono(LUNES)).status, 200);
+    assert.deepEqual([movimientos().length, lotes().length], [1, 1]);
+    // Dos asentados a la vez: el que llega con la cuenta de socio aun sin crear (lectura vieja) no falla y usa la misma cuenta.
+    const cliente = (t.db.prepare('select cliente_id from empleados where id = ?').get(ana.id) as { cliente_id: string }).cliente_id;
+    t.db.prepare(`update empleados set cliente_id = '' where id = ?`).run(ana.id);
+    assert.equal(await acreditarReto(t.env, { id: ana.id, nombre: 'Ana', correo: 'ana@prueba.mx', cliente_id: '' }, 'bono-tienda:otro', 100, Date.now()), cliente);
+  } finally { t.db.close(); }
+});
+
+test('GET /api/config: quien no es gerencia no recibe la linea de las tiendas ni los valores del bono', async () => {
+  const { t, config } = escenario();
+  try {
+    await config({ bono_tienda_linea_soledad: 123400, bono_tienda_meta_tope: 234500, bono_tienda_pb: 100, bono_d_cada: 100, bono_d_tope: 3, bono_d_record: 5 });
+    const dueno = (await t.pedir('/api/config')).cuerpo;
+    assert.ok(Object.keys(dueno).filter((k) => /^bono_(tienda|d)_/.test(k)).length >= 7);
+    (t.env as unknown as { DEV_USUARIO: string }).DEV_USUARIO = 'beto@prueba.mx';   // capturista: puede leer config, no es gerencia
+    const captura = await t.pedir('/api/config');
+    assert.equal(captura.status, 200);
+    assert.deepEqual(Object.keys(captura.cuerpo).filter((k) => /^bono_(tienda|d)_/.test(k)), []);
   } finally { t.db.close(); }
 });
 

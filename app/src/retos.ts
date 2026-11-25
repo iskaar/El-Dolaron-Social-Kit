@@ -197,7 +197,7 @@ export async function misRetos(env: Env, correo: string, ahora = Date.now()): Pr
   const pct = (meta: number) => meta > 0 ? Math.floor(plan.ventas * 100 / meta) : 0;
   // Cinco metas a pasos iguales entre la linea y la meta tope (sin tope valido, solo la linea); cada una con numero, porcentaje y si ya se logro.
   const valores = plan.linea <= 0 ? [] : bono.tope > plan.linea ? [0, 1, 2, 3, 4].map((k) => plan.linea + Math.floor((bono.tope - plan.linea) * k / 4)) : [plan.linea];
-  const metas = valores.map((meta, i) => ({ n: i + 1, pct: pct(meta), lograda: plan.ventas >= meta }));
+  const metas = valores.map((meta, i) => ({ n: i + 1, pct: pct(meta), lograda: plan.ventas > meta }));
   const promedio = Object.fromEntries(Object.entries(previas).map(([k, v]) => [k, Math.round(v * 10 / 4) / 10]));
   const cuenta = emp?.cliente_id ? await saldo(env, emp.cliente_id, iso) : null;
   const liberan = emp?.cliente_id

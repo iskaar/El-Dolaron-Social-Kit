@@ -733,6 +733,7 @@
     <article class="panel" style="margin-top:14px">
       <header><h4>Bono semanal por tienda <span class="subtitulo">últimas 8 semanas cerradas, lunes a domingo</span></h4></header>
       <form id="equipo-config" style="display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin-bottom:12px">
+        <label>El bono por tienda empieza en la semana del (un lunes) <input id="bono-desde" type="date" style="width:150px"></label>
         <div id="bono-lineas" style="display:contents"></div>
         <label>Porcentaje de lo vendido arriba de la línea (%) <input id="bono-pct" type="number" min="0" step="0.01" style="width:90px"></label>
         <label>Meta tope, la misma para todas ($) <input id="bono-tope" type="number" min="0" step="1" style="width:130px"></label>
@@ -742,10 +743,12 @@
         <button type="submit">Guardar</button> <span id="aviso-bono" role="status"></span>
       </form>
       <div id="bono-semanas" style="overflow-x:auto"></div>
-      <p class="nota">Cada tienda tiene su línea semanal; una tienda sin línea (o en 0) no tiene bono. Solo hay bolsa si las ventas netas de esa tienda superan su línea, y es el porcentaje de lo que pasa de la línea.
+      <p class="nota">Sin fecha de inicio el bono por tienda está apagado, y las semanas anteriores a esa fecha no se asientan aquí (así no se mezclan con las que ya se pagaron con el esquema anterior).
+        Cada tienda tiene su línea semanal; una tienda sin línea (o en 0) no tiene bono. Solo hay bolsa si las ventas netas de esa tienda superan su línea, y es el porcentaje de lo que pasa de la línea.
         Se reparte entre quienes trabajaron esa semana en esa tienda según sus días (el resto de centavos, a quien más días tuvo). Encima del efectivo, cada persona recibe 1 Dolarón por cada tanto de bono, con su tope;
         y si la semana fue la mejor de la tienda sin llegar a su línea, el premio «semana récord» (con el premio o el tope en 0 no se da Dolarones).
-        Registrar crea el bono en Nómina fechado el domingo de la semana y acredita los Dolarones; hacerlo dos veces no duplica.</p>
+        Registrar crea el bono en Nómina fechado el domingo de la semana y acredita los Dolarones; hacerlo dos veces no duplica, y lo ya pagado no cambia aunque cambies los valores.
+        Registra las semanas cerradas antes de cambiar a alguien de tienda: la bolsa de una semana pasada se reparte entre quienes hoy son de esa tienda.</p>
     </article>
     </div>
   </section>
@@ -1535,6 +1538,7 @@ function pintarEquipo(e) {
   const c = e.config, tiendasBono = e.semanas[0]?.tiendas ?? [];
   $('bono-lineas').innerHTML = tiendasBono.map((t) => `<label>Línea semanal de ${escapar(t.nombre)} ($) <input id="bono-linea-${t.tienda}" data-tienda="${t.tienda}" type="number" min="0" step="1" style="width:130px"></label>`).join('');
   for (const t of tiendasBono) $(`bono-linea-${t.tienda}`).value = c.lineas[t.tienda] / 100;
+  $('bono-desde').value = c.desde;
   $('bono-pct').value = c.pb / 100;
   $('bono-tope').value = c.tope / 100;
   $('bono-d-cada').value = c.d_cada / 100;
@@ -1546,7 +1550,9 @@ function pintarEquipo(e) {
     const hayParte = activas.some((t) => t.partes.some((p) => p.importe > 0 || p.d > 0));
     const accion = pendiente ? `<button type="button" data-semana="${s.lunes}" aria-label="Registrar el bono de la semana del ${diaCorto(s.lunes)}">Registrar</button>` : hayParte ? 'Registrado' : '';
     return activas.map((t, i) => {
-      const reparto = t.partes.length === 0 ? 'Nadie con cuenta ligada trabajó esa semana'
+      const reparto = t.partes.length === 0 ? (t.bolsa > 0
+          ? '<strong style="color:var(--mal)">⚠ Hay bolsa y nadie la recibe: ninguna cuenta de esta tienda trabajó esa semana (¿cambió alguien de tienda?). Revísalo antes de registrar.</strong>'
+          : 'Nadie con cuenta ligada trabajó esa semana')
         : !t.alcanzada && !t.record ? 'Sin bono: no llegó a la línea'
         : t.partes.map((p) => `<span class="bono-parte">${escapar(p.nombre)} (${n(p.dias)} d): ${pesos(p.importe)}${p.d ? ` + ${n(p.d)} D` : ''}${p.registrado ? ' ✓' : ''}</span>`).join('');
       return `<tr><td>${i === 0 ? `${diaCorto(s.lunes)} – ${diaCorto(s.domingo)}` : ''}</td><td>${escapar(t.nombre)}</td><td class="num">${pesos(t.ventas)}</td><td class="num">${pesos(t.linea)}</td>
@@ -1809,9 +1815,12 @@ async function cargarControl() {
 function avisoBono(texto, ok) { $('aviso-bono').textContent = texto; $('aviso-bono').style.color = ok ? 'var(--bien)' : 'var(--mal)'; }
 $('equipo-config').addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  const desde = $('bono-desde').value;
+  if (desde && new Date(`${desde}T12:00:00Z`).getUTCDay() !== 1) { avisoBono('La fecha de inicio debe ser un lunes.', false); return; }
   const r = await fetch('/api/config', {
     method: 'PUT', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
+      bono_tienda_desde: desde ? Number(desde.replaceAll('-', '')) : 0,
       bono_tienda_pb: Math.round(Number($('bono-pct').value) * 100), bono_tienda_meta_tope: Math.round(Number($('bono-tope').value) * 100),
       bono_d_cada: Math.round(Number($('bono-d-cada').value) * 100), bono_d_tope: Math.round(Number($('bono-d-tope').value)), bono_d_record: Math.round(Number($('bono-d-record').value)),
       ...Object.fromEntries([...$('bono-lineas').querySelectorAll('input')].map((i) => [`bono_tienda_linea_${i.dataset.tienda}`, Math.round(Number(i.value) * 100)])),
