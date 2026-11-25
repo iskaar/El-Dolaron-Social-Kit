@@ -7,7 +7,8 @@
  */
 import { lineasNetas } from './netas.ts';
 import { hoyTienda, delDia } from './reportes.ts';
-import { lunesDe, sumarDias, semanasBono, configBono } from './equipo.ts';
+import { lunesDe, sumarDias, semanasBono, configBono, notaBono, loteBono } from './equipo.ts';
+import { porDelante } from '../public/retos.js';
 import { TIENDA_CENTRAL, esTienda } from './cuentas.ts';
 import { saldo, acreditarReto } from './dolarones.ts';
 import { pushA } from './push.ts';
@@ -169,6 +170,52 @@ async function numerosDe(env: Env, correo: string, desdeDia: string, hastaDia: s
   return { ventas: ventas?.ventas ?? 0, tickets: ventas?.tickets ?? 0, socios: socios?.n ?? 0, apartados: apartados?.n ?? 0 };
 }
 
+/** Dia de la semana de un dia de tienda: 1 = lunes ... 7 = domingo. */
+const diaSemana = (dia: string) => (new Date(`${dia}T12:00:00Z`).getUTCDay() + 6) % 7 + 1;
+
+/**
+ * Avance de UNA tienda en la semana que empieza el `lunes`: SOLO porcentajes (decision de Isaac, #760 y #935). Ni el total ni la linea ni las metas
+ * en pesos salen de aqui. Lo comparten /api/retos/mios y /api/caja/meta, asi que nunca dicen cosas distintas.
+ * Cinco metas a pasos iguales entre la linea y la meta tope (sin tope valido, solo la linea); cada una con numero, porcentaje y si ya se logro.
+ * `metas` vacio = la tienda no tiene linea o el bono no tiene fecha de inicio.
+ */
+export async function avanceTienda(env: Env, tienda: string, lunes: string, bono?: Awaited<ReturnType<typeof configBono>>) {
+  bono ??= await configBono(env);
+  const [{ tiendas }] = await semanasBono(env, [lunes], bono, true);
+  const plan = tiendas.find((t) => t.tienda === (esTienda(tienda) ? tienda : TIENDA_CENTRAL))!;
+  const pct = (meta: number) => meta > 0 ? Math.floor(plan.ventas * 100 / meta) : 0;
+  const valores = plan.linea <= 0 ? [] : bono.tope > plan.linea ? [0, 1, 2, 3, 4].map((k) => plan.linea + Math.floor((bono.tope - plan.linea) * k / 4)) : [plan.linea];
+  const metas = valores.map((meta, i) => ({ n: i + 1, pct: pct(meta), lograda: plan.ventas > meta }));
+  return { nombre: plan.nombre, pct: pct(plan.linea), alcanzada: plan.alcanzada, metas };
+}
+
+/**
+ * GET /api/caja/meta: lo que necesita la franja de la caja (#935) de la tienda de la cuenta que pregunta: metas con porcentaje, el dia de la semana
+ * (1 = lunes) y si va por delante del ritmo. Sin pesos. Sin tienda (computadora sin asignar) o sin linea: `metas` vacio.
+ */
+export async function metaCaja(env: Env, tienda: string, ahora = Date.now()): Promise<Response> {
+  const hoy = hoyTienda(ahora);
+  const dia = diaSemana(hoy);
+  if (!esTienda(tienda)) return json({ tienda: '', metas: [], dia, por_delante: false });
+  const { nombre, metas } = await avanceTienda(env, tienda, lunesDe(hoy));
+  return json({ tienda: nombre, metas, dia, por_delante: porDelante(metas, dia) });
+}
+
+/**
+ * Lo que gerencia YA asento de la semana cerrada anterior a esta, de ESTA empleada (id sacado del correo del servidor): su movimiento de nomina
+ * de tipo bono y su lote de Dolarones, con los ids fijos de `registrarBonoSemana`. Nunca un recalculo: sin asentar, `registrado` es false y no hay importes.
+ */
+async function bonoPasado(env: Env, empleado: string | undefined, lunes: string) {
+  const semana = sumarDias(lunes, -7);
+  const [pago, lote] = empleado ? await Promise.all([
+    env.DB.prepare(`select importe from nomina_movimientos where id = ? and empleado_id = ? and tipo = 'bono' and nota = ?`)
+      .bind(`bono-tienda:${semana}:${empleado}`, empleado, notaBono(semana)).first<{ importe: number }>(),
+    env.DB.prepare('select importe from dolarones_lotes where id = ?').bind(loteBono(semana, empleado)).first<{ importe: number }>(),
+  ]) : [null, null];
+  if (!pago && !lote) return { semana, registrado: false, importe: null, d: null };
+  return { semana, registrado: true, importe: pago?.importe ?? 0, d: (lote?.importe ?? 0) / 100 };
+}
+
 /**
  * GET /api/retos/mios: SOLO lo de quien pregunta (correo del servidor, nunca de la peticion): su semana contra su promedio
  * de las 4 semanas cerradas anteriores, sus logros y el saldo de su cuenta. Dinero en centavos; `d` en Dolarones enteros.
@@ -191,13 +238,7 @@ export async function misRetos(env: Env, correo: string, ahora = Date.now()): Pr
     env.DB.prepare('select tienda from usuarios where correo = ?').bind(correo).first<{ tienda: string }>(),
   ]);
   // La tienda de quien pregunta (la de su cuenta; '' = la central): mismo total y linea que el bono, pero solo salen porcentajes.
-  const [{ tiendas }] = await semanasBono(env, [lunes], bono, true);
-  const suya = cuentaApp?.tienda || TIENDA_CENTRAL;
-  const plan = tiendas.find((t) => t.tienda === (esTienda(suya) ? suya : TIENDA_CENTRAL))!;
-  const pct = (meta: number) => meta > 0 ? Math.floor(plan.ventas * 100 / meta) : 0;
-  // Cinco metas a pasos iguales entre la linea y la meta tope (sin tope valido, solo la linea); cada una con numero, porcentaje y si ya se logro.
-  const valores = plan.linea <= 0 ? [] : bono.tope > plan.linea ? [0, 1, 2, 3, 4].map((k) => plan.linea + Math.floor((bono.tope - plan.linea) * k / 4)) : [plan.linea];
-  const metas = valores.map((meta, i) => ({ n: i + 1, pct: pct(meta), lograda: plan.ventas > meta }));
+  const avance = await avanceTienda(env, cuentaApp?.tienda || TIENDA_CENTRAL, lunes, bono);
   const promedio = Object.fromEntries(Object.entries(previas).map(([k, v]) => [k, Math.round(v * 10 / 4) / 10]));
   const cuenta = emp?.cliente_id ? await saldo(env, emp.cliente_id, iso) : null;
   const liberan = emp?.cliente_id
@@ -218,9 +259,10 @@ export async function misRetos(env: Env, correo: string, ahora = Date.now()): Pr
     racha = { largo, cajas: largo ? (largo - 1) % cfg.reto_racha_dias + 1 : 0, meta: cfg.reto_racha_dias, d: cfg.reto_d_racha, hoy: estado };
   }
   return json({
-    nombre: emp?.nombre ?? '', semana: { desde: lunes, hoy, dia: (new Date(`${hoy}T12:00:00Z`).getUTCDay() + 6) % 7 + 1, ...semana }, promedio_4_semanas: promedio,
+    nombre: emp?.nombre ?? '', semana: { desde: lunes, hoy, dia: diaSemana(hoy), ...semana }, promedio_4_semanas: promedio,
     // Avance de SU tienda hacia su linea: SOLO porcentajes (decision de Isaac, #760). Ni el total ni la linea ni las metas en pesos salen del servidor.
-    tienda_pct: pct(plan.linea), tienda_alcanzada: plan.alcanzada, bono_pct: bono.pb / 100, metas,
+    tienda: avance.nombre, tienda_pct: avance.pct, tienda_alcanzada: avance.alcanzada, bono_pct: bono.pb / 100, metas: avance.metas,
+    bono_pasado: await bonoPasado(env, emp?.id, lunes),
     racha, liberan_el: liberan?.d ?? null,
     logros: logros.results.map((l) => ({ id: l.id, fecha: l.creado_en, logro: l.logro, etiqueta: ETIQUETAS[l.logro] ?? l.logro, d: l.d })),
     logros_por_tipo: Object.fromEntries(porTipo.results.map((t) => [t.logro, t.n])),

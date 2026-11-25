@@ -89,6 +89,9 @@ const CAJA: Rol[] = ['cajero', 'computadora'];
 const VENDER: Rol[] = [...CAJA, 'revendedora'];
 // /retos (#752): lo propio de cada empleada. Como CAJA (la computadora entra con el PIN del cajero) mas capturista, que tambien figura como quien atendio.
 const RETOS: Rol[] = [...CAJA, 'capturista'];
+// Franja de metas de la caja (#935): las mismas cuentas que abren /caja, pero sin PIN a proposito (copia, no CAJA: esDeCaja compara por identidad).
+// Solo da porcentajes de la tienda de la CUENTA que pregunta, asi que la franja se pinta antes de que alguien escriba su PIN.
+const META_CAJA: Rol[] = [...CAJA];
 const TODOS: Rol[] = ['cajero', 'capturista'];
 const DUENO: Rol[] = [];
 const AUXILIAR: Rol[] = ['auxiliar'];
@@ -225,6 +228,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/avisos' || ruta.startsWith('/api/avisos/')) return CAJA;   // centro de avisos (Issue #429)
   if (ruta === '/api/plano') return metodo === 'GET' ? RETOS : DUENO;   // Issue #756
   if (ruta === '/api/retos/mios') return RETOS;   // solo lo propio de quien pregunta (Issue #752)
+  if (ruta === '/api/caja/meta' && metodo === 'GET') return META_CAJA;   // #935: porcentajes de la tienda de la cuenta, sin pesos
   if (ruta === '/api/ayuda') return CAJA;   // botón «Ayuda» (Issue #600)
   // #800: las cuentas de una tienda activan notificaciones para recibir los avisos de apartados; el resto de /api/push/* sigue siendo del dueño.
   if (ruta === '/api/push/clave' || ruta === '/api/push/suscripcion') return CAJA;

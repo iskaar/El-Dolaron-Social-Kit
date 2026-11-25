@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { metaPersonal, anillos, ritmoPct, diasQuedan, estadoTienda, premiosNuevos, estanteria, siguientePaso, dd } from '../public/retos.js';
+import { metaPersonal, anillos, ritmoPct, diasQuedan, estadoTienda, nombreMeta, panelMetas, porDelante, metasNuevas, premiosNuevos, estanteria, siguientePaso, dd } from '../public/retos.js';
 
 const REGLAS = [
   { logro: 'antiguedad', etiqueta: 'Pieza con antigüedad', texto: 'Vende una pieza con 90 días', d: 50 },
@@ -14,7 +14,7 @@ const SEMANA = { desde: '2026-11-02', hoy: '2026-11-04', dia: 3, ventas: 0, tick
 const PROMEDIO = { ventas: 0, tickets: 0, socios: 0, apartados: 0 };
 const base = (extra: Record<string, unknown> = {}) => ({
   semana: SEMANA, promedio_4_semanas: PROMEDIO,
-  tienda_pct: 0, tienda_alcanzada: false, racha: null, logros: [], logros_por_tipo: {}, reglas: REGLAS, ...extra,
+  tienda_pct: 0, tienda_alcanzada: false, metas: [], racha: null, logros: [], logros_por_tipo: {}, reglas: REGLAS, ...extra,
 });
 const semana = (s: Record<string, number>, p: Record<string, number>, extra: Record<string, unknown> = {}) =>
   base({ semana: { ...SEMANA, ...s }, promedio_4_semanas: { ...PROMEDIO, ...p }, ...extra });
@@ -38,13 +38,58 @@ test('anillos: porcentaje contra la meta propia; sin promedio no se inventa uno'
   assert.equal(anillos(semana({ tickets: 20 }, { tickets: 10 }))[1].pct, 181);   // pasa de 100: el aro se llena y el texto dice la verdad
 });
 
+// Cinco metas: n, porcentaje y si ya se logro (solo porcentajes, como las manda el servidor).
+const metas = (...pcts: number[]) => pcts.map((pct, i) => ({ n: i + 1, pct, lograda: false }));
+const logradas = (k: number, ...pcts: number[]) => metas(...pcts).map((x, i) => ({ ...x, lograda: i < k }));
+
 test('ritmo de la tienda: días transcurridos entre 7 y estado sin culpa', () => {
   assert.deepEqual([1, 3, 7].map(ritmoPct), [14, 43, 100]);
   assert.deepEqual([1, 5, 7].map(diasQuedan), [6, 2, 0]);
-  assert.match(estadoTienda(base({ tienda_pct: 50 })).texto, /delante/);
-  assert.match(estadoTienda(base({ tienda_pct: 10 })).texto, /detrás/);
-  assert.doesNotMatch(estadoTienda(base({ tienda_pct: 10 })).texto, /perdi|fall/i);
-  assert.match(estadoTienda(base({ tienda_pct: 120, tienda_alcanzada: true })).texto, /Llegamos a la meta/);
+  assert.match(estadoTienda(base({ metas: metas(50, 33, 25, 20, 16) })).texto, /delante/);   // dia 3: ritmo 43 %
+  assert.match(estadoTienda(base({ metas: metas(10, 6, 5, 4, 3) })).texto, /detrás/);
+  assert.doesNotMatch(estadoTienda(base({ metas: metas(10) })).texto, /perdi|fall/i);
+  assert.match(estadoTienda(base({ metas: logradas(1, 120) })).texto, /Llegamos a la meta/);   // una sola meta (la linea) lograda
+  assert.match(estadoTienda(base({ metas: logradas(1, 120, 80, 60, 48, 40) })).texto, /Ya hay bono! Vamos por la meta 2/);
+  assert.match(estadoTienda(base({ metas: logradas(4, 300, 200, 150, 120, 90) })).texto, /Vamos por la grande/);
+  assert.match(estadoTienda(base({ metas: logradas(5, 300, 200, 150, 120, 100) })).texto, /meta más grande/);
+});
+
+test('metas: nombres, la mas cercana sin lograr y todas logradas', () => {
+  assert.deepEqual([1, 2, 4, 5].map((n) => nombreMeta(n, 5)), ['Meta 1 · Arranca el bono', 'Meta 2', 'Meta 4', 'La grande']);
+  assert.equal(nombreMeta(1, 1), 'Meta 1 · Arranca el bono');   // solo la linea: es la que arranca el bono
+  const p = panelMetas(logradas(2, 300, 200, 90, 70, 56));
+  assert.deepEqual([p.vacio, p.completa, p.actual!.n, p.actual!.pct, p.actual!.etiqueta, p.logradas], [false, false, 3, 90, 'Meta 3', 2]);
+  assert.deepEqual(p.lista.map((x) => [x.etiqueta, x.pct, x.lograda]), [['Meta 1 · Arranca el bono', 300, true], ['Meta 2', 200, true], ['Meta 3', 90, false], ['Meta 4', 70, false], ['La grande', 56, false]]);
+  assert.equal(panelMetas(metas(40, 20, 10, 8, 6)).actual!.etiqueta, 'Meta 1 · Arranca el bono');
+  const todas = panelMetas(logradas(5, 300, 200, 150, 120, 101));
+  assert.deepEqual([todas.completa, todas.actual, todas.logradas], [true, null, 5]);   // celebracion: sin barra
+});
+
+test('metas: sin metas la seccion no aparece; exactamente en una meta marca 100 % y sigue siendo la actual', () => {
+  for (const sin of [undefined, null, []]) assert.deepEqual(panelMetas(sin as never), { vacio: true, completa: false, actual: null, lista: [], logradas: 0 });
+  assert.equal(porDelante([], 7), false);
+  // Se logra al SUPERAR la meta (lo decide el servidor): con justo 100 % la meta 2 aun no esta lograda y sigue en la barra.
+  const justo = panelMetas([{ n: 1, pct: 160, lograda: true }, { n: 2, pct: 100, lograda: false }, { n: 3, pct: 80, lograda: false }]);
+  assert.deepEqual([justo.actual!.n, justo.actual!.pct, justo.completa], [2, 100, false]);
+  assert.equal(porDelante([{ n: 1, pct: 100, lograda: false }], 7), true);   // dia 7, ritmo 100 %: justo en el ritmo cuenta como delante
+  assert.equal(porDelante([{ n: 1, pct: 99, lograda: false }], 7), false);
+});
+
+test('metas: por delante del ritmo se mide contra la meta de la barra; con todas logradas, si', () => {
+  assert.equal(porDelante(metas(43, 30, 20, 15, 12), 3), true);
+  assert.equal(porDelante(metas(42, 30, 20, 15, 12), 3), false);
+  assert.equal(porDelante(logradas(1, 200, 40, 30, 20, 10), 3), false);   // la barra va a la meta 2 (40 %)
+  assert.equal(porDelante(logradas(5, 300, 200, 150, 120, 101), 1), true);
+});
+
+test('metas nuevas: las logradas que aun no se celebraron esta semana', () => {
+  const m = logradas(3, 300, 200, 150, 80, 60);
+  assert.deepEqual(metasNuevas(m, 0).map((x) => x.n), [1, 2, 3]);
+  assert.deepEqual(metasNuevas(m, 2).map((x) => x.n), [3]);
+  assert.deepEqual(metasNuevas(m, 3), []);
+  assert.deepEqual(metasNuevas(m, 9), []);
+  assert.deepEqual(metasNuevas([], 0), []);
+  assert.deepEqual(metasNuevas(metas(10, 5, 4, 3, 2)), []);
 });
 
 test('premio nuevo: lo que está antes del último visto; sin visto, solo la última semana', () => {
@@ -97,6 +142,13 @@ test('siguiente paso: racha 0 con hoy pendiente invita a empezar sin culpa', () 
 
 test('Dolarones se muestran sin ceros de sobra', () => {
   assert.deepEqual([24500, 1250, 8000].map(dd), ['245 D', '12.5 D', '80 D']);
+});
+
+test('retos.html: la lista de metas se abre con un boton con aria-expanded y la barra tiene texto alternativo', () => {
+  const html = readFileSync('public/retos.html', 'utf8');
+  assert.match(html, /<button type="button" class="q" id="metas-btn" aria-expanded="false" aria-controls="metas-lista" aria-label="[^"]+"/);
+  assert.match(html, /\$\('barra'\)\.setAttribute\('aria-label'/);
+  assert.match(html, /id="bono-pasado"/);
 });
 
 test('retos.html no pide Google Fonts, guarda lo visto con try/catch y respeta movimiento reducido', () => {

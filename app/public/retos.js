@@ -31,12 +31,37 @@ export const ritmoPct = (dia) => Math.round(Math.min(Math.max(dia, 1), 7) * 100 
 /** Cuanto de los 7 dias queda despues de hoy. */
 export const diasQuedan = (dia) => 7 - Math.min(Math.max(dia, 1), 7);
 
+/** Nombre de una meta: la 1 arranca el bono, la ultima es la grande (si solo hay una, es la que arranca el bono). */
+export const nombreMeta = (n, total) => (n === 1 ? 'Meta 1 · Arranca el bono' : n === total ? 'La grande' : `Meta ${n}`);
+
+/**
+ * Las metas de la tienda como las pinta /retos y las usa la franja de la caja (#935). Todo sale de `metas` ([{ n, pct, lograda }]; solo porcentajes):
+ * `vacio` si no hay metas (la seccion no aparece), `actual` = la primera sin lograr (con su porcentaje tal cual: exactamente en la meta marca 100 y sigue sin lograr,
+ * porque se logra al superarla), `completa` si ya estan todas, `lista` con todas para el «?».
+ */
+export function panelMetas(metas) {
+  const lista = (metas ?? []).map((x) => ({ ...x, etiqueta: nombreMeta(x.n, metas.length) }));
+  const actual = lista.find((x) => !x.lograda) ?? null;
+  return { vacio: lista.length === 0, completa: lista.length > 0 && !actual, actual, lista, logradas: lista.filter((x) => x.lograda).length };
+}
+
+/** ¿Va la tienda por delante del ritmo de la semana hacia su meta mas cercana? Con todas logradas, si. Sin metas, no. */
+export function porDelante(metas, dia) {
+  const { vacio, actual } = panelMetas(metas);
+  return vacio ? false : !actual || actual.pct >= ritmoPct(dia);
+}
+
 /** Texto del estado de la tienda frente al ritmo; sin culpa: lo que falta se puede alcanzar. */
 export function estadoTienda(m) {
-  if (m.tienda_alcanzada) return { icono: '★', texto: '¡Llegamos a la meta de la semana! Hay bono.' };
-  if (m.tienda_pct >= ritmoPct(m.semana.dia)) return { icono: '▲', texto: 'Vamos por delante del ritmo.' };
+  const { completa, actual, lista } = panelMetas(m.metas);
+  if (completa) return { icono: '★', texto: lista.length === 1 ? '¡Llegamos a la meta de la semana! Hay bono.' : '¡Llegamos a la meta más grande de la semana!' };
+  if (actual?.n > 1) return { icono: '★', texto: `¡Ya hay bono! Vamos por ${actual.n === lista.length ? 'la grande' : `la meta ${actual.n}`}.` };
+  if (porDelante(m.metas, m.semana.dia)) return { icono: '▲', texto: 'Vamos por delante del ritmo.' };
   return { icono: '▼', texto: 'Vamos por detrás del ritmo, todavía hay días para alcanzarlo.' };
 }
+
+/** Metas que se lograron desde la ultima visita (`vistas` = cuantas ya se celebraron esta semana); la mas alta va al final. */
+export const metasNuevas = (metas, vistas = 0) => panelMetas(metas).lista.filter((x) => x.lograda).slice(Math.max(0, vistas));
 
 /** Logros desde la ultima visita. `visto` es el id del logro mas nuevo que ya se celebro; sin el, solo los de los ultimos 7 dias. */
 export function premiosNuevos(logros, visto, ahora = Date.now()) {
