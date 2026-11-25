@@ -10,19 +10,52 @@
   html, body { height: 100%; margin: 0; }
   body { background: #f4f6f9; color: #1a1f2b; font-family: system-ui, -apple-system, sans-serif;
     display: flex; flex-direction: column; }
-  header { background: var(--azul); color: #fff; padding: 10px 18px;
-    display: flex; align-items: center; gap: 14px; }
-  header h1 { font-size: 17px; margin: 0; flex: 1; }
-  header a { color: #FFD447; font-size: 13px; }
-  #avisos-ml:not([hidden]) { background: #D72B32; color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 15px; font-weight: 700; text-decoration: none; }
-  #pedir-ayuda { background: #D72B32; color: #fff; border: 0; border-radius: 8px; padding: 6px 14px; font-size: 15px; font-weight: 700; cursor: pointer; }
+  /* Encabezado corto (#931): lo de todos los días a la vista; lo poco frecuente, bajo «Más»; lo que pide atención, bajo «Avisos». */
+  header { background: var(--azul); color: #fff; padding: 8px 14px; position: relative; z-index: 20;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .hueco { flex: 1; min-width: 8px; }
+  header .b, header > a { background: transparent; color: #fff; border: 1px solid #ffffff55; border-radius: 8px; padding: 7px 12px;
+    font-size: 14px; min-height: 38px; display: inline-flex; align-items: center; cursor: pointer; text-decoration: none; }
+  header .b:hover, header > a:hover { background: #ffffff18; }
+  header .avisos { border-color: #FFD447; color: #FFD447; font-weight: 700; gap: 8px; }
+  #avisos-n { background: var(--rojo); color: #fff; border-radius: 999px; min-width: 22px; height: 22px; padding: 0 6px; font-size: 13px; display: inline-grid; place-items: center; }
+  #avisos-n[hidden] { display: none; }
+  #pedir-ayuda { background: #D72B32; color: #fff; border: 0; border-radius: 8px; padding: 7px 14px; min-height: 38px; font-size: 15px; font-weight: 700; cursor: pointer; }
   #pedir-ayuda:disabled { opacity: .8; cursor: default; }
   #estado-red { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: #ffffff22; }
   #estado-red.sin-red { background: var(--rojo); }
-  #promo-cupo { font-size: 15px; font-weight: 700; padding: 4px 12px; border-radius: 999px; background: #FFD447; color: #1a1f2b; }
+  .flota { position: absolute; top: calc(100% + 6px); right: 14px; z-index: 30; background: #fff; color: #1a1f2b; border: 1px solid var(--linea);
+    border-radius: 12px; box-shadow: 0 12px 30px #0f275040; width: min(400px, calc(100% - 28px)); padding: 6px; max-height: 80vh; overflow-y: auto; }
+  .flota[hidden] { display: none; }
+  .flota h3 { margin: 8px 10px 4px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: #5b6478; }
+  #panel-mas { width: min(240px, calc(100% - 28px)); }
+  #panel-mas a, #panel-mas button { display: block; width: 100%; text-align: left; padding: 11px 12px; color: #1a1f2b; background: none; border: 0; text-decoration: none;
+    border-radius: 8px; font-size: 15px; cursor: pointer; }
+  #panel-mas a:hover, #panel-mas button:hover { background: #f5f7fb; }
+  #panel-mas [hidden] { display: none; }
+  .aviso-item { display: grid; grid-template-columns: 10px 1fr auto; gap: 10px; align-items: center; padding: 10px; font-size: 15px; }
+  .aviso-item + .aviso-item { border-top: 1px solid var(--linea); }
+  .aviso-item i { width: 10px; height: 10px; border-radius: 50%; display: block; background: var(--azul); }
+  .aviso-item.rojo i { background: var(--rojo); }
+  .aviso-item.rojo b { color: var(--rojo); }
+  .aviso-item.dorado i { background: #FFD447; }
+  .aviso-item a { border: 1px solid var(--azul); color: var(--azul); border-radius: 8px; padding: 6px 10px; font-size: 13px; text-decoration: none; }
+  .aviso-vacio { margin: 8px 10px; color: #5b6478; font-size: 14px; }
+  #impresiones-aviso { margin: 4px 10px; font-size: 14px; color: var(--rojo); }
+  #impresiones-aviso:empty { display: none; }
+  #abrir-impresion-fallida { margin: 0 10px 6px; padding: 6px 10px; font-size: 13px; border: 1px solid var(--azul); background: #fff; color: var(--azul); border-radius: 8px; cursor: pointer; }
+  #abrir-impresion-fallida[hidden] { display: none; }
+  /* Franja bajo el encabezado, siempre a la vista. A la derecha, la promo vigente; a la izquierda se reserva la barra de la meta (otro Issue). */
+  #franja { background: #0f2750; color: #fff; display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 5px 14px; min-height: 34px; }
+  #franja-meta { flex: 1; min-width: 0; }
+  #franja-meta[hidden] { display: none; }
+  #promo-cupo, #buenfin { font-size: 14px; font-weight: 700; padding: 3px 12px; border-radius: 999px; white-space: nowrap; }
+  #promo-cupo { background: #FFD447; color: #1a1f2b; }
   #promo-cupo.agotada { background: var(--rojo); color: #fff; }
-  #buenfin { font-size: 15px; font-weight: 700; padding: 4px 12px; border-radius: 999px; background: #D72B32; color: #fff; }
-  main { flex: 1; display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px; min-height: 0; }
+  #buenfin { background: #D72B32; color: #fff; }
+  #promo-cupo[hidden], #buenfin[hidden] { display: none; }
+  main { flex: 1; display: grid; grid-template-columns: 1fr 380px; gap: 16px; padding: 12px 16px; min-height: 0; }
   .panel { background: #fff; border: 1px solid var(--linea); border-radius: 12px; padding: 14px;
     display: flex; flex-direction: column; min-height: 0; }
   #codigo { width: 100%; padding: 14px; font-size: 20px; border: 2px solid var(--azul);
@@ -50,40 +83,44 @@
   .renglon .codigo { font-size: 11px; color: #78839a; font-family: ui-monospace, monospace; }
   .renglon .importe { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
   .renglon button { border: 0; background: none; color: var(--rojo); font-size: 18px; cursor: pointer; }
-  #total { font-size: 44px; font-weight: 800; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
-  #original { color: #5b6478; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .total-fila { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  #total { font-size: 44px; font-weight: 800; letter-spacing: -1px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  #original { color: #5b6478; font-size: 16px; font-variant-numeric: tabular-nums; }
   #original:empty { display: none; }
-  #piezas { font-size: 20px; font-weight: 700; margin-bottom: 10px; font-variant-numeric: tabular-nums; }   /* el cajero cuenta lo que tiene enfrente contra esto */
+  #piezas { font-size: 20px; font-weight: 700; color: #5b6478; font-variant-numeric: tabular-nums; }   /* el cajero cuenta lo que tiene enfrente contra esto */
   label { display: block; font-size: 12px; color: #5b6478; margin: 10px 0 4px; }
   select, #efectivo { width: 100%; padding: 12px; font-size: 18px; border: 1px solid var(--linea);
     border-radius: 10px; }
   /* Una sola fila (Exacto + hasta 3 billetes): el cobro no debe bajar de la pantalla de 768 px (#830). */
-  #rapidos { display: flex; flex-wrap: nowrap; gap: 6px; margin-top: 6px; }
+  #rapidos { display: flex; flex-wrap: nowrap; gap: 6px; margin-top: 4px; }
+  #rapidos:empty { margin-top: 0; }
   #rapidos[hidden] { display: none; }
   #rapidos button { flex: 1; min-width: 0; padding: 8px 2px; font-size: 15px; font-weight: 700; border: 1px solid var(--azul);
     background: #fff; color: var(--azul); border-radius: 10px; cursor: pointer; }
   #rapidos button:disabled { opacity: .5; cursor: not-allowed; }
-  #cambio { font-size: 22px; font-weight: 700; margin-top: 10px; min-height: 30px; }
+  #cambio { font-size: 20px; font-weight: 700; margin-top: 4px; min-height: 24px; }
+  #aviso-remoto { margin-top: 6px; padding: 6px 10px; font-size: 13px; font-weight: 700; color: var(--azul); background: #e3ecff; border-radius: 8px; }
+  #aviso-remoto[hidden] { display: none; }
   #cambio.falta { color: var(--rojo); }
   #cambio.ok { color: var(--verde); }
   /* Tres botones de cobro, sin ninguno por omisión (#830): el clic es a la vez la forma de pago y el cobro. */
-  #botones-cobro { margin-top: 8px; }
+  #botones-cobro { margin-top: 2px; }
   #botones-cobro [hidden] { display: none; }
-  #cobrar-en { font-size: 12px; color: #5b6478; margin-bottom: 4px; }
+  #cobrar-en { font-size: 12px; color: #5b6478; margin-bottom: 2px; }
   #fila-cobro { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }   /* sin «Efectivo» (celular) quedan dos */
-  #botones-cobro button { width: 100%; min-height: 56px; padding: 6px 2px; font-size: 16px; font-weight: 800; border: 0; border-radius: 12px; color: #fff; cursor: pointer; }
+  #botones-cobro button { width: 100%; min-height: 52px; padding: 6px 2px; font-size: 16px; font-weight: 800; border: 0; border-radius: 12px; color: #fff; cursor: pointer; }
   #botones-cobro #cobrar-sin-dinero { font-size: 18px; }
   #cobrar-efectivo, #cobrar-sin-dinero { background: var(--verde); }
   #cobrar-tarjeta { background: var(--azul); }
   #cobrar-transferencia { background: #7b3fa0; }
   #botones-cobro button:disabled { background: #c8cfda; cursor: not-allowed; }
   #dev-lista { max-height: 50vh; overflow-y: auto; margin-top: 8px; }
-  #abrir-cajon, #abrir-devolucion { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--azul);
-    background: #fff; color: var(--azul); border-radius: 10px; cursor: pointer; }
-  #cancelar { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--rojo);
-    background: #fff; color: var(--rojo); border-radius: 10px; cursor: pointer; }
-  #pedir-descuento { width: 100%; margin-top: 8px; padding: 10px; font-size: 14px; border: 1px solid var(--azul);
-    background: #fff; color: var(--azul); border-radius: 10px; cursor: pointer; }
+  /* Lo poco frecuente, junto y discreto (#931). Sin «Pedir descuento» (ticket vacío) quedan tres. */
+  #acciones-raras { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; margin-top: 6px; }
+  #acciones-raras button { min-height: 36px; padding: 4px 2px; font-size: 13px; border: 1px solid var(--linea); background: #fff; color: #1a1f2b; border-radius: 10px; cursor: pointer; }
+  #acciones-raras button[hidden] { display: none; }
+  #acciones-raras button:disabled { opacity: .5; cursor: not-allowed; }
+  #acciones-raras #cancelar { color: var(--rojo); border-color: #ecc2c4; }
   #descuento-form { display: grid; gap: 8px; margin-top: 8px; }
   #descuento-form[hidden] { display: none; }
   #descuento-form input, #descuento-form select { padding: 12px; font-size: 16px; border: 1px solid var(--linea); border-radius: 10px; }
@@ -113,7 +150,14 @@
   #en-mano[hidden] { display: none; }
   #en-mano button { padding: 10px 14px; font-size: 14px; border: 1px solid var(--azul); border-radius: 10px; background: #fff; color: var(--azul); cursor: pointer; }
   .en-mano { color: var(--rojo); }
-  #pie { padding: 8px 18px 14px; font-size: 13px; color: #5b6478; display: flex; gap: 18px; flex-wrap: wrap; }
+  /* Pie con señales (#931): verde, nada que atender; ámbar, ojo; rojo, también sube a «Avisos». */
+  #pie { padding: 6px 16px 10px; font-size: 13px; color: #5b6478; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  #pie > span:not(:empty) { background: #fff; border: 1px solid var(--linea); border-radius: 999px; padding: 3px 10px; }
+  #pie > span[data-estado]:not(:empty)::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--verde); }
+  #pie > span[data-estado="aviso"]:not(:empty)::before { background: #FFD447; }
+  #pie > span[data-estado="rojo"]:not(:empty)::before { background: var(--rojo); }
+  #pie > span[data-estado="rojo"] { border-color: #ecc2c4; }
+  #pie > span[hidden] { display: none; }
   #tickets { margin-top: 14px; border-top: 1px solid var(--linea); padding-top: 10px; }
   #tickets summary { font-size: 13px; color: #5b6478; cursor: pointer; }
   #lista-tickets { max-height: 220px; overflow-y: auto; margin-top: 8px; }
@@ -147,11 +191,10 @@
   #pedido-cargado[hidden] { display: none; }
   #pedido-cargado button { border: 1px solid var(--azul); background: #fff; color: var(--azul); border-radius: 8px;
     padding: 6px 10px; min-height: 36px; font-size: 13px; cursor: pointer; }
-  #a-pagar { font-size: 18px; font-weight: 700; color: var(--azul); min-height: 22px; }
+  #a-pagar { font-size: 15px; font-weight: 700; color: var(--azul); }
+  #a-pagar:empty { display: none; }
   .caja-nombre { font-size: 13px; display: flex; align-items: center; gap: 6px; color: #fff; margin: 0; }
   .caja-nombre select { width: auto; padding: 4px 8px; font-size: 14px; border-radius: 8px; border: 0; }
-  header button { border: 1px solid #FFD447; background: transparent; color: #FFD447; border-radius: 8px;
-    padding: 5px 12px; font-size: 13px; cursor: pointer; }
   dialog { border: 0; border-radius: 14px; padding: 18px 20px; width: min(560px, 94vw); max-height: 92vh; }
   dialog::backdrop { background: #16366b99; }
   dialog h2 { margin: 0 0 8px; font-size: 20px; color: var(--azul); }
@@ -182,10 +225,30 @@
   #corte-resumen .fuerte td { font-weight: 800; font-size: 18px; }
   #corte-resumen .falta td { color: var(--rojo); font-weight: 800; }
   #corte-resumen .sobra td { color: #b26b00; font-weight: 800; }
+  #cobro-medio p { margin: 6px 0; }
+  #socio-info { min-height: 0; }
+  #socio-info:empty { display: none; }
+  #pago { background: #f5f7fb; border: 1px solid var(--linea); border-radius: 12px; padding: 2px 10px 10px; }
+  #pago > label:first-child { margin-top: 6px; }
+  #mas-opciones { margin-top: 12px; border-top: 1px solid var(--linea); padding-top: 8px; }
+  #mas-opciones > summary { font-size: 13px; color: #5b6478; cursor: pointer; padding: 4px 0; }
+  #mas-opciones #tickets { margin-top: 8px; }
+  /* La fila del ticket que acaba de entrar (#931): resaltada un momento. Con «reducir movimiento» no se desvanece: se queda fija y se quita sola. */
+  @keyframes resaltar { from { background: #fff1b8; } to { background: transparent; } }
+  @keyframes resaltar-fijo { from { background: #fff1b8; } to { background: #fff1b8; } }
+  .renglon.nuevo { animation: resaltar 1.6s ease-out; }
+  @media (prefers-reduced-motion: reduce) { .renglon.nuevo { animation: resaltar-fijo 1.6s steps(1, end); } }
   @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
-  /* El panel de cobro crece con socio, Dolarones y «Ventas de hoy»: con scroll propio no se mete
-     debajo del pie (impresora), que se robaba los clics de la lista. */
-  @media (min-width: 821px) { #cobro { overflow-y: auto; } }
+  /* Computadora de la caja (#931): el total arriba y el cobro abajo no se mueven; socio, Dolarones, pedido y transferencia (lo que crece)
+     se desplazan en medio. Un solo desplazamiento por columna: el cobro nunca sale de la pantalla, ni a 768 px de alto (#830). */
+  @media (min-width: 821px) {
+    #cobro { overflow: hidden; }
+    #cobro-medio { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 8px -6px 8px 0; padding-right: 6px; }
+    #cobro-resumen, #cobro-pago { flex: none; }
+  }
+  @media (max-width: 820px) {
+    #pago { margin-top: 10px; }
+  }
 </style>
 <script src="/cajero.js"></script>
 <script>
@@ -202,20 +265,38 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     </select>
   </label>
   <span id="estado-red">en línea</span>
+  <span class="hueco"></span>
+  <button id="abrir-corte" class="b" type="button">Corte</button>
+  <button id="abrir-retiro" class="b" type="button">Gasto / retiro</button>
+  <a href="/pedidos">Apartados</a>
+  <button id="abrir-mas" class="b" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="panel-mas">Más ▾</button>
+  <button id="abrir-avisos" class="b avisos" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="panel-avisos">Avisos <span id="avisos-n" aria-live="polite" hidden></span></button>
+  <button id="abrir-guia" type="button" class="b" title="Guía de la caja: qué hacer cuando… (tecla F1)">¿Cómo se hace?</button>
+  <button id="pedir-ayuda" type="button" aria-live="polite">Ayuda</button>
+
+  <!-- #931: lo poco frecuente. Ninguno de estos paneles recibe el foco: el Enter del lector sigue cayendo en #codigo (#260, #817). -->
+  <div class="flota" id="panel-mas" hidden>
+    <a href="/socios" id="alta-socios">Alta de socios</a>
+    <a href="/bultos">Bultos</a>
+    <a href="/admin">Cola de revisión</a>
+    <button id="marcar-entrada" type="button" hidden>Marcar entrada</button>
+    <button id="cerrar-sesion" type="button" hidden>Cerrar sesión</button>
+  </div>
+  <div class="flota" id="panel-avisos" hidden>
+    <h3>Avisos</h3>
+    <div id="lista-avisos"></div>
+    <div id="impresiones-aviso" role="alert"></div>
+    <button id="abrir-impresion-fallida" type="button" hidden>Abrir venta para reimprimir</button>
+    <div id="rechazadas"></div>
+  </div>
+</header>
+
+<!-- Franja siempre a la vista. A la izquierda queda el lugar de la barra de la meta semanal de la tienda (otro Issue, depende de #930): oculto mientras no haya dato. -->
+<div id="franja">
+  <div id="franja-meta" hidden></div>
   <span id="promo-cupo" role="status" hidden></span>
   <span id="buenfin" role="status" hidden></span>
-  <button id="marcar-entrada" type="button" hidden>Marcar entrada</button>
-  <button id="abrir-retiro" type="button">Gasto / retiro</button>
-  <button id="abrir-corte" type="button">Corte</button>
-  <a href="/socios" id="alta-socios">Alta de socios</a>
-  <a href="/bultos">Bultos</a>
-  <a href="/pedidos">Apartados</a>
-  <a href="/admin">Cola de revisión</a>
-  <a href="/avisos" id="avisos-ml" target="_blank" hidden></a>
-  <button id="abrir-guia" type="button" title="Guía de la caja: qué hacer cuando… (tecla F1)">¿Cómo se hace?</button>
-  <button id="pedir-ayuda" type="button" aria-live="polite">Ayuda</button>
-  <button id="cerrar-sesion" type="button" hidden>Cerrar sesión</button>
-</header>
+</div>
 
 <main>
   <section class="panel">
@@ -230,14 +311,19 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     <div id="ticket"></div>
   </section>
 
+  <!-- #931: arriba el total, en medio lo que crece (socio, Dolarones, pedido, transferencia: con scroll propio) y abajo el cobro, que nunca sale de la pantalla. -->
   <section class="panel" id="cobro">
-    <div id="original"></div>
-    <div id="total">$0</div>
-    <div id="piezas">0 piezas</div>
-    <div id="a-pagar"></div>
-    <button id="quitar-promo" type="button" hidden>Ya usó la promo: cobrar sin ella</button>
+    <div id="cobro-resumen">
+      <div id="original"></div>
+      <div class="total-fila"><div id="total">$0</div><div id="piezas">0 piezas</div></div>
+      <div id="a-pagar"></div>
+      <button id="quitar-promo" type="button" hidden>Ya usó la promo: cobrar sin ella</button>
+      <div id="descuento-estado"></div>
+      <button id="quitar-descuento" type="button" hidden
+        style="margin-top:6px;padding:6px 10px;font-size:13px;border:1px solid #dfe3ea;background:#fff;border-radius:8px;cursor:pointer">Quitar descuento</button>
+    </div>
 
-    <button id="pedir-descuento" type="button" hidden>Pedir descuento</button>
+    <div id="cobro-medio">
     <div id="descuento-form" hidden>
       <select id="descuento-tipo" aria-label="Tipo de descuento">
         <option value="porcentaje">% del ticket</option>
@@ -256,9 +342,6 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       </div>
       <button id="cerrar-descuento" class="claro" type="button">Cerrar</button>
     </div>
-    <div id="descuento-estado"></div>
-    <button id="quitar-descuento" type="button" hidden
-      style="margin-top:6px;padding:6px 10px;font-size:13px;border:1px solid #dfe3ea;background:#fff;border-radius:8px;cursor:pointer">Quitar descuento</button>
 
     <div id="pedido-cargado" hidden>
       <span id="pedido-info" role="status"></span>
@@ -282,16 +365,6 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
     </div>
     <p id="nota-vales" style="font-size:12px;color:#5b6478">El teléfono sólo acumula; para gastar hace falta el código.</p>
 
-    <!-- Impresión remota: controles independientes del escáner/cámara. -->
-    <div id="opcion-impresion-remota">
-      <label><input id="modo-remoto" type="checkbox"> Imprimir en otra caja</label>
-      <div id="destino-impresion" hidden>
-        <label for="imprimir-en">Imprimir en:</label>
-        <select id="imprimir-en"></select>
-        <p>En el celular sólo tarjeta o transferencia</p>
-      </div>
-    </div>
-
     <label for="vendedora">¿Quién atendió?</label>
     <select id="vendedora"><option value="">— sin elegir —</option></select>
 
@@ -310,53 +383,71 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
       <p id="clave-error" role="alert"></p>
     </div>
 
-    <label for="efectivo">Efectivo recibido</label>
-    <input id="efectivo" type="number" min="0" step="5" inputmode="numeric" placeholder="0">
-    <div id="rapidos"></div>
-
-    <div id="cambio"></div>
-    <!-- Sin forma por omision (17/10, #260, #830): ningun boton es el destino del Enter del lector; cada uno manda su forma y cobra. -->
-    <div id="botones-cobro">
-      <div id="botones-dinero">
-        <div id="cobrar-en">Cobrar en</div>
-        <div id="fila-cobro">
-          <button id="cobrar-efectivo" type="button" data-forma="efectivo" aria-label="Cobrar en efectivo" disabled>Efectivo</button>
-          <button id="cobrar-tarjeta" type="button" data-forma="tarjeta" aria-label="Cobrar con tarjeta" disabled>Tarjeta</button>
-          <button id="cobrar-transferencia" type="button" data-forma="transferencia" aria-label="Cobrar por transferencia" disabled>Transferencia</button>
+    <details id="mas-opciones">
+      <summary id="mas-opciones-resumen">Más opciones</summary>
+      <!-- Impresión remota: controles independientes del escáner/cámara. -->
+      <div id="opcion-impresion-remota">
+        <label><input id="modo-remoto" type="checkbox"> Imprimir en otra caja</label>
+        <div id="destino-impresion" hidden>
+          <label for="imprimir-en">Imprimir en:</label>
+          <select id="imprimir-en"></select>
+          <p>En el celular sólo tarjeta o transferencia</p>
         </div>
       </div>
-      <!-- Dolarones, vale o pedido cubren todo: no hay forma de pago que elegir, un solo botón cierra la venta. -->
-      <button id="cobrar-sin-dinero" type="button" data-forma="sin-dinero" hidden disabled>Cobrar: ya está pagado</button>
-    </div>
-    <button id="cancelar" type="button">Cancelar venta</button>
-    <button id="abrir-devolucion" type="button">Devolución</button>
-    <button id="abrir-cajon" type="button">Abrir cajón</button>
-    <div id="impresiones-destino" hidden></div>
-    <div id="impresiones-aviso" role="alert"></div>
-    <button id="abrir-impresion-fallida" type="button" hidden>Abrir venta para reimprimir</button>
-    <div id="rechazadas"></div>
 
-    <details id="tickets">
-      <summary>Ventas de hoy (toca un ticket para ver el desglose)</summary>
-      <div id="lista-tickets"></div>
+      <details id="tickets">
+        <summary>Ventas de hoy (toca un ticket para ver el desglose)</summary>
+        <div id="lista-tickets"></div>
+      </details>
+      <details style="margin-top:10px">
+        <summary>Reimprimir vale de otro día / venta sincronizada</summary>
+        <label for="vale-folio">Folio «Venta» del ticket</label>
+        <div class="socio-fila"><input id="vale-folio" placeholder="Folio completo de la venta" style="min-width:0;flex:1">
+          <button id="vale-por-folio" type="button">Imprimir vale</button></div>
+      </details>
+      <details id="cupon-manual" style="margin-top:10px">
+        <summary>Cupón de Dolarones (lo autoriza gerencia)</summary>
+        <div class="socio-fila">
+          <input id="cupon-importe" type="number" min="1" max="10000" step="1" inputmode="numeric" placeholder="Dolarones (1 D = $1)" style="min-width:0;flex:1">
+          <input id="cupon-motivo" maxlength="200" placeholder="Motivo (obligatorio)" autocomplete="off" style="min-width:0;flex:2"></div>
+        <div class="socio-fila">
+          <select id="cupon-aprobador" aria-label="Gerencia que autoriza" style="min-width:0;flex:1"></select>
+          <input id="cupon-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN de gerencia" style="min-width:0;flex:1"></div>
+        <button id="emitir-cupon" type="button">Emitir e imprimir cupón</button>
+        <div id="cupon-aviso" role="status"></div>
+      </details>
     </details>
-    <details style="margin-top:10px">
-      <summary>Reimprimir vale de otro día / venta sincronizada</summary>
-      <label for="vale-folio">Folio «Venta» del ticket</label>
-      <div class="socio-fila"><input id="vale-folio" placeholder="Folio completo de la venta" style="min-width:0;flex:1">
-        <button id="vale-por-folio" type="button">Imprimir vale</button></div>
-    </details>
-    <details id="cupon-manual" style="margin-top:10px">
-      <summary>Cupón de Dolarones (lo autoriza gerencia)</summary>
-      <div class="socio-fila">
-        <input id="cupon-importe" type="number" min="1" max="10000" step="1" inputmode="numeric" placeholder="Dolarones (1 D = $1)" style="min-width:0;flex:1">
-        <input id="cupon-motivo" maxlength="200" placeholder="Motivo (obligatorio)" autocomplete="off" style="min-width:0;flex:2"></div>
-      <div class="socio-fila">
-        <select id="cupon-aprobador" aria-label="Gerencia que autoriza" style="min-width:0;flex:1"></select>
-        <input id="cupon-pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN de gerencia" style="min-width:0;flex:1"></div>
-      <button id="emitir-cupon" type="button">Emitir e imprimir cupón</button>
-      <div id="cupon-aviso" role="status"></div>
-    </details>
+    </div>
+
+    <div id="cobro-pago">
+      <div id="pago">
+        <label for="efectivo">Efectivo recibido</label>
+        <input id="efectivo" type="number" min="0" step="5" inputmode="numeric" placeholder="0">
+        <div id="rapidos"></div>
+
+        <div id="cambio"></div>
+        <div id="aviso-remoto" role="status" hidden></div>
+        <!-- Sin forma por omision (17/10, #260, #830): ningun boton es el destino del Enter del lector; cada uno manda su forma y cobra. -->
+        <div id="botones-cobro">
+          <div id="botones-dinero">
+            <div id="cobrar-en">Cobrar en</div>
+            <div id="fila-cobro">
+              <button id="cobrar-efectivo" type="button" data-forma="efectivo" aria-label="Cobrar en efectivo" disabled>Efectivo</button>
+              <button id="cobrar-tarjeta" type="button" data-forma="tarjeta" aria-label="Cobrar con tarjeta" disabled>Tarjeta</button>
+              <button id="cobrar-transferencia" type="button" data-forma="transferencia" aria-label="Cobrar por transferencia" disabled>Transferencia</button>
+            </div>
+          </div>
+          <!-- Dolarones, vale o pedido cubren todo: no hay forma de pago que elegir, un solo botón cierra la venta. -->
+          <button id="cobrar-sin-dinero" type="button" data-forma="sin-dinero" hidden disabled>Cobrar: ya está pagado</button>
+        </div>
+      </div>
+      <div id="acciones-raras">
+        <button id="pedir-descuento" type="button" hidden>Pedir descuento</button>
+        <button id="abrir-devolucion" type="button">Devolución</button>
+        <button id="abrir-cajon" type="button">Abrir cajón</button>
+        <button id="cancelar" type="button">Cancelar venta</button>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -366,6 +457,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   <span id="reloj" style="color:#D72B32;font-weight:700"></span>
   <span id="catalogo-info"></span>
   <span id="impresora-estado"></span>
+  <span id="impresiones-destino" hidden></span>
   <button id="conectar-impresora" type="button" hidden
     style="border:1px solid #dfe3ea;background:#fff;color:#1a1f2b;border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer">
     Conectar impresora
@@ -546,9 +638,9 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, montoTransferidoRazonable, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, TOPE_DESCUENTO_CAJERO, TICKET_VIGENTE_MS, huellaTicket, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
+import { totales, agregarYMarcar, ordenEnPantalla, leerMultiplicador, efectivoAlcanza, montosRapidos, montoTransferidoRazonable, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, TOPE_DESCUENTO_CAJERO, TICKET_VIGENTE_MS, huellaTicket, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
   esBusquedaPorTexto, avisoExistencia, avisoDondeHay, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo,
-  MOTIVOS_EN_MANO, SIN_RED_EN_MANO, puedeVenderEnMano, LIBRE_ID, LIBRE_PRECIO_MIN, LIBRE_PRECIO_MAX, descripcionLibre } from '/venta.js';
+  MOTIVOS_EN_MANO, SIN_RED_EN_MANO, puedeVenderEnMano, LIBRE_ID, LIBRE_PRECIO_MIN, LIBRE_PRECIO_MAX, descripcionLibre, resumenAvisos } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -692,6 +784,7 @@ async function cargarConfigVales() {
     // Las ventas se guardan con la hora de esta computadora: si esta mal puesta, avisa.
     const min = desfaseReloj(Date.now(), r.headers.get('date'));
     $('reloj').textContent = min ? `⚠ El reloj de esta computadora está ${Math.abs(min)} min ${min > 0 ? 'adelantado' : 'atrasado'}. Corrígelo en la configuración de Windows: las ventas se guardan con esa hora.` : '';
+    pintarAvisos({ reloj: !!min });
     const c = r.ok ? await r.json() : null;
     valesHabilitados = c && typeof c.habilitado === 'boolean' ? c.habilitado : null;
     valesPrueba = c?.prueba === true;
@@ -723,6 +816,7 @@ setInterval(cargarConfigVales, 60000);
 /**
  * Issue #429: ventas de Mercado Libre por atender. #603: transferencias que Banxico no confirmó (solo un aviso:
  * nunca frena un cobro; el dueño las valida en /avisos). Sin red o sin PIN se queda como estaba.
+ * #931: cada una es un renglón del panel «Avisos» (antes, una franja roja suelta en el encabezado).
  */
 async function contarAvisos() {
   try {
@@ -738,9 +832,84 @@ async function contarAvisos() {
     if (por_regresar.length) partes.push(`↩ ${pieza(por_regresar.length)} por regresar al piso`);
     if (ml.length) partes.push(`📦 ${ml.length} venta${ml.length === 1 ? '' : 's'} de Mercado Libre por atender`);
     if (transferencias.length) partes.push(`⚠ ${transferencias.length} transferencia${transferencias.length === 1 ? '' : 's'} por validar con gerencia`);
-    $('avisos-ml').hidden = partes.length === 0;
-    $('avisos-ml').textContent = partes.join(' · ');
+    pintarAvisos({ servidor: partes });
   } catch { /* sin red */ }
+}
+
+/* ---------- «Avisos», «Más» y las señales del pie (#931) ---------- */
+
+// Ninguno de los dos paneles toma el foco al abrir ni al cerrar: el Enter del lector sigue cayendo en #codigo (#260, #817). Cerrar (Esc, otro clic
+// o el mismo botón) devuelve el foco a #codigo. No hay animación que reducir.
+const PANELES = [['abrir-mas', 'panel-mas'], ['abrir-avisos', 'panel-avisos']];
+/** Cierra los paneles abiertos (menos `salvo`). true si había alguno. */
+function cerrarPaneles({ enfocar = true, salvo = '' } = {}) {
+  let habia = false;
+  for (const [boton, panel] of PANELES) {
+    if (panel === salvo || $(panel).hidden) continue;
+    $(panel).hidden = true;
+    $(boton).setAttribute('aria-expanded', 'false');
+    habia = true;
+  }
+  if (habia && enfocar) $('codigo').focus();
+  return habia;
+}
+for (const [boton, panel] of PANELES) {
+  $(boton).addEventListener('click', (e) => {
+    e.stopPropagation();                         // el clic de fuera (abajo) cierra; este no
+    cerrarPaneles({ enfocar: false, salvo: panel });
+    const abrir = $(panel).hidden;
+    $(panel).hidden = !abrir;
+    $(boton).setAttribute('aria-expanded', String(abrir));
+    if (!abrir) $('codigo').focus();
+  });
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#panel-avisos')) return;   // sus botones (Reintentar, Descartar, Ver…) no lo cierran
+  // Un clic en otro campo o botón conserva su foco; un clic en nada devuelve el foco al lector.
+  cerrarPaneles({ enfocar: !e.target.closest('input, select, textarea, button, a, summary, label, details') });
+});
+// Un escaneo (el lector manda su ráfaga aunque el foco esté en el botón) también cierra los paneles: el ticket no queda tapado.
+document.addEventListener('lectura', () => cerrarPaneles({ enfocar: false }));
+
+// Estado de lo que pide atención. `servidor` son los avisos de /api/avisos; las demás señales las pintan sus funciones con pintarAvisos({ … }).
+// impresora / subir / catalogo: 'ok' (verde), 'aviso' (ámbar) o 'rojo' (rojo: también sube a «Avisos»); null = aún sin dato.
+const senales = { servidor: [], impresora: null, subir: null, catalogo: null, reloj: false, rechazadas: 0 };
+let firmaAvisos = '';
+function pintarAvisos(nuevas = {}) {
+  Object.assign(senales, nuevas);
+  for (const [id, estado] of [['impresora-estado', senales.impresora], ['pendientes', senales.subir], ['catalogo-info', senales.catalogo]]) {
+    if (estado) $(id).dataset.estado = estado; else delete $(id).dataset.estado;
+  }
+  const { rojos, informativos, total } = resumenAvisos(senales, {
+    impresora: $('impresora-estado').textContent, subir: $('pendientes').textContent, reloj: $('reloj').textContent,
+    promo: $('promo-cupo').hidden ? '' : $('promo-cupo').textContent, buenfin: $('buenfin').hidden ? '' : $('buenfin').textContent,
+    fallaImpresion: !!$('impresiones-aviso').textContent,
+  });
+  $('avisos-n').hidden = total === 0;
+  $('avisos-n').textContent = String(total);
+  $('abrir-avisos').title = total ? `${total} ${total === 1 ? 'aviso pide' : 'avisos piden'} atención` : 'Nada pide atención';
+  const firma = JSON.stringify([rojos, informativos, total === 0]);
+  if (firma === firmaAvisos) return;   // sin cambios no se toca el panel (puede estar abierto)
+  firmaAvisos = firma;
+  const fila = (nivel, texto, enlace) => {
+    const f = document.createElement('div');
+    f.className = `aviso-item ${nivel}`;
+    const punto = document.createElement('i');
+    const t = document.createElement('span');
+    t.textContent = texto;
+    f.append(punto, t);
+    if (enlace) {
+      const a = document.createElement('a');
+      a.href = enlace; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'Ver';
+      f.append(a);
+    } else f.append(document.createElement('span'));
+    return f;
+  };
+  const vacio = document.createElement('p');
+  vacio.className = 'aviso-vacio';
+  vacio.textContent = 'Nada pide atención.';
+  $('lista-avisos').replaceChildren(...(total === 0 ? [vacio] : []), ...rojos.map((a) => fila('rojo', a.texto, a.enlace)),
+    ...informativos.map((a) => fila(a.dorado ? 'dorado' : '', a.texto)));
 }
 contarAvisos();
 setInterval(contarAvisos, 60000);
@@ -874,6 +1043,9 @@ function pintarImpresionRemota() {
   $('rapidos').hidden = remota;
   $('efectivo').disabled = cobrando || remota;
   for (const id of ['abrir-cajon', 'abrir-retiro', 'abrir-corte']) $(id).disabled = remota;
+  $('aviso-remoto').hidden = !remota;   // #931: aunque «Imprimir en otra caja» viva en «Más opciones», se ve por qué falta «Efectivo»
+  $('aviso-remoto').textContent = remota ? 'Este ticket se imprime en otra caja: aquí no hay «Efectivo»; cobra con tarjeta o transferencia.' : '';
+  $('mas-opciones-resumen').textContent = remota ? 'Más opciones · este ticket se imprime en otra caja' : 'Más opciones';   // el modo vive dentro de «Más opciones» (#931)
 }
 
 function exigirCaja() {
@@ -949,8 +1121,10 @@ async function cargarCatalogo() {
     const datos = [...catalogo.values()];
     await store('catalogo', 'readwrite', (s) => s.put({ clave: 'piezas', datos, fecha: Date.now() }));
     $('catalogo-info').textContent = `${catalogo.size} códigos · actualizado`;
+    pintarAvisos({ catalogo: 'ok' });
   } catch {
     $('catalogo-info').textContent = `${catalogo.size} códigos · sin actualizar`;   // asignado completo: con `+=` se repetía cada minuto sin red
+    pintarAvisos({ catalogo: 'aviso' });   // la caja cobra con su copia: ámbar, no rojo
   }
 }
 
@@ -965,6 +1139,7 @@ function pintarPromoCupo() {
   $('promo-cupo').hidden = !letrero;
   $('promo-cupo').textContent = letrero;
   $('promo-cupo').classList.toggle('agotada', promoConfig?.restantes === 0);
+  pintarAvisos();   // las promos también se listan en «Avisos» (#931)
 }
 function pintar() {
   pintarPromoCupo();
@@ -986,14 +1161,17 @@ function pintar() {
   if (subtotal === 0) $('descuento-form').hidden = true;
   guardarTicket();
 
-  $('ticket').innerHTML = lineas.map((l, i) => `
-    <div class="renglon${l.sin_existencia ? ' sin-existencia' : ''}">
+  // #931: en pantalla, lo último escaneado va arriba (ordenEnPantalla no reordena `lineas`: lo que se envía y se imprime sale en el orden de captura).
+  // `i` sigue siendo el índice real del renglón en `lineas`: el ✕ quita el que dice. El renglón recién tocado se resalta lo que queda de su animación.
+  const reciente = (l) => l.tocada && Date.now() - l.tocada < 1600;
+  $('ticket').innerHTML = ordenEnPantalla(lineas).map((i) => { const l = lineas[i]; return `
+    <div class="renglon${l.sin_existencia ? ' sin-existencia' : ''}${reciente(l) ? ' nuevo' : ''}"${reciente(l) ? ` style="animation-delay:-${Date.now() - l.tocada}ms"` : ''}>
       ${l.producto_id ? `<img class="foto" src="/api/foto/${encodeURIComponent(l.producto_id)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">` : '<div></div>'}
       <div><div class="nombre">${escapar(l.nombre)}</div><div class="codigo">${escapar(l.codigo)}${l.precio_lista > l.precio ? ` · Descuento, antes <s>${pesos(l.precio_lista)}</s>` : ''}${l.en_mano ? ' · <b class="en-mano">Sin existencia en el sistema</b>' : ''}</div></div>
       <div>x${l.cantidad}</div>
       <div class="importe">${pesos(l.precio * l.cantidad)}</div>
       <button type="button" data-quitar="${i}" aria-label="Quitar ${escapar(l.nombre)}"${l.cantidad > 1 ? ' title="Quita una pieza; Mayús + clic quita el renglón entero"' : ''} ${cobrando ? 'disabled' : ''}>✕</button>
-    </div>`).join('') + (descuento && !descuentoCerrado() ? `
+    </div>`; }).join('') + (descuento && !descuentoCerrado() ? `
     <div class="renglon">
       <div></div>
       <div><div class="nombre">Descuento</div><div class="codigo">${descuento.estado === 'aprobada' ? 'aprobado' : 'esperando a gerencia'}</div></div>
@@ -1001,6 +1179,7 @@ function pintar() {
       <div class="importe">−${pesos(descuento.monto)}</div>
       <button type="button" data-quitar-descuento aria-label="Quitar descuento" ${cobrando ? 'disabled' : ''}>✕</button>
     </div>` : '');
+  if (lineas.some(reciente)) $('ticket').scrollTop = 0;   // lo recién escaneado está arriba: que se vea aunque el ticket venga desplazado
 
   // «Usar todos» elegido en el pop-up: el campo sigue al máximo mientras cambie el ticket.
   if (usarTodos && socio) {
@@ -1154,7 +1333,7 @@ function agregarCodigo(leido, reintento = false) {
     }
   }
 
-  lineas = agregar(lineas, {
+  lineas = agregarYMarcar(lineas, {
     codigo: pieza.codigo, nombre: pieza.nombre, precio: precioHoy(pieza), precio_lista: pieza.precio, producto_id: pieza.id,
   }, cantidad);
   idVenta = null;
@@ -1227,7 +1406,7 @@ function agregarEnMano(codigo, motivo) {
   if (!navigator.onLine) return aviso(SIN_RED_EN_MANO, '#D72B32');
   if (!pieza || !puedeVenderEnMano(pieza, enTicket)) return aviso('La existencia cambió: escanea la pieza otra vez.', '#D72B32');
   // `esperado` es la existencia que vio la caja: el servidor solo ajusta si sigue siendo esa.
-  lineas = agregar(lineas, { codigo: pieza.codigo, nombre: pieza.nombre, precio: precioHoy(pieza), precio_lista: pieza.precio, producto_id: pieza.id,
+  lineas = agregarYMarcar(lineas, { codigo: pieza.codigo, nombre: pieza.nombre, precio: precioHoy(pieza), precio_lista: pieza.precio, producto_id: pieza.id,
     en_mano: { motivo, esperado: Math.max(0, pieza.stock) } }, 1);
   idVenta = null;
   aviso(`${pieza.nombre}: se vende sin existencia en el sistema; gerencia lo revisa después.`, '#5b6478');
@@ -1257,7 +1436,7 @@ $('form-libre').addEventListener('submit', (e) => {
   if (precio === null) return error('Escribe el precio en pesos, por ejemplo 600 o 600.50.', 'libre-precio');
   if (precio < LIBRE_PRECIO_MIN || precio > LIBRE_PRECIO_MAX) return error('El precio va de $1 a $20,000.', 'libre-precio');
   if (cobrando || ticketEnDuda()) return $('dlg-libre').close();
-  lineas = agregar(lineas, { codigo: 'LIBRE', nombre: `Sin etiqueta: ${descripcion}`, precio, producto_id: LIBRE_ID, descripcion, libre: true }, 1);
+  lineas = agregarYMarcar(lineas, { codigo: 'LIBRE', nombre: `Sin etiqueta: ${descripcion}`, precio, producto_id: LIBRE_ID, descripcion, libre: true }, 1);
   idVenta = null;
   $('aviso').textContent = '';
   $('dlg-libre').close();
@@ -1825,10 +2004,10 @@ async function cargarPedido(folio) {
   if (apartado) {
     for (const l of p.lineas) {
       for (let i = 0; i < l.cantidad; i++) {
-        lineas = agregar(lineas, { codigo: l.codigo, nombre: l.nombre, precio: l.precio, producto_id: l.producto_id, dePedido: true });
+        lineas = agregarYMarcar(lineas, { codigo: l.codigo, nombre: l.nombre, precio: l.precio, producto_id: l.producto_id, dePedido: true });
       }
     }
-    if (envio) lineas = agregar(lineas, { codigo: envio.codigo, nombre: envio.nombre, precio: envio.precio, producto_id: envio.id, dePedido: true });
+    if (envio) lineas = agregarYMarcar(lineas, { codigo: envio.codigo, nombre: envio.nombre, precio: envio.precio, producto_id: envio.id, dePedido: true });
   }
   pedidoCargado = { id: p.id, folio: p.folio, saldo: p.saldo };
   idVenta = null;
@@ -2281,10 +2460,11 @@ async function pendientes() {
   // 7/10: 14 ventas pasaron 4 h en la caja sin llegar al servidor y nadie lo noto. Pasados 10 min, en rojo y con que hacer.
   const desde = Math.min(...porSincronizar.map((v) => Date.parse(v.creado_en) || Date.now()));
   const atorada = porSincronizar.length && Date.now() - desde > 10 * 60_000;
-  $('pendientes').textContent = !porSincronizar.length ? ''
+  $('pendientes').textContent = !porSincronizar.length ? 'Sin ventas por sincronizar'
     : atorada ? `⚠ ${nVentas(porSincronizar.length)} sin enviar desde las ${new Date(desde).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}. Recarga la página (F5); si pide iniciar sesión, entra.`
     : `${nVentas(porSincronizar.length)} por sincronizar`;
   $('pendientes').style.cssText = atorada ? 'color:#D72B32;font-weight:700' : '';
+  pintarAvisos({ subir: !porSincronizar.length ? 'ok' : atorada ? 'rojo' : 'aviso' });   // verde: nada que subir; rojo: atorada, sube a «Avisos» (#931)
 }
 
 /** Ventas que el servidor rechazo: visibles con su motivo, y recuperables a mano. */
@@ -2302,6 +2482,7 @@ async function pintarRechazadas() {
         <button type="button" data-descartar="${v.id}" ${v.reportada ? '' : 'disabled'}>${descartarListo === v.id ? '¿Seguro? Descartar' : 'Descartar'}</button>
       </div>
     </div>`).join('');
+  pintarAvisos({ rechazadas: rechazadas.length });   // cada venta rechazada suma al número rojo de «Avisos» (#931)
 }
 $('rechazadas').addEventListener('click', async (e) => {
   const reintentar = e.target.dataset?.reintentar;
@@ -3448,6 +3629,7 @@ $('corte-reimprimir').addEventListener('click', async () => {
 let ultimoEsc = 0;
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || e.repeat || document.querySelector('dialog[open]')) return;
+  if (cerrarPaneles()) return;   // #931: con «Avisos» o «Más» abiertos, Esc solo los cierra y devuelve el foco a #codigo
   if (e.timeStamp - ultimoEsc < 800) { ultimoEsc = 0; $('cancelar').click(); return; }
   ultimoEsc = e.timeStamp;
   if (lineas.length) { $('aviso').textContent = 'Esc otra vez para borrar el ticket.'; $('aviso').style.color = '#5b6478'; }
@@ -3535,11 +3717,13 @@ function pintarImpresora() {
     ? `Impresora: ${error}`
     : (lista ? 'Impresora conectada' : 'Impresora no conectada');
   $('impresora-estado').style.color = error && error !== 'no conectada' ? '#D72B32' : '';
+  const falla = !!error && error !== 'no conectada';
   $('conectar-impresora').hidden = lista;
   // Es la misma caja con la que imprimirPendientes consulta /api/impresiones.
   $('impresiones-destino').hidden = !lista || !cajaActual();
   $('impresiones-destino').textContent = `Imprimiendo tickets para: ${cajaActual()}`;
   pintarImpresionRemota();
+  pintarAvisos({ impresora: falla ? 'rojo' : lista ? 'ok' : 'aviso' });   // sin impresora es ámbar (el celular imprime en otra caja); un error es rojo y sube a «Avisos»
 }
 $('conectar-impresora').addEventListener('click', async () => {
   let motivo = '';
@@ -3551,7 +3735,7 @@ $('conectar-impresora').addEventListener('click', async () => {
     if (error?.name !== 'NotFoundError') motivo = explicarErrorUsb(error);
   }
   pintarImpresora();
-  if (motivo) $('impresora-estado').textContent = motivo;   // despues de pintar: pintar lo pisaba
+  if (motivo) { $('impresora-estado').textContent = motivo; pintarAvisos({ impresora: 'rojo' }); }   // despues de pintar: pintar lo pisaba
 });
 
 pintarRed();
