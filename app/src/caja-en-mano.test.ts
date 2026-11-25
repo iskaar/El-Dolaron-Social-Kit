@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import {
   agregar, leerMultiplicador, avisoExistencia, avisoDondeHay, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE,
-  debePreguntarSocio, descuentoDe, TOPE_DESCUENTO, puedeVenderEnMano, MOTIVOS_EN_MANO, SIN_RED_EN_MANO, moverSugerencia, esBusquedaPorTexto,
+  debePreguntarSocio, descuentoDe, TOPE_DESCUENTO, puedeVenderEnMano, MOTIVOS_EN_MANO, SIN_RED_EN_MANO, moverSugerencia, esBusquedaPorTexto, cobroEnDuda,
 } from '../public/venta.js';
 import { codigoDeDigitos } from '../public/code128.js';
 
@@ -55,7 +55,7 @@ function montar(piezas: any[], { enLinea = true } = {}) {
   const pintados: number[] = [];
   const red = { onLine: enLinea };
   const contexto: Record<string, unknown> = {
-    $, catalogo, agregar, leerMultiplicador, codigoDeDigitos, avisoExistencia, avisoDondeHay, fetch: () => new Promise(() => {}), puedeVenderEnMano, MOTIVOS_EN_MANO, SIN_RED_EN_MANO, Map, Date, Math,
+    $, catalogo, agregar, leerMultiplicador, codigoDeDigitos, avisoExistencia, avisoDondeHay, fetch: () => new Promise(() => {}), puedeVenderEnMano, MOTIVOS_EN_MANO, SIN_RED_EN_MANO, Map, Date, Math, cobroEnDuda,
     precioHoy: (p: any) => p.precio, navigator: red, cargarPedido() {}, buscarSocio() {}, cargarCatalogo: async () => {},
     pintar: () => pintados.push(1), sonar() {}, TONO_RECHAZO: {}, escapar: String, pesos: String, moverSugerencia, esBusquedaPorTexto, TONO_PIEZA: {}, document: { createElement: () => elemento() },
   };
@@ -229,14 +229,14 @@ test('folio en duda: ✕ (renglón y descuento), quitar descuento, quitar socio 
   const aviso = elemento();
   const estado = { idVenta: 'folio-1' as string | null, cobroIncierto: { id: 'folio-1' } as { id: string } | null, pedidoCargado: { id: 'p' } as unknown, descuento: { x: 1 } as unknown };
   const $ = (id: string) => (id === 'ticket' ? ticket : id === 'quitar-descuento' ? descuento : id === 'quitar-socio' ? socioX : id === 'aviso' ? aviso : elemento());
-  const rutinas = runInNewContext(`let idVenta = ${JSON.stringify('folio-1')}, cobroIncierto = { id: 'folio-1' }, pedidoCargado = { id: 'p' }, descuento = { x: 1 }, lineas = L;
+  const rutinas = runInNewContext(`let cobrando = false, idVenta = ${JSON.stringify('folio-1')}, cobroIncierto = { id: 'folio-1' }, pedidoCargado = { id: 'p' }, descuento = { x: 1 }, lineas = L;
     const pintar = () => {}, pintarDescuento = () => {}, quitarSocio = () => {};
     ${entre('/** Con el folio en duda el ticket no se toca', '// Pedido por WhatsApp cargado')}
     ${entre("$('ticket').addEventListener('click'", '/* ---------- botones de cobro (#830)')}
     ${entre("$('quitar-descuento').addEventListener('click'", "$('pedir-descuento').addEventListener")}
     ${entre("$('quitar-socio').addEventListener('click'", '\n\n')}
     ${entre('function quitarPedido()', "$('quitar-pedido')")}
-    ({ quitarPedido, estado: () => ({ idVenta, pedidoCargado, descuento, lineas }), sinDuda: () => { cobroIncierto = null; } })`, { $, L: lineas });
+    ({ quitarPedido, estado: () => ({ idVenta, pedidoCargado, descuento, lineas }), sinDuda: () => { cobroIncierto = null; } })`, { $, L: lineas, cobroEnDuda });
   const toque = (el: any, e: any = {}) => el.oyentes.click({ shiftKey: false, ...e });
   const intentos = () => {
     toque(ticket, { target: { dataset: { quitar: '0' } } });

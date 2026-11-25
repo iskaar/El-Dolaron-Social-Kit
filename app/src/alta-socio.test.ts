@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { leerMensajeAlta } from '../public/venta.js';
+import { leerMensajeAlta, cobroEnDuda } from '../public/venta.js';
 
 test('el aviso del alta solo acepta el número de socio o el cierre', () => {
   assert.deepEqual(leerMensajeAlta({ tipo: 'alta-socio', numero: 42 }), { tipo: 'alta', numero: 42 });
@@ -71,7 +71,7 @@ function cajaLlegada(inicial: { cobroIncierto?: boolean; respuesta: () => Promis
   const elementos = new Map<string, any>();
   const $ = (id: string) => { if (!elementos.has(id)) elementos.set(id, { textContent: '', style: {} }); return elementos.get(id); };
   const peticiones: string[] = [], altas: string[] = [];
-  const contexto = { $, abrirAlta: (c: string) => altas.push(c), pintarSocio() {}, pintar() {},
+  const contexto = { $, cobroEnDuda, abrirAlta: (c: string) => altas.push(c), pintarSocio() {}, pintar() {},
     fetch: async (ruta: string) => { peticiones.push(ruta); return inicial.respuesta(); } };
   const programa = `
     let idVenta = 'folio-1', cobroIncierto = ${inicial.cobroIncierto ? "{ id: 'folio-1' }" : 'null'};

@@ -548,7 +548,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 import { CATEGORIAS_GASTO } from '/categorias.js';
 import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, montoTransferidoRazonable, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, TOPE_DESCUENTO_CAJERO, TICKET_VIGENTE_MS, huellaTicket, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
   esBusquedaPorTexto, avisoExistencia, avisoDondeHay, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo,
-  MOTIVOS_EN_MANO, SIN_RED_EN_MANO, puedeVenderEnMano, LIBRE_ID, LIBRE_PRECIO_MIN, LIBRE_PRECIO_MAX, descripcionLibre } from '/venta.js';
+  MOTIVOS_EN_MANO, SIN_RED_EN_MANO, puedeVenderEnMano, LIBRE_ID, LIBRE_PRECIO_MIN, LIBRE_PRECIO_MAX, descripcionLibre, cobroEnDuda, fotoDeVenta, ventaRecuperada } from '/venta.js';
 import { abrirCamara } from '/camara.js';
 import {
   reconectarImpresora, conectarImpresora, impresoraLista, imprimirTicket, abrirCajon, explicarErrorUsb, errorImpresora,
@@ -651,9 +651,21 @@ let folioIncierto = null;       // folio de un cobro con Dolarones, pedido o cla
 let cobroIncierto = null;
 /** Con el folio en duda el ticket no se toca (#832): cambiarlo mintaría otro folio y el cobro dudoso podría quedar duplicado. Dice qué hacer y devuelve true. */
 function ticketEnDuda() {
-  if (!idVenta || cobroIncierto?.id !== idVenta) return false;
+  if (!cobroEnDuda({ idVenta, cobroIncierto })) return false;
   $('aviso').textContent = 'Primero termina el cobro pendiente: toca otra vez el mismo botón.';
   $('aviso').style.color = '#D72B32';
+  return true;
+}
+/**
+ * LA puerta (#933): todo cambio al ticket (piezas, socio, código, vales, Dolarones, promo, descuento, pedido, cancelar) pasa por aquí, y solo aquí se
+ * suelta el folio (`idVenta = null`). Con un cobro en curso o en duda no cambia nada y dice qué hacer: lo único que se puede hacer es repetir
+ * ese mismo cobro (cobrar()). Si no, aplica el cambio, suelta el folio (es otra venta) y pinta. Devuelve si se aplicó.
+ */
+function cambiarTicket(cambio) {
+  if (cobrando || ticketEnDuda()) return false;
+  cambio();
+  idVenta = null;
+  pintar();
   return true;
 }
 // Pedido por WhatsApp cargado en el ticket (Issue #269): { id, folio, saldo } o null. Su saldo solo
@@ -717,7 +729,7 @@ function promoAgotada() {
 }
 notaVales();
 cargarConfigVales();
-$('quitar-promo').addEventListener('click', () => { sinPromo = !sinPromo; pintar(); });
+$('quitar-promo').addEventListener('click', () => { cambiarTicket(() => { sinPromo = !sinPromo; }); });
 setInterval(cargarConfigVales, 60000);
 
 /**
@@ -974,7 +986,7 @@ function pintar() {
   const subtotal = totales(lineas).subtotal;
   revisarVencimientoDescuento();
   // Con un cobro en duda el ticket no se toca: soltar aqui el descuento y el folio dejaria el reintento sin ellos (#845).
-  const enDuda = !!idVenta && cobroIncierto?.id === idVenta;
+  const enDuda = cobroEnDuda({ idVenta, cobroIncierto });
   if (descuento && !enDuda && (subtotal === 0 || descuento.huella !== huellaTicket(lineas, subtotal))) {
     const habiaSolicitud = !descuentoCerrado();
     quitarDescuentoEnServidor(descuento);
@@ -1033,6 +1045,7 @@ function pintar() {
   const autorizado = !usados || (codigoSocio && usados <= socio.maximo && ((folioIncierto && folioIncierto === idVenta) || Date.parse(socio.expira_en) > Date.now()));
   $('usar-maximo').disabled = cobrando || !codigoSocio || maximoCanje(socio, t.total) === 0;
   for (const id of ['codigo', 'socio', 'buscar-socio', 'quitar-socio', 'llegada-pendiente', 'dolarones', 'efectivo', 'cancelar', 'pedir-descuento', 'quitar-descuento', 'quitar-pedido', 'clave-rastreo', 'monto-transferido', 'banco-emisor', 'comprobante', 'sin-etiqueta']) $(id).disabled = cobrando;
+  $('dolarones').disabled = cobrando || enDuda;   // con el cobro en duda lo pedido es lo que ya se mandó (#933)
   // Transferencia desde $300 (#593): aparecen la clave de rastreo y el monto del comprobante.
   // Los datos aparecen con el primer clic en «Transferencia» (cobrar()); aquí se esconden si ya no hacen falta, y con el ticket vacío no queda nada de la anterior.
   if (t.aPagar < CLAVE_DESDE) $('datos-transferencia').hidden = true;
@@ -1044,7 +1057,7 @@ function pintar() {
   $('cobrar-sin-dinero').hidden = !sinDinero;
   const sinCobro = cobrando || t.total === 0 || usados > t.total || usados > canjeable || !autorizado;
   // Con el folio en duda solo se deja tocar el mismo botón (#830): otro mandaría otra forma o efectivo con el mismo folio.
-  const incierto = idVenta && cobroIncierto?.id === idVenta ? cobroIncierto : null;
+  const incierto = enDuda ? cobroIncierto : null;
   for (const id of ['cobrar-efectivo', 'cobrar-tarjeta', 'cobrar-transferencia', 'cobrar-sin-dinero']) $(id).disabled = sinCobro || (!!incierto && $(id).dataset.forma !== incierto.boton);
   $('rapidos').innerHTML = montosRapidos(t.aPagar).map((m) =>
     `<button type="button" data-centavos="${m.centavos}"${cobrando ? ' disabled' : ''}>${m.exacto ? 'Exacto' : pesos(m.centavos)}</button>`).join('');
@@ -1154,13 +1167,12 @@ function agregarCodigo(leido, reintento = false) {
     }
   }
 
-  lineas = agregar(lineas, {
-    codigo: pieza.codigo, nombre: pieza.nombre, precio: precioHoy(pieza), precio_lista: pieza.precio, producto_id: pieza.id,
-  }, cantidad);
-  idVenta = null;
-  $('aviso').textContent = '';
-  pintar();
-  return true;
+  return cambiarTicket(() => {
+    lineas = agregar(lineas, {
+      codigo: pieza.codigo, nombre: pieza.nombre, precio: precioHoy(pieza), precio_lista: pieza.precio, producto_id: pieza.id,
+    }, cantidad);
+    $('aviso').textContent = '';
+  });
 }
 
 /**
@@ -1227,12 +1239,12 @@ function agregarEnMano(codigo, motivo) {
   if (!navigator.onLine) return aviso(SIN_RED_EN_MANO, '#D72B32');
   if (!pieza || !puedeVenderEnMano(pieza, enTicket)) return aviso('La existencia cambió: escanea la pieza otra vez.', '#D72B32');
   // `esperado` es la existencia que vio la caja: el servidor solo ajusta si sigue siendo esa.
-  lineas = agregar(lineas, { codigo: pieza.codigo, nombre: pieza.nombre, precio: precioHoy(pieza), precio_lista: pieza.precio, producto_id: pieza.id,
-    en_mano: { motivo, esperado: Math.max(0, pieza.stock) } }, 1);
-  idVenta = null;
-  aviso(`${pieza.nombre}: se vende sin existencia en el sistema; gerencia lo revisa después.`, '#5b6478');
+  if (!cambiarTicket(() => {
+    lineas = agregar(lineas, { codigo: pieza.codigo, nombre: pieza.nombre, precio: precioHoy(pieza), precio_lista: pieza.precio, producto_id: pieza.id,
+      en_mano: { motivo, esperado: Math.max(0, pieza.stock) } }, 1);
+    aviso(`${pieza.nombre}: se vende sin existencia en el sistema; gerencia lo revisa después.`, '#5b6478');
+  })) return;
   sonar(TONO_PIEZA);
-  pintar();
 }
 
 /* ---------- «Sin etiqueta» (#880) ---------- */
@@ -1257,12 +1269,12 @@ $('form-libre').addEventListener('submit', (e) => {
   if (precio === null) return error('Escribe el precio en pesos, por ejemplo 600 o 600.50.', 'libre-precio');
   if (precio < LIBRE_PRECIO_MIN || precio > LIBRE_PRECIO_MAX) return error('El precio va de $1 a $20,000.', 'libre-precio');
   if (cobrando || ticketEnDuda()) return $('dlg-libre').close();
-  lineas = agregar(lineas, { codigo: 'LIBRE', nombre: `Sin etiqueta: ${descripcion}`, precio, producto_id: LIBRE_ID, descripcion, libre: true }, 1);
-  idVenta = null;
-  $('aviso').textContent = '';
+  cambiarTicket(() => {
+    lineas = agregar(lineas, { codigo: 'LIBRE', nombre: `Sin etiqueta: ${descripcion}`, precio, producto_id: LIBRE_ID, descripcion, libre: true }, 1);
+    $('aviso').textContent = '';
+  });
   $('dlg-libre').close();
   sonar(TONO_PIEZA);
-  pintar();
   $('codigo').focus();
 });
 
@@ -1324,7 +1336,8 @@ let vencimientoDescuento = null;
 
 // Issue #332: el ticket en curso sobrevive a recargar la caja (piezas, descuento pendiente o aprobado,
 // folio y pedido). Se guarda en cada pintar(). Con el mismo folio, cobrar otra vez no duplica la venta.
-// El socio no: su código es de un solo uso y se vuelve a pedir.
+// El socio no: su código es de un solo uso y se vuelve a pedir. Salvo con un cobro en duda (#933): el reintento debe ser la MISMA venta (el servidor
+// la liga al socio, su código, los vales, los Dolarones y la promo), así que mientras dure la duda se guarda también `venta`; sin duda no se guarda.
 // ponytail: un ticket por computadora; dos pestañas de caja se pisan (la última que pinta gana).
 const CLAVE_TICKET = 'caja-ticket';
 // TICKET_VIGENTE_MS (venta.js, 4 h): uno olvidado de otro turno no reaparece
@@ -1339,12 +1352,20 @@ try {
     pedidoCargado = g.pedidoCargado ?? null;
     cobroIncierto = g.cobroIncierto?.id && g.cobroIncierto.id === idVenta ? g.cobroIncierto : null;
     if (cobroIncierto) folioIncierto = idVenta;
+    const antes = ventaRecuperada(g);   // null en un ticket guardado por una versión anterior: carga como siempre
+    if (antes) {
+      ({ socio, codigoSocio, valesCargados, sinPromo } = antes);
+      usarTodos = false;
+      $('dolarones').value = antes.dolarones;
+      $('socio').value = socio && !socio.vale ? `#${socio.numero}` : '';
+    }
     ticketRecuperado = true;
   }
 } catch { /* sin memoria: empieza vacío */ }
 function guardarTicket() {
   try {
-    localStorage.setItem(CLAVE_TICKET, JSON.stringify({ guardado: Date.now(), lineas, descuento, idVenta, creadoEnVenta, pedidoCargado, cobroIncierto: cobroIncierto?.id === idVenta ? cobroIncierto : null }));
+    localStorage.setItem(CLAVE_TICKET, JSON.stringify({ guardado: Date.now(), lineas, descuento, idVenta, creadoEnVenta, pedidoCargado, cobroIncierto: cobroIncierto?.id === idVenta ? cobroIncierto : null,
+      ...(cobroEnDuda({ idVenta, cobroIncierto }) ? { venta: fotoDeVenta({ socio, codigoSocio, valesCargados, dolarones: $('dolarones').value, sinPromo }) } : {}) }));
   } catch { /* sin memoria: no se recupera al recargar */ }
 }
 const descuentoAplicado = () => (descuento?.estado === 'aprobada' ? descuento.monto : 0);
@@ -1407,11 +1428,11 @@ async function consultarDescuento() {
     if (!r.ok) return;
     const { estado, vence_en } = await r.json();
     if (estado === 'pendiente' || descuento?.estado !== 'pendiente') return;
-    descuento.estado = estado;
-    descuento.vence_en = vence_en;
-    idVenta = null;
-    pintarDescuento();
-    pintar();
+    cambiarTicket(() => {
+      descuento.estado = estado;
+      descuento.vence_en = vence_en;
+      pintarDescuento();
+    });
   } catch { /* sin red: se vuelve a preguntar en 3 s */ }
 }
 
@@ -1426,7 +1447,7 @@ async function cargarDuenos() {
   } catch { $('descuento-pin').hidden = true; }   // sin red tampoco se piden descuentos
 }
 
-$('quitar-descuento').addEventListener('click', () => { if (ticketEnDuda()) return; quitarDescuentoEnServidor(descuento); descuento = null; idVenta = null; pintarDescuento(); pintar(); });
+$('quitar-descuento').addEventListener('click', () => { cambiarTicket(() => { quitarDescuentoEnServidor(descuento); descuento = null; pintarDescuento(); }); });
 $('pedir-descuento').addEventListener('click', () => {
   $('descuento-form').hidden = false;
   cargarDuenos();
@@ -1440,6 +1461,7 @@ $('cerrar-descuento').addEventListener('click', () => {
 
 /** Pide el descuento; `aprobacion` ({ aprobador, pin }) lo aprueba el dueño aqui con su PIN. */
 async function enviarDescuento(aprobacion = {}) {
+  if (cobrando || ticketEnDuda()) return;
   const tipo = $('descuento-tipo').value;
   const escrito = Number($('descuento-valor').value);
   const valor = tipo === 'monto' ? Math.round(escrito * 100) : escrito;
@@ -1461,13 +1483,13 @@ async function enviarDescuento(aprobacion = {}) {
     $('descuento-pin-dueno').value = '';
     if (!r.ok) return falla(cuerpo.error ?? 'No se pudo pedir el descuento.');
     // Pendiente (va al dueño), o ya aprobado: con el PIN del dueño, o porque quien cobra es el dueño.
-    descuento = { id: cuerpo.id, tipo, valor, subtotal, monto: cuerpo.monto, estado: cuerpo.estado, huella: huellaTicket(lineas, subtotal), vence_en: cuerpo.vence_en };
-    idVenta = null;
-    $('descuento-form').hidden = true;
-    $('descuento-valor').value = '';
-    $('descuento-motivo').value = '';
-    pintarDescuento();
-    pintar();
+    cambiarTicket(() => {
+      descuento = { id: cuerpo.id, tipo, valor, subtotal, monto: cuerpo.monto, estado: cuerpo.estado, huella: huellaTicket(lineas, subtotal), vence_en: cuerpo.vence_en };
+      $('descuento-form').hidden = true;
+      $('descuento-valor').value = '';
+      $('descuento-motivo').value = '';
+      pintarDescuento();
+    });
   } catch {
     falla('Sin red: no se pueden pedir descuentos. Cobra a precio normal.');
   }
@@ -1527,7 +1549,7 @@ function confirmarReemplazo(texto, boton) {
 }
 
 async function buscarSocio() {
-  if (cobrando) return;
+  if (cobrando || ticketEnDuda()) return;
   // El lector manda vales y codigos de socio solo en digitos (code128.js).
   const q = codigoDeDigitos($('socio').value) ?? $('socio').value.trim();
   if (!q) return;
@@ -1551,11 +1573,12 @@ async function buscarSocio() {
     $('aviso').textContent = 'Ese vale ya está en el ticket.';
     return;
   }
-  if (sumar) busquedaSocio++;
-  else quitarSocio();
-  const busqueda = busquedaSocio;
-  idVenta = null;
-  pintar();
+  let busqueda;
+  if (!cambiarTicket(() => {
+    if (sumar) busquedaSocio++;
+    else quitarSocio();
+    busqueda = busquedaSocio;
+  })) return;
   try {
     const esCodigo = q.startsWith('DC-') || esVale;
     const r = esVale
@@ -1578,19 +1601,19 @@ async function buscarSocio() {
       $('socio-info').style.color = '#D72B32';
       return;
     }
-    if (esVale) valesCargados.push({ codigo:q, disponible:cuerpo.disponible, expira_en:cuerpo.expira_en, completo:cuerpo.completo });
-    socio = sumar ? { ...socio, disponible:socio.disponible + cuerpo.disponible, maximo:socio.maximo + cuerpo.maximo,
-      expira_en:Date.parse(cuerpo.expira_en) < Date.parse(socio.expira_en) ? cuerpo.expira_en : socio.expira_en } : cuerpo;
-    codigoSocio = sumar ? codigoSocio : esCodigo ? q : '';
-    // #839: un código escaneado de un socio con la llegada pendiente ofrece acreditarla en la ventana de alta.
-    codigoLlegada = !esVale && esCodigo && cuerpo.llegada_pendiente ? q : '';
-    // Vacío con vale: el siguiente vale se escanea aquí mismo.
-    $('socio').value = esVale ? '' : '#' + socio.numero;
-    $('dolarones').value = '';
-    idVenta = null;
-    $('socio-info').style.color = '';
-    pintarSocio();
-    pintar();
+    if (!cambiarTicket(() => {
+      if (esVale) valesCargados.push({ codigo:q, disponible:cuerpo.disponible, expira_en:cuerpo.expira_en, completo:cuerpo.completo });
+      socio = sumar ? { ...socio, disponible:socio.disponible + cuerpo.disponible, maximo:socio.maximo + cuerpo.maximo,
+        expira_en:Date.parse(cuerpo.expira_en) < Date.parse(socio.expira_en) ? cuerpo.expira_en : socio.expira_en } : cuerpo;
+      codigoSocio = sumar ? codigoSocio : esCodigo ? q : '';
+      // #839: un código escaneado de un socio con la llegada pendiente ofrece acreditarla en la ventana de alta.
+      codigoLlegada = !esVale && esCodigo && cuerpo.llegada_pendiente ? q : '';
+      // Vacío con vale: el siguiente vale se escanea aquí mismo.
+      $('socio').value = esVale ? '' : '#' + socio.numero;
+      $('dolarones').value = '';
+      $('socio-info').style.color = '';
+      pintarSocio();
+    })) return;
     $('codigo').focus();   // el siguiente escaneo es una pieza, no otra búsqueda de socio (#817)
     preguntarDolarones();
   } catch {
@@ -1604,7 +1627,7 @@ async function buscarSocio() {
 
 $('buscar-socio').addEventListener('click', buscarSocio);
 $('socio').addEventListener('keydown', (e) => { if (e.key === 'Enter') buscarSocio(); });
-$('quitar-socio').addEventListener('click', () => { if (ticketEnDuda()) return; quitarSocio(); idVenta = null; pintar(); });
+$('quitar-socio').addEventListener('click', () => { cambiarTicket(quitarSocio); });
 
 // Alta de socio en una ventana (#820): la misma pantalla /socios, incrustada. Al terminar solo avisa su numero
 // (mismo origen y desde ese marco); el socio se liga al ticket al cerrar la ventana, con el mismo camino que «Buscar».
@@ -1681,7 +1704,7 @@ $('dlg-alta').addEventListener('close', async () => {
   }
   $('codigo').focus();
 });
-$('dolarones').addEventListener('input', () => { usarTodos = false; idVenta = null; pintar(); });
+$('dolarones').addEventListener('input', () => { cambiarTicket(() => { usarTodos = false; }); });
 
 /** Pop-up al cargar socio con código o vale: sólo si realmente puede gastar. */
 function preguntarDolarones() {
@@ -1699,9 +1722,7 @@ function preguntarDolarones() {
 }
 function cerrarDialogo(usar) {
   $('dlg-dolarones').close();
-  if (usar === 'todos') usarTodos = true;
-  idVenta = null;
-  pintar();
+  cambiarTicket(() => { if (usar === 'todos') usarTodos = true; });
   if (usar === 'otra') $('dolarones').focus();
   else $('codigo').focus();   // «Usar todos» y «No usar»: el lector sigue escaneando piezas (#817)
 }
@@ -1711,9 +1732,7 @@ $('dlg-no').addEventListener('click', () => cerrarDialogo('no'));
 // Escape = «No usar» (el campo ya está vacío).
 $('dlg-dolarones').addEventListener('cancel', () => $('codigo').focus());
 $('usar-maximo').addEventListener('click', () => {
-  $('dolarones').value = String(maximoCanje(socio, totalNeto()) / 100);
-  idVenta = null;
-  pintar();
+  cambiarTicket(() => { $('dolarones').value = String(maximoCanje(socio, totalNeto()) / 100); });
 });
 
 /**
@@ -1742,9 +1761,8 @@ async function cobrarConDolarones(venta, t, boton = 'el mismo botón de cobro') 
     // Sin respuesta en 15 s no se sabe si se cobró. Reintentar con el mismo folio es seguro: registrarVenta contesta
     // `duplicada` antes de validar el código del socio o del vale (#817).
     folioIncierto = venta.id;
-    $('aviso').textContent = error?.name === 'TimeoutError' || error?.name === 'AbortError'
-      ? `No se supo si se cobró. Toca otra vez ${boton}: con el mismo folio no se cobra dos veces. Si no avanza, abre Ventas de hoy antes de cobrar de nuevo.`
-      : 'Sin red: no se pudo cobrar con Dolarones. Intenta otra vez o cobra sin Dolarones.';
+    // Sea tiempo agotado o corte de red, el servidor pudo recibir la venta: en los dos casos solo se repite el mismo cobro (#933).
+    $('aviso').textContent = `No se supo si se cobró. Toca otra vez ${boton}: con el mismo folio no se cobra dos veces. Si no avanza, abre «Ventas de hoy» para ver si la venta ya quedó registrada.`;
     $('aviso').style.color = '#D72B32';
     return false;
   }
@@ -1797,7 +1815,7 @@ function pintarFalla({ texto, calmo }, nodo) {
  * Con saldo a favor vigente (apartado, vencido o cancelado) el pedido paga parte del ticket.
  */
 async function cargarPedido(folio) {
-  if (cobrando) return;
+  if (cobrando || ticketEnDuda()) return;
   if (pedidoCargado) return avisoRojo(`El pedido P-${pedidoCargado.folio} ya está en este ticket. Cóbralo o quítalo antes de cargar otro.`);
   let r, cuerpo;
   try {
@@ -1822,29 +1840,28 @@ async function cargarPedido(folio) {
   if (apartado && p.entrega === 'envio' && p.envio > 0 && !envio) {
     return avisoRojo('Falta el producto ENVIO en el catálogo de la caja. Recarga la página con red.');
   }
-  if (apartado) {
-    for (const l of p.lineas) {
-      for (let i = 0; i < l.cantidad; i++) {
-        lineas = agregar(lineas, { codigo: l.codigo, nombre: l.nombre, precio: l.precio, producto_id: l.producto_id, dePedido: true });
+  cambiarTicket(() => {
+    if (apartado) {
+      for (const l of p.lineas) {
+        for (let i = 0; i < l.cantidad; i++) {
+          lineas = agregar(lineas, { codigo: l.codigo, nombre: l.nombre, precio: l.precio, producto_id: l.producto_id, dePedido: true });
+        }
       }
+      if (envio) lineas = agregar(lineas, { codigo: envio.codigo, nombre: envio.nombre, precio: envio.precio, producto_id: envio.id, dePedido: true });
     }
-    if (envio) lineas = agregar(lineas, { codigo: envio.codigo, nombre: envio.nombre, precio: envio.precio, producto_id: envio.id, dePedido: true });
-  }
-  pedidoCargado = { id: p.id, folio: p.folio, saldo: p.saldo };
-  idVenta = null;
-  $('aviso').textContent = p.saldo > 0 ? `Pedido P-${p.folio} de ${p.cliente}: ${apartado ? 'piezas y ' : ''}saldo ${pesos(p.saldo)} cargados.`
-    : `Pedido P-${p.folio} de ${p.cliente}: piezas cargadas, sin pago registrado: se cobra completo.`;
-  $('aviso').style.color = '#1f7a4d';
-  pintar();
+    pedidoCargado = { id: p.id, folio: p.folio, saldo: p.saldo };
+    $('aviso').textContent = p.saldo > 0 ? `Pedido P-${p.folio} de ${p.cliente}: ${apartado ? 'piezas y ' : ''}saldo ${pesos(p.saldo)} cargados.`
+      : `Pedido P-${p.folio} de ${p.cliente}: piezas cargadas, sin pago registrado: se cobra completo.`;
+    $('aviso').style.color = '#1f7a4d';
+  });
 }
 
 /** Quita el pedido y, si era un apartado, también sus piezas del ticket. */
 function quitarPedido() {
-  if (ticketEnDuda()) return;
-  lineas = lineas.filter((l) => !l.dePedido);
-  pedidoCargado = null;
-  idVenta = null;
-  pintar();
+  cambiarTicket(() => {
+    lineas = lineas.filter((l) => !l.dePedido);
+    pedidoCargado = null;
+  });
   $('codigo').focus();
 }
 $('quitar-pedido').addEventListener('click', quitarPedido);
@@ -1864,7 +1881,7 @@ async function cobrarConPedido(venta, boton = 'el mismo botón de cobro') {
   } catch {
     // Sin respuesta no se sabe si se cobró: el reintento va con el mismo folio, la misma forma y el mismo efectivo (#830).
     folioIncierto = venta.id;
-    return avisoRojo(`Sin red: una venta con pedido o con clave de rastreo no se cobra sin conexión. Toca otra vez ${boton}: con el mismo folio no se cobra dos veces. Si no avanza, abre Ventas de hoy antes de cobrar de nuevo.`);
+    return avisoRojo(`Sin red: una venta con pedido o con clave de rastreo no se cobra sin conexión. Toca otra vez ${boton}: con el mismo folio no se cobra dos veces. Si no avanza, abre «Ventas de hoy» para ver si la venta ya quedó registrada.`);
   }
   folioIncierto = respuesta.status >= 500 ? venta.id : null;
   const cuerpo = await respuesta.json().catch(() => ({}));
@@ -1920,7 +1937,7 @@ async function cobrar(forma) {
   if (!sinDinero && !['efectivo', 'tarjeta', 'transferencia'].includes(forma)) return;
   const nombres = { efectivo: 'el botón «Efectivo»', tarjeta: 'el botón «Tarjeta»', transferencia: 'el botón «Transferencia»', 'sin-dinero': 'el botón «Cobrar: ya está pagado»' };
   // Folio en duda (#830): el servidor liga el folio a la forma, al efectivo y a la clave. El reintento sale con lo guardado, del mismo botón.
-  const previo = idVenta && cobroIncierto?.id === idVenta ? cobroIncierto : null;
+  const previo = cobroEnDuda({ idVenta, cobroIncierto }) ? cobroIncierto : null;
   if (previo && boton !== previo.boton) return avisoRojo(`El cobro anterior quedó en duda. Toca otra vez ${nombres[previo.boton]}: con el mismo folio no se cobra dos veces.`);
   if (!exigirCaja()) return;
   // #832: la pieza «en la mano» la ajusta el servidor junto con la venta; una venta con ella no se encola sin red.
@@ -2006,7 +2023,8 @@ async function cobrar(forma) {
   $('clave-error').textContent = '';
 
   // Sin socio real (o solo con vale) y con red, nadie cobra sin preguntar (#730). Todo lo de arriba ya pasó: la ventana es lo último antes de cobrar.
-  if (debePreguntarSocio(socio, navigator.onLine)) {
+  // Con el cobro en duda no se pregunta: el reintento va con el socio (o sin él) que ya se mandó, y la ventana ofrecería cambiarlo (#933).
+  if (!previo && debePreguntarSocio(socio, navigator.onLine)) {
     const r = await preguntarSocio();
     if (r !== 'cobrar') {
       if (r === 'alta') abrirAlta();
@@ -2094,7 +2112,7 @@ async function cobrar(forma) {
         // #832: una venta con una pieza «en la mano» nunca se encola. Se deja el folio en duda como en las otras rutas (#830): el finally lo guarda
         // en `cobroIncierto` y solo queda el mismo botón; el ticket no se puede tocar hasta que el servidor conteste.
         folioIncierto = venta.id;
-        $('aviso').textContent = `No se supo si se cobró. Toca otra vez ${nombres[boton]}: con el mismo folio no se cobra dos veces. Si no avanza, abre Ventas de hoy antes de cobrar de nuevo.`;
+        $('aviso').textContent = `No se supo si se cobró. Toca otra vez ${nombres[boton]}: con el mismo folio no se cobra dos veces. Si no avanza, abre «Ventas de hoy» para ver si la venta ya quedó registrada.`;
         $('aviso').style.color = '#D72B32';
         return;
       } else {
@@ -3010,12 +3028,12 @@ escucharLector(({ codigo }) => { escanear(codigo); $('codigo').focus(); }, { lib
 $('ticket').addEventListener('click', (e) => {
   if (e.target.dataset?.quitarDescuento !== undefined) return $('quitar-descuento').click();
   const i = e.target.dataset?.quitar;
-  if (i === undefined || ticketEnDuda()) return;
-  const linea = lineas[Number(i)];
-  if (linea.cantidad > 1 && !e.shiftKey) linea.cantidad -= 1;   // Mayús + clic: el renglón entero (#817)
-  else lineas.splice(Number(i), 1);
-  idVenta = null;
-  pintar();
+  if (i === undefined) return;
+  cambiarTicket(() => {
+    const linea = lineas[Number(i)];
+    if (linea.cantidad > 1 && !e.shiftKey) linea.cantidad -= 1;   // Mayús + clic: el renglón entero (#817)
+    else lineas.splice(Number(i), 1);
+  });
 });
 /* ---------- botones de cobro (#830) ---------- */
 // Escribir el efectivo no elige nada: el cobro sale solo de un clic en un botón de cobro. Enter en el campo no hace nada.
@@ -3448,6 +3466,7 @@ $('corte-reimprimir').addEventListener('click', async () => {
 let ultimoEsc = 0;
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || e.repeat || document.querySelector('dialog[open]')) return;
+  if (ticketEnDuda()) return;   // con el cobro en duda el ticket no se borra: Esc no arma nada (#933)
   if (e.timeStamp - ultimoEsc < 800) { ultimoEsc = 0; $('cancelar').click(); return; }
   ultimoEsc = e.timeStamp;
   if (lineas.length) { $('aviso').textContent = 'Esc otra vez para borrar el ticket.'; $('aviso').style.color = '#5b6478'; }
@@ -3466,6 +3485,7 @@ function revisarCancelarArmado() {
   if (cancelarArmado && cancelarArmado.firma !== firmaTicket()) desarmarCancelar();
 }
 $('cancelar').addEventListener('click', () => {
+  if (cobrando || ticketEnDuda()) return;   // ni siquiera se arma el segundo toque (#933)
   if (!cancelarArmado && cancelarPideConfirmar({ piezas: totales(lineas).piezas, descuentoAprobado: descuento?.estado === 'aprobada', pedido: !!pedidoCargado })) {
     $('cancelar').textContent = 'Toca otra vez para borrar el ticket';
     $('aviso').textContent = 'Toca otra vez para borrar el ticket.'; $('aviso').style.color = '#D72B32';
@@ -3474,10 +3494,13 @@ $('cancelar').addEventListener('click', () => {
     $('codigo').focus();
     return;
   }
-  desarmarCancelar();
-  quitarDescuentoEnServidor(descuento);
-  lineas = []; idVenta = null; pedidoCargado = null; descuento = null; sinPromo = false; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; limpiarDatosTransferencia(); $('aviso').textContent = 'Venta cancelada';
-  $('aviso').style.color = '#5b6478'; pintar(); $('codigo').focus();
+  cambiarTicket(() => {
+    desarmarCancelar();
+    quitarDescuentoEnServidor(descuento);
+    lineas = []; pedidoCargado = null; descuento = null; sinPromo = false; pintarDescuento(); quitarSocio(); $('efectivo').value = ''; limpiarDatosTransferencia(); $('aviso').textContent = 'Venta cancelada';
+    $('aviso').style.color = '#5b6478';
+  });
+  $('codigo').focus();
 });
 
 function pintarRed() {
@@ -3558,7 +3581,11 @@ pintarRed();
 await cargarCatalogo();
 if (ticketRecuperado) {
   pintarDescuento();   // si seguía esperando a gerencia, vuelve a preguntar
-  $('aviso').textContent = 'Se recuperó el ticket que estaba en curso. Para borrarlo: «Cancelar venta» o Esc dos veces.';
+  if (socio) pintarSocio();   // con un cobro en duda vuelve también el socio de esa venta (#933)
+  // Con un cobro en duda borrar el ticket no es una salida (#933): solo se repite el mismo cobro.
+  $('aviso').textContent = cobroIncierto
+    ? 'Se recuperó un cobro que quedó en duda. Toca el único botón de cobro que sigue activo: con el mismo folio no se cobra dos veces.'
+    : 'Se recuperó el ticket que estaba en curso. Para borrarlo: «Cancelar venta» o Esc dos veces.';
   $('aviso').style.color = '#5b6478';
 }
 pintar();

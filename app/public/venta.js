@@ -412,6 +412,33 @@ export const puedeVenderEnMano = (pieza, enTicket) =>
 export const moverSugerencia = (actual, total, tecla) =>
   total <= 0 ? -1 : tecla === 'ArrowDown' ? Math.min(actual + 1, total - 1) : Math.max(actual - 1, -1);
 
+/* ---------- cobro en duda (#933) ---------- */
+
+/** Con la respuesta de un cobro sin saber, el ticket es ESE cobro: solo se puede repetir (mismo folio, misma forma, mismo importe). */
+export const cobroEnDuda = ({ idVenta, cobroIncierto }) => !!idVenta && cobroIncierto?.id === idVenta;
+
+/**
+ * Lo que, además de las piezas, define la venta que se mandó: socio y su código, vales, Dolarones pedidos y «sin promo» (todo va dentro del
+ * pedidoHash del servidor). Se guarda con el ticket SOLO mientras el cobro está en duda: así, tras recargar, el reintento sale idéntico.
+ * Un ticket sin duda sigue guardándose como siempre (el código de socio es de un solo uso y se vuelve a pedir).
+ */
+export const fotoDeVenta = ({ socio, codigoSocio, valesCargados, dolarones, sinPromo }) =>
+  JSON.parse(JSON.stringify({ socio: socio ?? null, codigoSocio: codigoSocio ?? '', valesCargados: valesCargados ?? [], dolarones: String(dolarones ?? ''), sinPromo: !!sinPromo }));
+
+/** Lo guardado de la venta en duda, ya validado; null si el ticket no trae foto (versión anterior) o no es de ese cobro. */
+export function ventaRecuperada(guardado) {
+  const foto = guardado?.venta;
+  if (!guardado?.idVenta || guardado.cobroIncierto?.id !== guardado.idVenta || !foto || typeof foto !== 'object') return null;
+  const objeto = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : null);
+  return {
+    socio: objeto(foto.socio),
+    codigoSocio: typeof foto.codigoSocio === 'string' ? foto.codigoSocio : '',
+    valesCargados: Array.isArray(foto.valesCargados) ? foto.valesCargados.filter(objeto) : [],
+    dolarones: typeof foto.dolarones === 'string' ? foto.dolarones : '',
+    sinPromo: foto.sinPromo === true,
+  };
+}
+
 /** «Cancelar venta» (y doble Esc) pide un segundo toque si se perdería trabajo: descuento aprobado, pedido cargado o 3 piezas o más. */
 export const cancelarPideConfirmar = ({ piezas, descuentoAprobado, pedido }) =>
   piezas > 0 && (!!descuentoAprobado || !!pedido || piezas >= 3);

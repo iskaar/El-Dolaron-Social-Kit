@@ -13,7 +13,7 @@ import {
 import { LIMITE_GASTO_CAJERO } from './corte.ts';
 import { codigoDeDigitos, codigoEnDigitos } from '../public/code128.js';
 import { agregar, guiaVale, descuentoDe, TOPE_DESCUENTO } from '../public/venta.js';
-import { puedeVenderEnMano } from '../public/venta.js';
+import { puedeVenderEnMano, cobroEnDuda, fotoDeVenta, ventaRecuperada } from '../public/venta.js';
 import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
@@ -134,7 +134,7 @@ function montarCobro(op: Opciones = {}) {
   };
   const contexto: Record<string, unknown> = {
     crypto, Date, $, AbortSignal, Object, Math, vistos, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido,
-    transferenciaDe, CLAVE_DESDE, debePreguntarSocio, navigator: { onLine: true }, window: { open() {} },
+    transferenciaDe, CLAVE_DESDE, debePreguntarSocio, cobroEnDuda, fotoDeVenta, ventaRecuperada, navigator: { onLine: true }, window: { open() {} },
     document: { createElement: () => ({ style: {}, textContent: '' }) },
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
     errorImpresora: () => op.errorImpresora ?? 'USB falló',
@@ -281,7 +281,10 @@ test('#817 Dolarones: la petición tiene el mismo límite de 15 s y, si vence, d
   assert.match(vencida.aviso.textContent, /No se supo si se cobró\. Toca otra vez el mismo botón de cobro.*mismo folio no se cobra dos veces.*Ventas de hoy/);
   const sinRed = montarDolarones([new TypeError('Failed to fetch')]);
   await sinRed.cobrarConDolarones({ ...VENTA }, { aPagar: 5000 });
-  assert.match(sinRed.aviso.textContent, /^Sin red: no se pudo cobrar con Dolarones/);
+  // #933: un corte de red tampoco dice si se cobró, así que tampoco invita a cobrar de otra forma (antes: «o cobra sin Dolarones»).
+  assert.match(sinRed.aviso.textContent, /^No se supo si se cobró\. Toca otra vez el mismo botón de cobro/);
+  assert.doesNotMatch(sinRed.aviso.textContent, /sin Dolarones|cobrar de nuevo/);
+  assert.equal(sinRed.incierto(), 'folio-1');
   assert.match(fuente, /signal: AbortSignal\.timeout\(15000\)/, 'la fetch de Dolarones lleva la señal (la prueba solo ve que hay una)');
 });
 
@@ -447,11 +450,15 @@ test('#817 teclado: lo que puede ser un código (banda JU49, QR de vale, ED-, d�
 
 /* ---------- ticket, cancelar, rueda ---------- */
 
+// La puerta REAL de caja.html (#933): todo cambio al ticket pasa por ella.
+const puerta = () => entre('function cambiarTicket(', '// Pedido por WhatsApp cargado');
+
 test('#817 renglón: Mayús + clic quita el renglón entero; el clic solo quita una pieza', () => {
   const montar = () => {
     const estado: any = { lineas: [{ codigo: 'A', cantidad: 3 }, { codigo: 'B', cantidad: 1 }], idVenta: 'x', pintada: 0 };
     let oyente: (e: any) => void = () => {};
-    runInNewContext(`${entre("$('ticket').addEventListener('click'", "$('efectivo').addEventListener('input'")}`, {
+    runInNewContext(`let cobrando = false; ${puerta()}
+${entre("$('ticket').addEventListener('click'", "$('efectivo').addEventListener('input'")}`, {
       $: () => ({ addEventListener: (_t: string, f: any) => { oyente = f; } }),
       get lineas() { return estado.lineas; }, set lineas(v) { estado.lineas = v; },
       get idVenta() { return estado.idVenta; }, set idVenta(v) { estado.idVenta = v; },
@@ -480,9 +487,10 @@ function montarCancelar(lineas: any[], extra: Record<string, unknown> = {}) {
       focus() { estado.activo = id; }, addEventListener(_t: string, f: any) { this.clic = f; } });
     return elementos.get(id);
   };
-  const rutinas = runInNewContext(`let cancelarArmado = null; ${entre('// Con descuento aprobado, pedido cargado', 'function pintarRed()')}
+  const rutinas = runInNewContext(`let cancelarArmado = null, cobrando = false; ${puerta()}
+${entre('// Con descuento aprobado, pedido cargado', 'function pintarRed()')}
     ({ revisarCancelarArmado })`, {
-    $, totales, cancelarPideConfirmar, descuento: null, pedidoCargado: null, sinPromo: false, limpiarDatosTransferencia() {}, quitarDescuentoEnServidor() {}, ...extra,
+    $, ticketEnDuda: () => false, totales, cancelarPideConfirmar, descuento: null, pedidoCargado: null, sinPromo: false, limpiarDatosTransferencia() {}, quitarDescuentoEnServidor() {}, ...extra,
     get lineas() { return estado.lineas; }, set lineas(v) { estado.lineas = v; },
     idVenta: 'x', pintarDescuento() {}, quitarSocio() { estado.limpiadas++; }, pintar() {}, clearTimeout() {},
     setTimeout: (f: () => void) => { temporizadores.push(f); return temporizadores.length; },
@@ -801,6 +809,7 @@ function montarAgregar(piezas: any[], { enLinea = true, recarga = [] as any[], r
     escanear: (leido: string, reintento: boolean) => { escaneos.push([leido, reintento]); return true; },
   };
   const rutina = runInNewContext(`let cobrando = false, idVenta = null, lineas = [];
+    ${puerta()}
     ${entre('function buscarPieza(', '/* ---------- busqueda a mano')}
     ({ agregarCodigo, lineas: () => lineas })`, contexto);
   return { ...rutina, aviso: $(), escaneos, recargas, consultas };
@@ -969,8 +978,9 @@ function montarBuscarSocio(respuesta: { ok: boolean; cuerpo: Record<string, unkn
   };
   $('socio').value = '#7';
   const rutinas = runInNewContext(`let socio = null, valesCargados = [], busquedaSocio = 0, cobrando = false, valesPrueba = false, codigoSocio = '', usarTodos = false;
+    ${puerta()}
     ${entre('function pintarSocio()', "$('buscar-socio').addEventListener")}; ({ buscarSocio })`, {
-    $, guiaVale, dolares: String, escapar: String, idVenta: 'x', pintar() {}, avisoRojo() {}, setTimeout, Promise, Date, Math, codigoDeDigitos,
+    $, guiaVale, dolares: String, escapar: String, idVenta: 'x', pintar() {}, avisoRojo() {}, ticketEnDuda: () => false, setTimeout, Promise, Date, Math, codigoDeDigitos,
     preguntarDolarones() { orden.push('ventana-dolarones'); },
     fetch: async () => ({ ok: respuesta.ok, json: async () => respuesta.cuerpo }),
   });
@@ -990,8 +1000,9 @@ test('#817 foco: «Usar todos» y «No usar» devuelven el foco a #codigo; «Otr
   const montar = () => {
     const orden: string[] = [];
     const $ = (id: string) => ({ close() { orden.push(`cerrar:${id}`); }, focus() { orden.push(`foco:${id}`); } });
-    const rutinas = runInNewContext(`let usarTodos = false, idVenta = 'x'; ${entre('function cerrarDialogo(', "$('dlg-todos').addEventListener")}
-      ({ cerrarDialogo, usarTodos: () => usarTodos })`, { $, pintar() { orden.push('pintar'); } });
+    const rutinas = runInNewContext(`let usarTodos = false, idVenta = 'x', cobrando = false; ${puerta()}
+${entre('function cerrarDialogo(', "$('dlg-todos').addEventListener")}
+      ({ cerrarDialogo, usarTodos: () => usarTodos })`, { $, ticketEnDuda: () => false, pintar() { orden.push('pintar'); } });
     return { ...rutinas, orden };
   };
   const todos = montar(); todos.cerrarDialogo('todos');
