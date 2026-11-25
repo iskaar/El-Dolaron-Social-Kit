@@ -677,7 +677,7 @@ test('#845 la caja manda el ticket y la caja al pedir, cierra en el servidor al 
   const html = readFileSync('public/caja.html', 'utf8');
   assert.match(html, /caja: cajaActual\(\),\s+lineas: lineas\.map\(\(\{ producto_id, cantidad \}\)/);
   assert.match(html, /\/api\/descuentos\/\$\{encodeURIComponent\(d\.id\)\}\/quitar`, \{ method: 'POST' \}/);
-  assert.match(html, /quitar-descuento'\)\.addEventListener\('click', \(\) => \{ if \(ticketEnDuda\(\)\) return; quitarDescuentoEnServidor\(descuento\);/);
+  assert.match(html, /quitar-descuento'\)\.addEventListener\('click', \(\) => \{ cambiarTicket\(\(\) => \{ quitarDescuentoEnServidor\(descuento\);/);   // por la puerta (#933): con un cobro en duda no corre
   assert.match(html, /Más de 10 %: lo aprueba gerencia con su PIN/);
   // Los botones de pedir son type=button y los campos no escuchan teclas: el Enter con el que el lector termina un escaneo no pide nada.
   assert.doesNotMatch(html, /\$\('descuento-(?:valor|motivo|tipo|pin-dueno|aprobador)'\)\.addEventListener\('(?:keydown|keypress|keyup)'/);
