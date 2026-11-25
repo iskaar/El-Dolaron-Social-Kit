@@ -8,7 +8,8 @@
 import { lineasNetas } from './netas.ts';
 import { hoyTienda, delDia } from './reportes.ts';
 import { lunesDe, sumarDias, semanasBono, configBono } from './equipo.ts';
-import { saldo, sumarMeses } from './dolarones.ts';
+import { TIENDA_CENTRAL, esTienda } from './cuentas.ts';
+import { saldo, acreditarReto } from './dolarones.ts';
 import { pushA } from './push.ts';
 
 const json = (cuerpo: unknown, status = 200) => new Response(JSON.stringify(cuerpo), {
@@ -20,8 +21,6 @@ const OMISIONES = {
   reto_d_racha: 100, reto_d_socio: 30, reto_d_apartado: 30, reto_d_tope_mes: 500,
 };
 type ConfigRetos = typeof OMISIONES;
-// ponytail: el credito vence como el de una compra (12 meses); si Isaac prefiere otro plazo, cambia esta constante.
-const MESES_VIGENCIA = 12;
 // El cron corre cada 15 min: la corrida diaria es la que cae a las 03:00 de la tienda (09:00 UTC).
 export const esCorridaDiaria = (ms: number) => { const f = new Date(ms); return f.getUTCHours() === 9 && f.getUTCMinutes() < 15; };
 
@@ -36,7 +35,6 @@ export async function configRetos(env: Env): Promise<ConfigRetos> {
   return cfg;
 }
 
-interface Empleada { id: string; nombre: string; correo: string; cliente_id: string }
 interface Candidato { correo: string; logro: string; ref: string; d: number }
 
 /** Venta que cuenta: no cancelada, sin devolucion (ni de dinero ni de Dolarones) y que no es compra de la propia empleada. */
@@ -110,20 +108,6 @@ async function candidatosDelDia(env: Env, cfg: ConfigRetos, dia: string): Promis
   return salida;
 }
 
-/** La cuenta de socio de la empleada; se crea al primer credito. Telefono de relleno (unico): para canjear, Isaac pone el real. */
-async function clienteDe(env: Env, e: Empleada, ahora: string): Promise<string> {
-  if (e.cliente_id) return e.cliente_id;
-  const id = crypto.randomUUID();
-  await env.DB.batch([
-    env.DB.prepare(
-      `insert into clientes (id, numero, nombre, telefono, bases_version, registrado_por, creado_en)
-       select ?, coalesce(max(numero), 0) + 1, ?, ?, ?, 'retos', ? from clientes`,
-    ).bind(id, e.nombre, `retos-${e.id}`, env.BASES_APROBADAS_VERSION || 'retos', ahora),
-    env.DB.prepare(`update empleados set cliente_id = ? where id = ? and cliente_id = ''`).bind(id, e.id),
-  ]);
-  return (await env.DB.prepare('select cliente_id from empleados where id = ?').bind(e.id).first<{ cliente_id: string }>())!.cliente_id;
-}
-
 /**
  * Cron diario: registra los logros de los dias 8 a 10 antes de hoy (tres dias para que una corrida perdida no pierda nada;
  * es idempotente) y paga en Dolarones los que no tengan su lote. Devuelve cuantos logros nuevos registro.
@@ -154,20 +138,8 @@ export async function otorgarLogros(env: Env, ahora = Date.now()): Promise<numbe
   ).all<{ id: string; logro: string; d: number; empleado: string; nombre: string; correo: string; cliente_id: string }>();
   const cuentas = new Map<string, string>();   // la lista trae cliente_id de antes de pagar: la cuenta recien creada se recuerda aqui
   for (const p of porPagar) {
-    const cliente = cuentas.get(p.empleado) ?? await clienteDe(env, { id: p.empleado, nombre: p.nombre, correo: p.correo, cliente_id: p.cliente_id }, iso);
+    const cliente = await acreditarReto(env, { id: p.empleado, nombre: p.nombre, correo: p.correo, cliente_id: cuentas.get(p.empleado) ?? p.cliente_id }, `reto:${p.id}`, p.d * 100, ahora);
     cuentas.set(p.empleado, cliente);
-    const lote = `reto:${p.id}`;
-    const centavos = p.d * 100;
-    await env.DB.batch([
-      env.DB.prepare(
-        `insert into dolarones_lotes (id, cliente_id, origen, venta_id, importe, restante, disponible_desde, vence_en, creado_en)
-         values (?, ?, 'reto', null, ?, ?, ?, ?, ?) on conflict (id) do nothing`,
-      ).bind(lote, cliente, centavos, centavos, iso, sumarMeses(new Date(ahora), MESES_VIGENCIA), iso),
-      env.DB.prepare(
-        `insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
-         select ?, ?, null, 'reto', ?, 'retos', ? where not exists (select 1 from dolarones_movimientos where lote_id = ? and tipo = 'reto')`,
-      ).bind(cliente, lote, centavos, iso, lote),
-    ]);
     await pushA(env, p.correo, '¡Ganaste un reto!', `${ETIQUETAS[p.logro] ?? p.logro}: +${p.d} Dolarones.`)
       .catch((error) => console.error(JSON.stringify({ mensaje: 'push de reto fallido', error: String(error).slice(0, 200) })));
   }
@@ -205,7 +177,7 @@ export async function misRetos(env: Env, correo: string, ahora = Date.now()): Pr
   const hoy = hoyTienda(ahora);
   const lunes = lunesDe(hoy);
   const iso = new Date(ahora).toISOString();
-  const [semana, previas, cfg, logros, porTipo, mes, emp, [plan], bono] = await Promise.all([
+  const [semana, previas, cfg, logros, porTipo, mes, emp, bono, cuentaApp] = await Promise.all([
     numerosDe(env, correo, lunes, sumarDias(lunes, 7)),
     numerosDe(env, correo, sumarDias(lunes, -28), lunes),
     configRetos(env),
@@ -215,9 +187,17 @@ export async function misRetos(env: Env, correo: string, ahora = Date.now()): Pr
     env.DB.prepare(`select coalesce(sum(d), 0) as d from retos_logros where correo = ? and substr(datetime(creado_en, '-6 hours'), 1, 7) = ?`)
       .bind(correo, hoy.slice(0, 7)).first<{ d: number }>(),
     env.DB.prepare('select id, nombre, cliente_id from empleados where correo = ? and activo = 1').bind(correo).first<{ id: string; nombre: string; cliente_id: string }>(),
-    semanasBono(env, [lunes]),   // mismo total y meta que el bono; solo sale el porcentaje
     configBono(env),
+    env.DB.prepare('select tienda from usuarios where correo = ?').bind(correo).first<{ tienda: string }>(),
   ]);
+  // La tienda de quien pregunta (la de su cuenta; '' = la central): mismo total y linea que el bono, pero solo salen porcentajes.
+  const [{ tiendas }] = await semanasBono(env, [lunes], bono, true);
+  const suya = cuentaApp?.tienda || TIENDA_CENTRAL;
+  const plan = tiendas.find((t) => t.tienda === (esTienda(suya) ? suya : TIENDA_CENTRAL))!;
+  const pct = (meta: number) => meta > 0 ? Math.floor(plan.ventas * 100 / meta) : 0;
+  // Cinco metas a pasos iguales entre la linea y la meta tope (sin tope valido, solo la linea); cada una con numero, porcentaje y si ya se logro.
+  const valores = plan.linea <= 0 ? [] : bono.tope > plan.linea ? [0, 1, 2, 3, 4].map((k) => plan.linea + Math.floor((bono.tope - plan.linea) * k / 4)) : [plan.linea];
+  const metas = valores.map((meta, i) => ({ n: i + 1, pct: pct(meta), lograda: plan.ventas > meta }));
   const promedio = Object.fromEntries(Object.entries(previas).map(([k, v]) => [k, Math.round(v * 10 / 4) / 10]));
   const cuenta = emp?.cliente_id ? await saldo(env, emp.cliente_id, iso) : null;
   const liberan = emp?.cliente_id
@@ -239,8 +219,8 @@ export async function misRetos(env: Env, correo: string, ahora = Date.now()): Pr
   }
   return json({
     nombre: emp?.nombre ?? '', semana: { desde: lunes, hoy, dia: (new Date(`${hoy}T12:00:00Z`).getUTCDay() + 6) % 7 + 1, ...semana }, promedio_4_semanas: promedio,
-    // Meta de la tienda: SOLO el porcentaje (decision de Isaac, #760). Ni el total ni la meta en pesos salen del servidor.
-    tienda_pct: plan.meta > 0 ? Math.floor(plan.ventas * 100 / plan.meta) : 0, tienda_alcanzada: plan.alcanzada, bono_pct: bono.pb / 100,
+    // Avance de SU tienda hacia su linea: SOLO porcentajes (decision de Isaac, #760). Ni el total ni la linea ni las metas en pesos salen del servidor.
+    tienda_pct: pct(plan.linea), tienda_alcanzada: plan.alcanzada, bono_pct: bono.pb / 100, metas,
     racha, liberan_el: liberan?.d ?? null,
     logros: logros.results.map((l) => ({ id: l.id, fecha: l.creado_en, logro: l.logro, etiqueta: ETIQUETAS[l.logro] ?? l.logro, d: l.d })),
     logros_por_tipo: Object.fromEntries(porTipo.results.map((t) => [t.logro, t.n])),

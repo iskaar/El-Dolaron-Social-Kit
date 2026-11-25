@@ -581,3 +581,44 @@ export async function buscarPorCodigo(request: Request, env: Env): Promise<Respo
   respuesta.headers.set('cache-control', 'no-store');
   return respuesta;
 }
+
+/* ---------- credito a empleadas (retos #752 y bono por tienda #930) ---------- */
+
+// ponytail: el credito vence como el de una compra (12 meses); si Isaac prefiere otro plazo, cambia esta constante.
+const MESES_VIGENCIA = 12;
+export interface Empleada { id: string; nombre: string; correo: string; cliente_id: string }
+
+/** La cuenta de socio de la empleada; se crea al primer credito. Telefono de relleno (unico): para canjear, Isaac pone el real. */
+export async function clienteDe(env: Env, e: Empleada, ahora: string): Promise<string> {
+  if (e.cliente_id) return e.cliente_id;
+  const id = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      `insert into clientes (id, numero, nombre, telefono, bases_version, registrado_por, creado_en)
+       select ?, coalesce(max(numero), 0) + 1, ?, ?, ?, 'retos', ? from clientes where 1 on conflict do nothing`,
+    ).bind(id, e.nombre, `retos-${e.id}`, env.BASES_APROBADAS_VERSION || 'retos', ahora),
+    // Con dos corridas a la vez gana la primera fila del telefono de relleno (unico): la otra no falla y se queda con esa cuenta.
+    env.DB.prepare(`update empleados set cliente_id = (select id from clientes where telefono = ?) where id = ? and cliente_id = ''
+      and exists (select 1 from clientes where telefono = ?)`).bind(`retos-${e.id}`, e.id, `retos-${e.id}`),
+  ]);
+  const cliente = (await env.DB.prepare('select cliente_id from empleados where id = ?').bind(e.id).first<{ cliente_id: string }>())?.cliente_id;
+  if (!cliente) throw new Error('No se pudo crear la cuenta de socio de la empleada; reintenta.');
+  return cliente;
+}
+
+/** Lote `origen = 'reto'` con id fijo: repetir la llamada no duplica ni el lote ni su movimiento. Devuelve la cuenta. */
+export async function acreditarReto(env: Env, e: Empleada, lote: string, centavos: number, ahora: number): Promise<string> {
+  const iso = new Date(ahora).toISOString();
+  const cliente = await clienteDe(env, e, iso);
+  await env.DB.batch([
+    env.DB.prepare(
+      `insert into dolarones_lotes (id, cliente_id, origen, venta_id, importe, restante, disponible_desde, vence_en, creado_en)
+       values (?, ?, 'reto', null, ?, ?, ?, ?, ?) on conflict (id) do nothing`,
+    ).bind(lote, cliente, centavos, centavos, iso, sumarMeses(new Date(ahora), MESES_VIGENCIA), iso),
+    env.DB.prepare(
+      `insert into dolarones_movimientos (cliente_id, lote_id, venta_id, tipo, importe, autor, creado_en)
+       select ?, ?, null, 'reto', ?, 'retos', ? where not exists (select 1 from dolarones_movimientos where lote_id = ? and tipo = 'reto')`,
+    ).bind(cliente, lote, centavos, iso, lote),
+  ]);
+  return cliente;
+}

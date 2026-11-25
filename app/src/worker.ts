@@ -46,7 +46,7 @@ import { UPC_VISIBLE, MISMO_UPC, claveTalla, PIEZA_UPC, CAPTURA_SUMADA, conflict
 import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaEspejoCaptura } from './espejo-captura.ts';
 import { rutaNomina } from './nomina.ts';
-import { reporteEquipo, registrarBonoSemana } from './equipo.ts';
+import { reporteEquipo, registrarBonoSemana, CLAVE_BONO_DESDE, fechaBono } from './equipo.ts';
 import { reporteCapturas } from './reportes-capturas.ts';
 import { reporteControl } from './reportes-control.ts';
 import { reporteDolarones } from './reportes-dolarones.ts';
@@ -1665,7 +1665,9 @@ async function guardarConfig(request: Request, env: Env): Promise<Response> {
     const numero = Math.round(Number(valor));
     // El tope de retiros (#846) son centavos enteros; un monto con decimales o vacio no se redondea en silencio.
     const topeMalo = clave === CLAVE_TOPE_RETIRO && (valor === '' || valor === null || typeof valor === 'boolean' || !Number.isInteger(Number(valor)) || numero > 100_000_000);
-    if (!/^[a-z_0-9]{1,40}$/.test(clave) || !Number.isFinite(numero) || numero < 0 || topeMalo || configInvalida(clave, valor)) {
+    // La primera semana del bono por tienda (#930) es un lunes real como AAAAMMDD; 0 la apaga.
+    const desdeMalo = clave === CLAVE_BONO_DESDE && (valor === '' || valor === null || typeof valor === 'boolean' || !Number.isInteger(Number(valor)) || (Number(valor) !== 0 && !fechaBono(Number(valor))));
+    if (!/^[a-z_0-9]{1,40}$/.test(clave) || !Number.isFinite(numero) || numero < 0 || topeMalo || desdeMalo || configInvalida(clave, valor)) {
       return json({ error: `Valor invalido para ${clave}.` }, 400);
     }
     await env.DB.prepare(
@@ -2890,7 +2892,11 @@ export default {
         }
         const config = await leerConfig(env);
         // El tope de retiros sin aprobacion (#846) es politica de efectivo: lo ve el dueno, no quien captura ni FEP.
-        if (!usuario?.roles.includes('dueno')) delete config[CLAVE_TOPE_RETIRO];
+        // Lo mismo la linea de ventas de cada tienda y los valores del bono (#930): con ellas y el porcentaje de /retos se despejaria la venta de la tienda.
+        if (!usuario?.roles.includes('dueno')) {
+          delete config[CLAVE_TOPE_RETIRO];
+          for (const clave of Object.keys(config)) if (/^bono_(tienda|d)_/.test(clave)) delete config[clave];
+        }
         return json(config);
       }
 
