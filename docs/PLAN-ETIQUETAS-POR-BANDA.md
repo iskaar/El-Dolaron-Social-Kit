@@ -21,6 +21,10 @@
 > **La caja ya no tiene botones de banda**: todo se escanea como un producto normal, y si el
 > código no lee se busca en la caja por descripción («juguetes 49») o por código.
 
+> **Actualizado 2026-11-25 (Isaac, #934): se agregan $250 y $300.** Los vigentes son trece:
+> **20, 30, 40, 50, 70, 80, 100, 120, 130, 150, 200, 250 y 300**. Las familias existentes los reciben con
+> `app/migracion-091-bandas-250-300.sql`.
+
 > **Actualizado 2026-11-18 (Isaac, #869): bandas en múltiplos de $10.** Los once montos vigentes son
 > **20, 30, 40, 50, 70, 80, 100, 120, 130, 150 y 200** (+$1 a cada uno de los de abajo). Los montos
 > anteriores (19 … 199) **ya no se imprimen** en `/bandas`, ni salen en la tarjeta laminada, ni se ofrecen

@@ -4,10 +4,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda } from './prueba-d1.ts';
 
-const MONTOS = [20, 30, 40, 50, 70, 80, 100, 120, 130, 150, 200];
+const MONTOS = [20, 30, 40, 50, 70, 80, 100, 120, 130, 150, 200, 250, 300];
 const ANTERIORES = [19, 29, 39, 49, 69, 79, 99, 119, 129, 149, 199];
 
-test('/api/familias ofrece los once montos nuevos y cada familia sembrada tiene los nuevos y los de antes', async () => {
+test('/api/familias ofrece los trece montos nuevos y cada familia sembrada tiene los nuevos y los de antes', async () => {
   const { db, pedir } = tienda();
   const { montos, familias } = (await pedir('/api/familias')).cuerpo;
   assert.deepEqual(montos, MONTOS);
@@ -24,7 +24,7 @@ test('/api/familias ofrece los once montos nuevos y cada familia sembrada tiene 
       assert.equal(p.stock, 0);
     }
   }
-  assert.equal((db.prepare(`select count(*) as n from productos where destino like 'banda_%'`).get() as { n: number }).n, 18 * 22);
+  assert.equal((db.prepare(`select count(*) as n from productos where destino like 'banda_%'`).get() as { n: number }).n, 18 * 24);
 });
 
 // #869: las etiquetas viejas impresas se respetan, y los montos nuevos se cobran a su precio.
@@ -63,7 +63,7 @@ test('una familia nueva nace solo con los montos nuevos, y el precio de la confi
   assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
   const filas = db.prepare(`select codigo, precio from productos where destino like ? order by precio`)
     .all(`banda_${r.cuerpo.prefijo}%`) as { codigo: string; precio: number }[];
-  assert.equal(filas.length, 11);
+  assert.equal(filas.length, MONTOS.length);
   assert.ok(filas.some((f) => f.codigo === `${r.cuerpo.prefijo.toUpperCase()}120`));
   assert.equal(filas.find((f) => f.codigo.endsWith('130'))?.precio, 12500);
 });
@@ -79,14 +79,14 @@ function conFamiliaFep() {
   return { ...t, como };
 }
 
-test('finanzas crea una familia: ella y sus once productos nacen de FEP; las sembradas siguen de la tienda', async () => {
+test('finanzas crea una familia: ella y sus productos nacen de FEP; las sembradas siguen de la tienda', async () => {
   const { db, pedir, como } = conFamiliaFep();
   como(FEP);
   const r = await pedir('/api/familias', { nombre: 'Termos FEP' });
   assert.equal(r.status, 201, JSON.stringify(r.cuerpo));
   assert.equal((db.prepare('select propietario from familias where prefijo = ?').get(r.cuerpo.prefijo) as { propietario: string }).propietario, 'fep');
   const filas = db.prepare(`select propietario from productos where destino like ?`).all(`banda_${r.cuerpo.prefijo}%`) as { propietario: string }[];
-  assert.equal(filas.length, 11);
+  assert.equal(filas.length, MONTOS.length);
   assert.ok(filas.every((f) => f.propietario === 'fep'));
   assert.equal((db.prepare(`select count(*) n from familias where propietario = 'dolaron'`).get() as { n: number }).n, 18);
   // Clave y prefijo son globales: la tienda no repite el nombre de FEP ni le toma el prefijo.
