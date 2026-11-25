@@ -277,14 +277,24 @@ test('datos inválidos: id, tienda, cortes y contado', async () => {
 const EMPLEADO = '22222222-2222-4222-8222-222222222222';
 const hoyTienda = (dias = 0) => new Date(Date.now() - 6 * 3_600_000 + dias * 86_400_000).toISOString().slice(0, 10);
 
+// Espera a que el reloj pase del último arqueo: el arqueo y lo que sigue no pueden caer en el mismo milisegundo.
+async function tictac(db: { prepare(sql: string): { get(): unknown } }) {
+  const ultimo = (db.prepare('select max(creado_en) as m from arqueos').get() as { m: string | null }).m;
+  if (!ultimo) return;
+  while (new Date().toISOString() <= ultimo) await new Promise((r) => setTimeout(r, 1));
+}
+
 async function montarCaja() {
   const t = await montar();
   const gasto = (extra: Record<string, unknown>) =>
     t.pedir('/api/gastos', { fecha: hoyTienda(), categoria: 'renta', importe: 1000, nota: 'prueba', origen: 'fuera', ...extra });
   const nomina = (extra: Record<string, unknown>) =>
     t.pedir('/api/nomina/movimientos', { id: crypto.randomUUID(), empleado_id: EMPLEADO, fecha: hoyTienda(), ...extra });
-  const arqueo = (contado: number, extra: Record<string, unknown> = {}) =>
-    t.pedir('/api/dinero/arqueos', { id: crypto.randomUUID(), contado, ...extra });
+  const arqueo = async (contado: number, extra: Record<string, unknown> = {}) => {
+    const r = await t.pedir('/api/dinero/arqueos', { id: crypto.randomUUID(), contado, ...extra });
+    await tictac(t.db);
+    return r;
+  };
   const mover = (tipo: string, importe: number, extra: Record<string, unknown> = {}) =>
     t.pedir('/api/dinero/movimientos', { id: crypto.randomUUID(), tipo, importe, ...extra });
   const saldo = async () => (await t.pedir('/api/dinero', undefined, 'GET')).cuerpo;
@@ -394,6 +404,7 @@ test('reintentar con el mismo id no duplica movimientos ni arqueos', async () =>
   const { pedir, saldo, db } = await montarCaja();
   const idArqueo = crypto.randomUUID(), idMov = crypto.randomUUID();
   assert.equal((await pedir('/api/dinero/arqueos', { id: idArqueo, contado: 5000 })).status, 201);
+  await tictac(db);
   const otra = await pedir('/api/dinero/arqueos', { id: idArqueo, contado: 5000 });
   assert.equal(otra.status, 200);
   assert.equal(otra.cuerpo.repetida, true);
@@ -471,4 +482,14 @@ test('«¿Con qué se pagó?»: efectivo por omisión con origen fuera, vacío c
   const historial = (await pedir(`/api/nomina/${EMPLEADO}/movimientos`, undefined, 'GET')).cuerpo.movimientos;
   assert.deepEqual(historial.filter((m: any) => m.tipo === 'adelanto').map((m: any) => m.pagado_con).sort(), ['', 'banco', 'efectivo']);
   assert.equal(historial.find((m: any) => m.tipo === 'devengo').pagado_con, '');
+});
+
+test('GET /api/dinero: el personal de cada tienda no incluye a quien consulta, pero sí a su otro personal con PIN', async () => {
+  const { pedir } = await montar();   // consulta gerencia (DUENO)
+  const { tiendas } = (await pedir('/api/dinero', undefined, 'GET')).cuerpo;
+  const personal = (clave: string) => tiendas.find((t: any) => t.clave === clave).personal.map((p: any) => p.correo);
+  assert.equal(personal('soledad').includes(DUENO), false, 'quien consulta no se ofrece a sí mismo');
+  assert.equal(personal('soledad').includes(ANA), true, 'la cajera de Soledad sigue');
+  assert.equal(personal('salk').includes(DUENO), false, 'quien consulta no se ofrece a sí mismo en Salk');
+  assert.equal(personal('salk').includes(SARA), true, 'la cajera de Salk sigue');
 });
