@@ -12,7 +12,7 @@ import {
 } from '../public/venta.js';
 import { LIMITE_GASTO_CAJERO } from './corte.ts';
 import { codigoDeDigitos, codigoEnDigitos } from '../public/code128.js';
-import { agregar, guiaVale, descuentoDe, TOPE_DESCUENTO } from '../public/venta.js';
+import { agregarYMarcar, guiaVale, descuentoDe, TOPE_DESCUENTO } from '../public/venta.js';
 import { puedeVenderEnMano } from '../public/venta.js';
 import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
 
@@ -352,7 +352,7 @@ function montarEscaneo() {
   const $ = (id: string) => (id === 'sugerencias' ? sugerencias : codigo);
   const catalogo = [{ codigo: 'ED-000001', nombre: 'Bufanda roja', precio: 5000 }, { codigo: 'ED-000002', nombre: 'Bufanda azul', precio: 6000 }];
   const contexto = {
-    $, leerMultiplicador, escapar: String, pesos: String, precioHoy: (p: any) => p.precio, TONO_PIEZA: {}, TONO_RECHAZO: {}, sonar() {},
+    $, cerrarPaneles() {}, leerMultiplicador, escapar: String, pesos: String, precioHoy: (p: any) => p.precio, TONO_PIEZA: {}, TONO_RECHAZO: {}, sonar() {},
     moverSugerencia, esBusquedaPorTexto, codigoDeDigitos,
     buscarPieza: (t: string) => catalogo.find((p) => p.codigo === t.trim().toUpperCase()),
     buscarPorTexto: (t: string) => catalogo.filter((p) => p.nombre.toLowerCase().includes(t.trim().toLowerCase())),
@@ -794,7 +794,7 @@ function montarAgregar(piezas: any[], { enLinea = true, recarga = [] as any[], r
   const recargas: number[] = [];
   const catalogo = new Map(piezas.map((p) => [p.codigo, p]));
   const contexto: Record<string, unknown> = {
-    $, catalogo, agregar, leerMultiplicador, codigoDeDigitos, avisoExistencia, avisoDondeHay, fetch: (url: string) => { consultas.push(url); return respuesta; }, precioHoy: (p: any) => p.precio, Map, Date, puedeVenderEnMano, ocultarEnMano() {}, ofrecerEnMano() {}, ticketEnDuda: () => false,
+    $, catalogo, agregarYMarcar, leerMultiplicador, codigoDeDigitos, avisoExistencia, avisoDondeHay, fetch: (url: string) => { consultas.push(url); return respuesta; }, precioHoy: (p: any) => p.precio, Map, Date, puedeVenderEnMano, ocultarEnMano() {}, ofrecerEnMano() {}, ticketEnDuda: () => false,
     navigator: { onLine: enLinea }, pintar() {}, cargarPedido() {}, buscarSocio() {},
     // El catálogo que baja la recarga: reemplaza lo que había (como cargarCatalogo).
     cargarCatalogo: async () => { recargas.push(1); for (const p of recarga) catalogo.set(p.codigo, p); },
@@ -913,7 +913,7 @@ test('#817 pie del catálogo: sin red el texto se asigna completo, no se acumula
   const pie = { textContent: '' };
   const cargar = runInNewContext(`let catalogo = new Map();
     ${entre('const CATALOGO_COMPLETO_MS', '/* ---------- ticket')}; cargarCatalogo`, {
-    $: () => pie, Map, Date, Number, store: async () => undefined, fetch: async () => { throw new TypeError('sin red'); },
+    $: () => pie, pintarAvisos() {}, Map, Date, Number, store: async () => undefined, fetch: async () => { throw new TypeError('sin red'); },
   });
   await cargar(); await cargar(); await cargar();
   assert.equal(pie.textContent, '0 códigos · sin actualizar');
@@ -924,7 +924,7 @@ test('#817 pie de ventas por sincronizar: singular y plural', async () => {
   const pie: any = { textContent: '', style: {} };
   const cola = (n: number) => Array.from({ length: n }, (_, i) => ({ id: String(i), creado_en: new Date().toISOString() }));
   const correr = async (n: number) => {
-    await runInNewContext(`${bloque}; pendientes()`, { $: () => pie, store: async () => cola(n), nVentas, Date, Math });
+    await runInNewContext(`${bloque}; pendientes()`, { $: () => pie, pintarAvisos() {}, store: async () => cola(n), nVentas, Date, Math });
     return pie.textContent;
   };
   assert.equal(await correr(1), '1 venta por sincronizar');

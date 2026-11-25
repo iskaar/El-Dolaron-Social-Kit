@@ -264,7 +264,7 @@ test('caja: un 400 o 404 al reportar es definitivo (no se reintenta y se puede d
     const caja = runInNewContext(`${texto}\n${dibujo}; ({ sincronizar, pintarRechazadas })`, {
       store: almacen, AbortSignal, JSON, encodeURIComponent, Date, $: (id: string) => el[id] ??= { textContent: '' },
       fetch: async () => { intentos++; if (respuesta === 'red') throw new TypeError('sin red'); return { ok: false, status: respuesta, json: async () => ({}) }; },
-      dolares: String, pendientes() {}, actualizarCorte() {}, pesos: String, escapar: String,
+      dolares: String, pendientes() {}, pintarAvisos() {}, actualizarCorte() {}, pesos: String, escapar: String,
       totales: (l: { cantidad: number }[]) => ({ total: 1, piezas: l.reduce((n, x) => n + x.cantidad, 0) }),
     }) as { sincronizar: () => Promise<void>; pintarRechazadas: () => Promise<void> };
     await caja.sincronizar();

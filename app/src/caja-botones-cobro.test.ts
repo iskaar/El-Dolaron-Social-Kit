@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import {
   totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio,
-  descuentoDe, TOPE_DESCUENTO, huellaTicket, TICKET_VIGENTE_MS, maximoCanje, montosRapidos, montoTransferidoRazonable, MINIMO_REGALO, SIN_RED_EN_MANO,
+  descuentoDe, TOPE_DESCUENTO, huellaTicket, TICKET_VIGENTE_MS, maximoCanje, montosRapidos, montoTransferidoRazonable, MINIMO_REGALO, SIN_RED_EN_MANO, ordenEnPantalla,
 } from '../public/venta.js';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
@@ -77,6 +77,7 @@ interface Opciones {
   recargar?: boolean;                           // arranca como una caja recién abierta: el ticket sale del almacén
   enMano?: boolean;                             // #832: el renglón lleva «La tengo en la mano»
   enLinea?: boolean;                            // navigator.onLine (por omisión, sí)
+  lineas?: any[];                               // #931: el ticket de la prueba, en el orden de captura
 }
 
 const respuestaOk = async () => ({ ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null, saldo_pedido: 0 }) });
@@ -88,6 +89,7 @@ function armar(op: Opciones = {}) {
   const enviadas: any[] = [];
   const guardadas: unknown[] = [];
   const cajones: number[] = [];
+  const impresos: any[][] = [];                // lo que se manda a imprimir: (venta, lineas)
   const almacen = op.almacen ?? {};
   const $ = (id: string) => p.el(id);
   $('efectivo').value = op.efectivo ?? '300';
@@ -100,12 +102,12 @@ function armar(op: Opciones = {}) {
     ? { id: 's1', numero: 7, disponible: 500000, regalo_disponible: 0, maximo: 500000, expira_en: '2099-01-01T00:00:00Z', vale: false } : null;
   let n = 0;
   const contexto: Record<string, any> = {
-    crypto, Date, JSON, $, AbortSignal, Object, Math, Number, String, vistos: [] as unknown[], totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados,
+    crypto, Date, JSON, ordenEnPantalla, $, AbortSignal, Object, Math, Number, String, vistos: [] as unknown[], totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados,
     anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, descuentoDe, TOPE_DESCUENTO, maximoCanje, montosRapidos, montoTransferidoRazonable,
     MINIMO_REGALO, navigator: { onLine: op.enLinea ?? true }, window: { open() {} }, ocultarEnMano() {}, SIN_RED_EN_MANO,
     localStorage: { getItem: (k: string) => almacen[k] ?? null, setItem: (k: string, v: string) => { almacen[k] = v; } },
     document: { querySelectorAll: (s: string) => (s === '#botones-cobro button' ? BOTONES.map($) : []), createElement: () => ({ style: {}, textContent: '' }) },
-    lineas: op.recargar ? [] : [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: op.precio ?? 30000, cantidad: 1, ...(op.enMano ? { en_mano: { motivo: 'no_se', esperado: 0 } } : {}) }],
+    lineas: op.recargar ? [] : op.lineas ?? [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: op.precio ?? 30000, cantidad: 1, ...(op.enMano ? { en_mano: { motivo: 'no_se', esperado: 0 } } : {}) }],
     errorImpresora: () => 'no conectada', socio, valesCargados: [], catalogo: new Map(), pedidoCargado: op.recargar ? null : op.pedido ?? null,
     descuento: op.descuento ? { huella: huellaTicket([{ producto_id: 'p1', cantidad: 1 }], op.precio ?? 30000), ...op.descuento } : null,
     huellaTicket, TICKET_VIGENTE_MS, quitarDescuentoEnServidor() {}, descuentoCerrado: () => false, revisarVencimientoDescuento: () => false,
@@ -114,7 +116,7 @@ function armar(op: Opciones = {}) {
     descuentoAplicado: () => 0, promoActual: () => 0, totalNeto: () => op.precio ?? 30000, pintarDescuento() {}, promoAgotada() {},
     pintarPromoCupo() {}, revisarCancelarArmado() {}, pintarImpresionRemota() {}, escapar: String, pesos: String, dolares: String,
     quitarSocio() {}, sincronizar() {}, cargarCatalogo() {}, pintarImpresora() {}, promoConfig: null,
-    abrirCajon: async () => { cajones.push(1); return true; }, imprimirTicket: async () => true,
+    abrirCajon: async () => { cajones.push(1); return true; }, imprimirTicket: async (...args: any[]) => { impresos.push(args); return true; },
     store: async (almacenIdb: string, _m: string, fn: any) => fn({ put(v: unknown) { if (almacenIdb === 'ventas') guardadas.push(v); } }),
     fetch: async (_ruta: string, o: any) => { enviadas.push(JSON.parse(o.body)); n++; return (op.fetch ?? respuestaOk)(n); },
   };
@@ -135,7 +137,7 @@ function armar(op: Opciones = {}) {
   rutinas.pintar();                                          // como al abrir la caja
 
   return {
-    p, $, enviadas, guardadas, cajones, almacen, contexto, rutinas,
+    p, $, enviadas, guardadas, cajones, impresos, almacen, contexto, rutinas,
     estado: () => rutinas.estado() as { idVenta: string | null; folioIncierto: string | null; cobroIncierto: any },
     habilitados: () => BOTONES.filter((id) => !$(id).disabled),
     /** Un clic de ratón: el navegador enfoca el botón (si está habilitado) y solo entonces corre el manejador. */
@@ -628,4 +630,55 @@ test('#832 en la mano: la marca viaja en su línea (motivo y existencia que vio 
   const normal = armar();
   await normal.clic('cobrar-tarjeta');
   assert.deepEqual(Object.keys(normal.enviadas[0].lineas[0]), ['codigo', 'nombre', 'precio', 'cantidad', 'producto_id']);
+});
+
+/* ---------- #931: lo último escaneado arriba, solo en pantalla ---------- */
+
+// Orden de captura A, B, C. B se escaneó otra vez al final (sumó una pieza): en pantalla va primero, en los datos sigue en su lugar.
+const TICKET_931 = [
+  { producto_id: 'pa', codigo: 'ED-A', nombre: 'Pieza A', precio: 10000, cantidad: 1, tocada: 1000 },
+  { producto_id: 'pb', codigo: 'ED-B', nombre: 'Pieza B', precio: 20000, cantidad: 2, tocada: 3000 },
+  { producto_id: 'pc', codigo: 'ED-C', nombre: 'Pieza C', precio: 30000, cantidad: 1, tocada: 2000 },
+];
+const codigosEnPantalla = (html: string) => [...html.matchAll(/class="codigo">(ED-[A-C])/g)].map((m) => m[1]);
+
+test('#931 pantalla: el ticket dibuja lo último escaneado arriba (incluida una pieza repetida que ya estaba) y el ✕ quita la línea real, no la de pantalla', async () => {
+  const c = armar({ lineas: structuredClone(TICKET_931).map((l) => ({ ...l, tocada: l.tocada + Date.now() })) });
+  assert.deepEqual(codigosEnPantalla(c.$('ticket').innerHTML), ['ED-B', 'ED-C', 'ED-A']);
+  // Cada ✕ lleva el índice REAL en `lineas` (B es la 1, aunque salga primero).
+  assert.deepEqual([...c.$('ticket').innerHTML.matchAll(/data-quitar="(\d+)"/g)].map((m) => m[1]), ['1', '2', '0']);
+  assert.deepEqual(c.contexto.lineas.map((l: any) => l.codigo), ['ED-A', 'ED-B', 'ED-C'], 'pintar() no reordena los datos');
+  // Sin sello (ticket de antes de este cambio o de un pedido) cae al más nuevo primero por posición.
+  const viejo = armar({ lineas: TICKET_931.map(({ tocada, ...l }) => l) });
+  assert.deepEqual(codigosEnPantalla(viejo.$('ticket').innerHTML), ['ED-C', 'ED-B', 'ED-A']);
+});
+
+test('#931 pantalla: solo el renglón recién tocado se resalta (y sigue donde lo dejó la animación); uno viejo no', () => {
+  const ahora = Date.now();
+  const c = armar({ lineas: [{ ...TICKET_931[0], tocada: ahora - 60_000 }, { ...TICKET_931[1], tocada: ahora - 300 }] });
+  const html: string = c.$('ticket').innerHTML;
+  assert.equal((html.match(/class="renglon nuevo"/g) ?? []).length, 1);
+  assert.match(html, /class="renglon nuevo" style="animation-delay:-\d+ms"[\s\S]*ED-B/);
+  assert.ok(html.indexOf('renglon nuevo') < html.indexOf('ED-A'), 'el resaltado es el de arriba');
+  assert.equal(c.$('ticket').scrollTop, 0);
+});
+
+for (const forma of ['con red', 'sin red (se encola)']) {
+  test(`#931 lo que se envía, se encola y se imprime sale en el orden de captura y sin el dato de pantalla (${forma})`, async () => {
+    const c = armar({ lineas: structuredClone(TICKET_931), fetch: forma === 'con red' ? respuestaOk : sinRed });
+    // Antes de cobrar la pantalla dibuja B primero: si el envío usara ese orden, esta prueba lo vería.
+    assert.deepEqual(codigosEnPantalla(c.$('ticket').innerHTML), ['ED-B', 'ED-C', 'ED-A']);
+    await c.clic('cobrar-tarjeta');
+    const salida = forma === 'con red' ? c.enviadas[0].lineas : (c.guardadas[0] as any).lineas;
+    assert.deepEqual(salida.map((l: any) => l.codigo), ['ED-A', 'ED-B', 'ED-C']);
+    assert.ok(salida.every((l: any) => !('tocada' in l)), 'el sello de pantalla no viaja');
+    assert.deepEqual(c.impresos[0][1].map((l: any) => l.codigo), ['ED-A', 'ED-B', 'ED-C'], 'el ticket impreso lleva el mismo orden');
+  });
+}
+
+test('#931 pantalla: con el reloj atrasado (sello en el futuro) ningún renglón se resalta ni fija el scroll arriba', () => {
+  const futuro = Date.now() + 3_600_000;
+  const c = armar({ lineas: TICKET_931.map((l) => ({ ...l, tocada: futuro })) });
+  assert.equal((c.$('ticket').innerHTML.match(/renglon nuevo/g) ?? []).length, 0);
+  assert.equal(c.$('ticket').scrollTop, undefined);
 });

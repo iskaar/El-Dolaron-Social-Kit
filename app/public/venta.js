@@ -296,6 +296,45 @@ export function agregar(lineas, pieza, cantidad = 1) {
 }
 
 /**
+ * #931: agrega como `agregar` y sella el renglón tocado con `tocada` (ms; siempre mayor que la de los demás) para mostrarlo primero en pantalla.
+ * Es solo un dato de pantalla: lo que se manda al servidor y se imprime se arma campo por campo en la caja y no lo lleva.
+ */
+export function agregarYMarcar(lineas, pieza, cantidad = 1, ahora = Date.now()) {
+  const nuevas = agregar(lineas, pieza, cantidad);
+  const tocado = nuevas.findIndex((l, i) => l !== lineas[i]);   // `agregar` conserva los renglones que no toca: el distinto es el nuevo o el que sumó
+  const sello = Math.max(ahora, ...lineas.map((l) => (l.tocada ?? 0) + 1));
+  return nuevas.map((l, i) => (i === tocado ? { ...l, tocada: sello } : l));
+}
+
+/**
+ * #931: qué muestra «Avisos» y qué cuenta su número rojo. Lo que pide atención (`rojos`, más una falla de impresión del ticket y las ventas
+ * rechazadas, que se dibujan aparte) suma; las promos (`informativos`) se listan pero no suman. `s` es el estado de las señales de la
+ * caja y `t` lo que dice la pantalla (textos de promo, impresora, ventas por subir y reloj).
+ */
+export function resumenAvisos(s, t) {
+  const rojos = [
+    ...(s.servidor ?? []).map((texto) => ({ texto, enlace: '/avisos' })),
+    ...(s.impresora === 'rojo' ? [{ texto: t.impresora }] : []),
+    ...(s.subir === 'rojo' ? [{ texto: t.subir }] : []),
+    ...(s.reloj ? [{ texto: t.reloj }] : []),
+  ];
+  const informativos = [
+    ...(t.promo ? [{ texto: t.promo, dorado: true }] : []),
+    ...(t.buenfin ? [{ texto: t.buenfin }] : []),
+  ];
+  const total = rojos.length + (t.fallaImpresion ? 1 : 0) + (s.rechazadas ?? 0);
+  return { rojos, informativos, total };
+}
+
+/**
+ * #931: en qué orden se DIBUJA el ticket en pantalla: lo último escaneado arriba. Devuelve índices de `lineas`, que no se reordena:
+ * el orden de lo que se envía y se imprime es el de siempre (el de captura).
+ */
+export function ordenEnPantalla(lineas) {
+  return lineas.map((_, i) => i).sort((a, b) => ((lineas[b].tocada ?? 0) - (lineas[a].tocada ?? 0)) || b - a);
+}
+
+/**
  * «3*» antes de escanear agrega 3 piezas (Issue #358): "3*ED-000123", "3*123".
  * Sin prefijo la cantidad es 1. null = prefijo que no es 1 a 99.
  */
