@@ -472,3 +472,13 @@ test('«¿Con qué se pagó?»: efectivo por omisión con origen fuera, vacío c
   assert.deepEqual(historial.filter((m: any) => m.tipo === 'adelanto').map((m: any) => m.pagado_con).sort(), ['', 'banco', 'efectivo']);
   assert.equal(historial.find((m: any) => m.tipo === 'devengo').pagado_con, '');
 });
+
+test('GET /api/dinero: el personal de cada tienda no incluye a quien consulta, pero sí a su otro personal con PIN', async () => {
+  const { pedir } = await montar();   // consulta gerencia (DUENO)
+  const { tiendas } = (await pedir('/api/dinero', undefined, 'GET')).cuerpo;
+  const personal = (clave: string) => tiendas.find((t: any) => t.clave === clave).personal.map((p: any) => p.correo);
+  assert.equal(personal('soledad').includes(DUENO), false, 'quien consulta no se ofrece a sí mismo');
+  assert.equal(personal('soledad').includes(ANA), true, 'la cajera de Soledad sigue');
+  assert.equal(personal('salk').includes(DUENO), false, 'quien consulta no se ofrece a sí mismo en Salk');
+  assert.equal(personal('salk').includes(SARA), true, 'la cajera de Salk sigue');
+});
