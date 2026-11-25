@@ -65,7 +65,7 @@ async function listar(env: Env, correo: string): Promise<Response> {
       // Quienes pueden firmar la entrega: personal de esa tienda (sin tienda cuenta como Soledad, igual que en la caja) y gerencia.
       personal: usuarios.filter((u) => {
         const roles = leerRoles(u.roles);
-        return puedeEntregar(roles) && (roles.includes('dueno') || (esTienda(u.tienda) ? u.tienda : 'soledad') === clave);
+        return u.correo.toLowerCase() !== correo.toLowerCase() && puedeEntregar(roles) && (roles.includes('dueno') || (esTienda(u.tienda) ? u.tienda : 'soledad') === clave);
       }).map(({ correo, nombre }) => ({ correo, nombre })),
     };
   });
