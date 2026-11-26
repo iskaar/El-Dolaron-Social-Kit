@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { agregar, agregarYMarcar, ordenEnPantalla, resumenAvisos } from '../public/venta.js';
 import { crearLector } from '../public/lector.js';
+import { PUERTA } from './prueba-caja.ts';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
 const entre = (desde: string, hasta: string) => {
@@ -106,7 +107,7 @@ function montarPaneles() {
   // Los dos trozos reales de caja.html: los paneles y el doble Esc.
   const codigo = `${entre('const PANELES =', '// Estado de lo que pide atención')}
     ${entre('// Doble Esc borra el ticket completo', '// Con descuento aprobado')}`;
-  runInNewContext(codigo, { $, document: Object.assign(doc, { querySelector: () => (estado.dialogoAbierto ? {} : null) }), get lineas() { return estado.lineas; } });
+  runInNewContext(codigo, { $, ...PUERTA, idVenta: null, cobroIncierto: null, ticketEnDuda: () => false, document: Object.assign(doc, { querySelector: () => (estado.dialogoAbierto ? {} : null) }), get lineas() { return estado.lineas; } });
   const tecla = (key: string, extra: Record<string, unknown> = {}) => { for (const f of doc.oyentes.keydown ?? []) f({ key, repeat: false, timeStamp: 10000, ...extra }); };
   const clic = (id: string) => { const e = { stopPropagation() { this.parado = true; }, parado: false, target: { closest: () => null } }; for (const f of $(id).oyentes.click ?? []) f(e); return e; };
   return { $, doc, mundo, estado, tecla, clic };
@@ -207,7 +208,7 @@ test('#931 «Imprimir en otra caja» vive en «Más opciones», pero con el modo
   const el: Record<string, any> = {};
   const $ = (id: string) => (el[id] ??= { hidden: false, textContent: '', value: '' });
   const correr = (remota: boolean) => {
-    runInNewContext(`${bloque}; pintarImpresionRemota()`, { $, impresionRemota: () => remota, impresoraLista: () => false, cobrando: false });
+    runInNewContext(`${bloque}; pintarImpresionRemota()`, { $, ...PUERTA, idVenta: null, cobroIncierto: null, impresionRemota: () => remota, impresoraLista: () => false, cobrando: false });
   };
   correr(true);
   assert.equal(el['aviso-remoto'].hidden, false);

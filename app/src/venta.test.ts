@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { PUERTA } from './prueba-caja.ts';
 import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, BILLETES, montoTransferidoRazonable, EXCEDENTE_MAXIMO, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
@@ -214,7 +215,7 @@ const cobroPedido = (fetchSimulado: () => Promise<unknown>, forma = 'efectivo', 
     return elementos.get(id);
   };
   const contexto: Record<string, unknown> = {
-    crypto, Date, $, AbortSignal, Object, Math, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, montoTransferidoRazonable,
+    crypto, Date, $, AbortSignal, Object, Math, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, montoTransferidoRazonable, ...PUERTA,
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
     socio: opciones.socio ?? null, valesCargados: [], catalogo: new Map(), debePreguntarSocio, navigator: { onLine: !opciones.sinRed },
     preguntarSocio: async () => { preguntasSocio.push(1); return opciones.respuestaSocio ?? 'cobrar'; }, abrirAlta: () => abiertas.push('/socios'), pedidoCargado: opciones.sinPedido ? null : { id: 'ped-1', folio: 17, saldo: 10000 },
@@ -452,12 +453,13 @@ const buscarConAviso = (inicial: { socio?: any; vales?: any[] }, texto: string, 
   const pedidos: string[] = [];
   const cuerpo = vale ? { vale: true, disponible: 1000, maximo: 1000, expira_en: '2099-01-01T00:00:00Z', completo: true }
     : { numero: 7, nombre: 'Ana', disponible: 500, maximo: 500, expira_en: '2099-01-01T00:00:00Z' };
-  const contexto = { $, guiaVale, dolares: String, escapar: String, idVenta: 'x', pintar() {}, preguntarDolarones() {}, avisoRojo() {}, setTimeout, Promise, Date, Math,
+  const contexto = { $, guiaVale, dolares: String, escapar: String, idVenta: 'x', pintar() {}, ticketEnDuda: () => false, preguntarDolarones() {}, avisoRojo() {}, setTimeout, Promise, Date, Math,
     fetch: async (ruta: string) => { pedidos.push(ruta); return { ok: true, json: async () => cuerpo }; },
     codigoDeDigitos: () => null };
   const bloque = cajaFuente.slice(cajaFuente.indexOf('function pintarSocio()'), cajaFuente.indexOf("$('buscar-socio').addEventListener"));
   const buscar = runInNewContext(`let socio = ${JSON.stringify(inicial.socio ?? null)}, valesCargados = ${JSON.stringify(inicial.vales ?? [])}, busquedaSocio = 0,
     cobrando = false, valesPrueba = false, codigoSocio = '', usarTodos = false;
+    ${cajaFuente.slice(cajaFuente.indexOf('function cambiarTicket('), cajaFuente.indexOf('// Pedido por WhatsApp cargado'))}
     ${bloque}; ({ buscarSocio, estado: () => ({ socio, valesCargados }) })`, contexto);
   return { ...buscar, $, pedidos };
 };

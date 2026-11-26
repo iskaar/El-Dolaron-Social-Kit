@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
 import { totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, debePreguntarSocio } from '../public/venta.js';
+import { PUERTA } from './prueba-caja.ts';
 
 const venta = (extra:Record<string, unknown> = {}) => ({ id:crypto.randomUUID(),
   lineas:[{ producto_id:PRODUCTO, cantidad:1 }], forma_pago:'tarjeta', efectivo:0,
@@ -203,7 +204,7 @@ test('modo remoto sólo sin impresora: esconde «Cobrar en efectivo» y deshabil
   $('caja-nombre').options = ['', 'Caja 1', 'Caja 2', 'Caja 3'].map((value) => ({ value, cloneNode:() => ({ value }) }));
   const bloque = fuente.slice(fuente.indexOf('const impresionRemota ='), fuente.indexOf('function exigirCaja()'));
   const modos = runInNewContext(`${bloque}; ({ pintarImpresionRemota, impresionRemota })`, {
-    $, cobrando:false, pintar() {}, impresoraLista:() => conectada,
+    $, cobrando:false, pintar() {}, impresoraLista:() => conectada, ...PUERTA, idVenta:null, cobroIncierto:null,
     localStorage:{ getItem() { throw new Error('sin memoria'); } },
   });
   assert.equal($('imprimir-en').value, 'Caja 1');
@@ -234,7 +235,7 @@ test('celular sin red guarda imprimir_en; no imprime localmente ni abre el cajó
   };
   const cobrar = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, folioIncierto = null, cobroIncierto = null;
     ${cobro}; cobrar`, {
-    crypto, Date, $, AbortSignal, Object, debePreguntarSocio, navigator:{ onLine:false },   // sin red no se pregunta por el socio (#730)
+    crypto, Date, $, AbortSignal, Object, debePreguntarSocio, ...PUERTA, navigator:{ onLine:false },   // sin red no se pregunta por el socio (#730)
     lineas:[{ producto_id:PRODUCTO, codigo:'ED-000001', nombre:'Ventilador', precio:25000, cantidad:1 }],
     socio:null, catalogo:new Map(), pedidoCargado:null,
     impresionRemota:() => true, exigirCaja:() => true, cajaActual:() => 'Caja 1', dolaronesPedidos:() => 0,
@@ -253,6 +254,33 @@ test('celular sin red guarda imprimir_en; no imprime localmente ni abre el cajó
   assert.equal(guardadas[0].forma_pago, 'tarjeta');
   assert.equal(guardadas[0].efectivo, 0);
   assert.match($('aviso').textContent, /Ticket enviado a Caja 2.*se enviará al sincronizar/);
+});
+
+test('#933 con un cobro en duda «Efectivo» y el destino de la impresión son los del primer intento: que aparezca o se vaya la impresora no los cambia', () => {
+  let conectada = false;
+  const elementos = new Map<string, any>();
+  const $ = (id: string) => {
+    if (!elementos.has(id)) elementos.set(id, { value:'', checked:false, options:[], add() {}, addEventListener() {} });
+    return elementos.get(id);
+  };
+  $('caja-nombre').options = ['', 'Caja 1', 'Caja 2'].map((value) => ({ value, cloneNode:() => ({ value }) }));
+  const bloque = fuente.slice(fuente.indexOf('const impresionRemota ='), fuente.indexOf('function exigirCaja()'));
+  const contexto: Record<string, unknown> = { $, cobrando:false, pintar() {}, impresoraLista:() => conectada, ...PUERTA, idVenta:'f1',
+    cobroIncierto:{ id:'f1', boton:'efectivo', cuerpo:{ forma_pago:'efectivo' } }, localStorage:{ getItem() { throw new Error('sin memoria'); } } };
+  const modos = runInNewContext(`${bloque}; ({ pintarImpresionRemota })`, contexto);
+  $('modo-remoto').checked = true;                          // el modo remoto está marcado, pero el primer intento fue en esta caja
+  modos.pintarImpresionRemota();
+  assert.equal($('cobrar-efectivo').hidden, false, '«Efectivo» es el botón que hay que volver a tocar');
+  assert.equal($('efectivo').disabled, false);
+  contexto.cobroIncierto = { id:'f1', boton:'tarjeta', cuerpo:{ forma_pago:'tarjeta', imprimir_en:'Caja 2' } };
+  $('modo-remoto').checked = false;
+  conectada = true;                                         // y ahora hay impresora: el primer intento fue remoto y el reintento también
+  modos.pintarImpresionRemota();
+  assert.equal($('cobrar-efectivo').hidden, true);
+  assert.equal($('destino-impresion').hidden, false);
+  contexto.cobroIncierto = null;                            // sin duda manda lo de ahora
+  modos.pintarImpresionRemota();
+  assert.equal($('cobrar-efectivo').hidden, false);
 });
 
 test('sincronizar reenvía el destino remoto y elimina la venta sólo después de aceptarla', async () => {

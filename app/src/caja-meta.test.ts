@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import * as retos from '../public/retos.js';
 import { crearLector } from '../public/lector.js';
+import { PUERTA } from './prueba-caja.ts';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
 const entre = (desde: string, hasta: string) => {
@@ -246,7 +247,7 @@ function montarPaneles() {
   doc.querySelector = () => null;
   const codigo = `${entre('const PANELES =', '// Estado de lo que pide atención')}
     ${entre('// Doble Esc borra el ticket completo', '// Con descuento aprobado')}`;
-  runInNewContext(codigo, { $, document: doc, get lineas() { return estado.lineas; } });
+  runInNewContext(codigo, { $, ...PUERTA, idVenta: null, cobroIncierto: null, ticketEnDuda: () => false, document: doc, get lineas() { return estado.lineas; } });
   const tecla = (key: string, extra: Record<string, unknown> = {}) => { for (const f of doc.oyentes.keydown ?? []) f({ key, repeat: false, timeStamp: 10000, ...extra }); };
   const clic = (id: string) => { for (const f of $(id).oyentes.click ?? []) f({ stopPropagation() {}, target: { closest: () => null } }); };
   return { $, doc, mundo, estado, tecla, clic };

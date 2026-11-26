@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { totales, promoInauguracion } from '../public/venta.js';
 import { tienda, PRODUCTO } from './prueba-d1.ts';
+import { PUERTA } from './prueba-caja.ts';
 
 const fuente = readFileSync('public/caja.html', 'utf8');
 const venta = (extra: Record<string, unknown> = {}) => ({ id: crypto.randomUUID(),
@@ -32,8 +33,8 @@ test('la promo del ticket nuevo se mide con la hora de ahora, no con la hora de 
   const inicio = '2026-10-07T16:00:00.000Z';
   const ahora = Date.parse('2026-10-07T20:00:00.000Z');
   const linea = fuente.slice(fuente.indexOf('const promoActual ='), fuente.indexOf('\n', fuente.indexOf('const promoActual =')));
-  const caja = runInNewContext(`let idVenta = null, creadoEnVenta = null, sinPromo = false;\n${linea}; ({ promoActual, fijar(i, c) { idVenta = i; creadoEnVenta = c; }, quitar(q) { sinPromo = q; } })`, {
-    totales, promoInauguracion, lineas: [{ precio: 40000, cantidad: 1 }], promoConfig: { desde: inicio, hasta: '2026-10-14T16:00:00.000Z' },
+  const caja = runInNewContext(`let idVenta = null, creadoEnVenta = null, sinPromo = false, cobroIncierto = null;\n${linea}; ({ promoActual, fijar(i, c) { idVenta = i; creadoEnVenta = c; }, quitar(q) { sinPromo = q; } })`, {
+    totales, promoInauguracion, ...PUERTA, lineas: [{ precio: 40000, cantidad: 1 }], promoConfig: { desde: inicio, hasta: '2026-10-14T16:00:00.000Z' },
     Date: class extends Date { static now() { return ahora; } },
   });
   // La venta anterior se cobro a las 10:00, antes de que empezara la promo; ya no hay ticket en curso.

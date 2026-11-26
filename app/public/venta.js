@@ -451,6 +451,50 @@ export const puedeVenderEnMano = (pieza, enTicket) =>
 export const moverSugerencia = (actual, total, tecla) =>
   total <= 0 ? -1 : tecla === 'ArrowDown' ? Math.min(actual + 1, total - 1) : Math.max(actual - 1, -1);
 
+/* ---------- cobro en duda (#933) ---------- */
+
+/** Con la respuesta de un cobro sin saber, el ticket es ESE cobro: solo se puede repetir (mismo folio, misma forma, mismo importe). */
+export const cobroEnDuda = ({ idVenta, cobroIncierto }) => !!idVenta && cobroIncierto?.id === idVenta;
+
+/** Un cobro en duda de una versión anterior de la caja: se guardó sin con qué se mandó, así que no se puede repetir idéntico (la única salida es cancelarlo). */
+export const cobroSinCuerpo = ({ idVenta, cobroIncierto }) => cobroEnDuda({ idVenta, cobroIncierto }) && !cobroIncierto.cuerpo;
+
+/** El botón que hay que volver a tocar, tal como lo nombra la caja. */
+export const botonDeCobro = (cobroIncierto) =>
+  ({ efectivo: 'el botón «Efectivo»', tarjeta: 'el botón «Tarjeta»', transferencia: 'el botón «Transferencia»', 'sin-dinero': 'el botón «Cobrar: ya está pagado»' })[cobroIncierto?.boton] ?? 'el mismo botón';
+
+/** Los códigos con que se cobra con Dolarones: del vale (o de los vales juntos) o del socio. Van aparte: nunca a la cola ni al ticket impreso. */
+export const codigosDeVenta = (socio, valesCargados, codigoSocio) =>
+  socio.vale ? { codigo_vale: valesCargados.length > 1 ? valesCargados.map((v) => v.codigo) : codigoSocio } : { codigo_socio: codigoSocio };
+
+/** Los códigos de socio o de vale de un cuerpo ya enviado (van aparte del resto: no se encolan ni se imprimen). */
+export const codigosDeCuerpo = (cuerpo) =>
+  Object.fromEntries(['codigo_socio', 'codigo_vale'].filter((k) => k in (cuerpo ?? {})).map((k) => [k, cuerpo[k]]));
+export const cuerpoSinCodigos = (cuerpo) =>
+  Object.fromEntries(Object.entries(cuerpo ?? {}).filter(([k]) => k !== 'codigo_socio' && k !== 'codigo_vale'));
+
+/**
+ * Lo que, además de las piezas, define la venta que se mandó: socio y su código, vales, Dolarones pedidos y «sin promo» (todo va dentro del
+ * pedidoHash del servidor). Se guarda con el ticket SOLO mientras el cobro está en duda: así, tras recargar, el reintento sale idéntico.
+ * Un ticket sin duda sigue guardándose como siempre (el código de socio es de un solo uso y se vuelve a pedir).
+ */
+export const fotoDeVenta = ({ socio, codigoSocio, valesCargados, dolarones, sinPromo }) =>
+  JSON.parse(JSON.stringify({ socio: socio ?? null, codigoSocio: codigoSocio ?? '', valesCargados: valesCargados ?? [], dolarones: String(dolarones ?? ''), sinPromo: !!sinPromo }));
+
+/** Lo guardado de la venta en duda, ya validado; null si el ticket no trae foto (versión anterior) o no es de ese cobro. */
+export function ventaRecuperada(guardado) {
+  const foto = guardado?.venta;
+  if (!guardado?.idVenta || guardado.cobroIncierto?.id !== guardado.idVenta || !foto || typeof foto !== 'object') return null;
+  const objeto = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : null);
+  return {
+    socio: objeto(foto.socio),
+    codigoSocio: typeof foto.codigoSocio === 'string' ? foto.codigoSocio : '',
+    valesCargados: Array.isArray(foto.valesCargados) ? foto.valesCargados.filter(objeto) : [],
+    dolarones: typeof foto.dolarones === 'string' ? foto.dolarones : '',
+    sinPromo: foto.sinPromo === true,
+  };
+}
+
 /** «Cancelar venta» (y doble Esc) pide un segundo toque si se perdería trabajo: descuento aprobado, pedido cargado o 3 piezas o más. */
 export const cancelarPideConfirmar = ({ piezas, descuentoAprobado, pedido }) =>
   piezas > 0 && (!!descuentoAprobado || !!pedido || piezas >= 3);
