@@ -139,6 +139,19 @@ export const ESCENARIOS = [
     pantalla: 'caja',
     textos: ['El reloj de esta computadora está', 'Corrígelo en la configuración de Windows'],
   },
+  {
+    id: 'barra-meta', categoria: 'dia', titulo: 'Arriba hay una barra con un porcentaje: la meta de la semana de la tienda',
+    palabras: ['meta', 'barra', 'porcentaje', 'bono', 'ritmo', 'semana', 'metas', 'la grande', 'signo de interrogación', 'lograda'],
+    pasos: [
+      'Mira la barra bajo el encabezado, a la izquierda: dice qué meta sigue (la primera es la que arranca el bono, la última es la grande) y qué porcentaje de esa meta lleva la tienda esta semana.',
+      'La rayita blanca sobre la barra marca dónde debería ir la tienda hoy. Si la barra ya la pasó dice «Por delante del ritmo»; si no, dice «Por detrás del ritmo»: todavía hay días para alcanzarla.',
+      'Toca el botón «?» para ver las metas de la semana con su porcentaje. Las que ya se lograron dicen «Lograda». Se cierra con Esc, con otro toque o al escanear una pieza.',
+      'Cuando la tienda logra una meta, la barra lo avisa un momento y pasa a la siguiente.',
+    ],
+    ojo: 'Es el avance de toda la tienda esta semana, no el de una persona, y solo muestra porcentajes. Se actualiza sola al abrir la caja, después de cada cobro y cada pocos minutos. Si se ve apagada, no hay red y está mostrando el último dato. Si no aparece, la tienda no tiene metas esta semana: pregunta a gerencia. Nunca frena ni retrasa un cobro.',
+    pantalla: 'caja',
+    textos: ['Por delante del ritmo', 'Por detrás del ritmo', '?', 'Lograda'],
+  },
 
   /* ---------------------------------------------------------------- Cobrar */
   {
