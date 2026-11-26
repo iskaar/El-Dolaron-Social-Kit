@@ -143,7 +143,7 @@ function montarCobro(op: Opciones = {}) {
     preguntarSocio: async () => 'cobrar',
     impresionRemota: () => !!op.remota, exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 0,
     descuento: op.descuento ?? null, descuentoAplicado: () => ((op.descuento as any)?.estado === 'aprobada' ? (op.descuento as any).monto : 0), descuentoDe, TOPE_DESCUENTO, revisarVencimientoDescuento: () => false, promoActual: () => 0, totalNeto: () => 30000, pintarDescuento() {},
-    pesos: String, dolares: String, quitarSocio() {}, sincronizar() {}, cargarCatalogo() {}, pintarImpresora() {}, promoConfig: null,
+    pesos: String, dolares: String, quitarSocio() {}, sincronizar() {}, refrescarMeta() {}, cargarCatalogo() {}, pintarImpresora() {}, promoConfig: null,
     abrirCajon: op.abrirCajon ?? (async () => true), imprimirTicket: op.imprimirTicket ?? (async () => true),
     store: async (almacen: string, _m: string, fn: any) => fn({ put(v: unknown) { if (almacen === 'ventas') guardadas.push(v); } }),
     fetch: op.fetch ?? (async () => ({ ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null, saldo_pedido: 0 }) })),

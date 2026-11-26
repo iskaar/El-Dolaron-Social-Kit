@@ -55,8 +55,31 @@
   #franja { background: #0f2750; color: #fff; display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 5px 14px; min-height: 34px; }
   /* Sin promo ni barra de meta a la vista no ocupa lugar; reaparece sola cuando alguno de sus hijos se muestra. */
   #franja:not(:has(> :not([hidden]))) { display: none; }
-  #franja-meta { flex: 1; min-width: 0; }
+  #franja { position: relative; }
+  #franja-meta { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
   #franja-meta[hidden] { display: none; }
+  /* Barra de la meta semanal de la tienda (#940): solo porcentajes. Sin red conserva el último dato, atenuado. Su alto (24 px + 2 × 5 px) cabe en los 34 px que ya ocupa la franja. */
+  #franja-meta.viejo { opacity: .55; }
+  #meta-nombre { font-size: 13px; font-weight: 700; white-space: nowrap; }
+  #meta-barra { flex: 1 1 120px; min-width: 60px; height: 12px; background: #ffffff26; border-radius: 999px; position: relative; }
+  #meta-relleno { display: block; height: 100%; width: 0; background: #FFD447; border-radius: 999px; }
+  #meta-marca { position: absolute; top: -2px; bottom: -2px; left: 0; width: 2px; background: #fff; opacity: .85; }
+  #meta-marca[hidden] { display: none; }
+  #meta-pct { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #meta-ritmo { font-size: 13px; color: #9be3bb; white-space: nowrap; }
+  #meta-ritmo.atras { color: #ffd9a0; }
+  #meta-ritmo.aviso { color: #FFD447; font-weight: 700; }
+  #abrir-meta { flex: none; width: 24px; height: 24px; padding: 0; border-radius: 50%; border: 1px solid #ffffff88; background: transparent; color: #fff; font-weight: 700; font-size: 14px; line-height: 1; cursor: pointer; }
+  #abrir-meta:hover { background: #ffffff22; }
+  #panel-meta { left: 14px; right: auto; width: min(390px, calc(100% - 28px)); }
+  .meta-fila { display: grid; grid-template-columns: 1fr 80px 64px; gap: 10px; align-items: center; padding: 8px 10px; font-size: 14px; }
+  .meta-fila .m { height: 8px; background: var(--fondo, #eef1f6); border-radius: 999px; overflow: hidden; }
+  .meta-fila .m i { display: block; height: 100%; background: var(--azul); }
+  .meta-fila.lograda .m i { background: #1f7a4d; }
+  .meta-fila b { text-align: right; font-variant-numeric: tabular-nums; }
+  .meta-fila.lograda b { color: #1f7a4d; }
+  #panel-meta p { margin: 4px 10px 8px; font-size: 12px; color: #5b6478; }
+  @media (max-width: 700px) { #meta-nombre, #meta-ritmo { display: none; } }
   #promo-cupo, #buenfin { font-size: 14px; font-weight: 700; padding: 3px 12px; border-radius: 999px; white-space: nowrap; }
   #promo-cupo { background: #FFD447; color: #1a1f2b; }
   #promo-cupo.agotada { background: var(--rojo); color: #fff; }
@@ -299,11 +322,18 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
   </div>
 </header>
 
-<!-- Franja siempre a la vista. A la izquierda queda el lugar de la barra de la meta semanal de la tienda (otro Issue, depende de #930): oculto mientras no haya dato. -->
+<!-- Franja siempre a la vista. A la izquierda, la barra de la meta semanal de la tienda (#940, GET /api/caja/meta): oculta mientras no haya dato o la tienda no tenga metas. Solo porcentajes. -->
 <div id="franja">
-  <div id="franja-meta" hidden></div>
+  <div id="franja-meta" hidden>
+    <span id="meta-nombre"></span>
+    <div id="meta-barra" role="img"><i id="meta-relleno"></i><u id="meta-marca" hidden></u></div>
+    <span id="meta-pct"></span>
+    <span id="meta-ritmo" role="status"></span>
+    <button id="abrir-meta" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="panel-meta" aria-label="Ver las metas de la semana" title="Ver las metas de la semana">?</button>
+  </div>
   <span id="promo-cupo" role="status" hidden></span>
   <span id="buenfin" role="status" hidden></span>
+  <div class="flota" id="panel-meta" hidden></div>
 </div>
 
 <main>
@@ -862,7 +892,7 @@ async function contarAvisos() {
 
 // Ninguno de los dos paneles toma el foco al abrir ni al cerrar: el Enter del lector sigue cayendo en #codigo (#260, #817). Cerrar (Esc, otro clic
 // o el mismo botón) devuelve el foco a #codigo. No hay animación que reducir.
-const PANELES = [['abrir-mas', 'panel-mas'], ['abrir-avisos', 'panel-avisos']];
+const PANELES = [['abrir-mas', 'panel-mas'], ['abrir-avisos', 'panel-avisos'], ['abrir-meta', 'panel-meta']];   // #940: el «?» de la barra de la meta es el tercero
 /** Cierra los paneles abiertos (menos `salvo`). true si había alguno. */
 function cerrarPaneles({ enfocar = true, salvo = '' } = {}) {
   let habia = false;
@@ -2407,6 +2437,7 @@ async function cobrar(forma) {
     $('efectivo').value = '';
     limpiarDatosTransferencia();
     sincronizar();
+    refrescarMeta();   // #940: la venta ya terminó; el servidor ya la cuenta. No espera nada y nunca falla (bloque «meta semanal»)
   } finally {
     cobrando = false;
     // Si el folio quedó en duda se guarda qué botón y cuánto efectivo (y la clave) llevaba; una respuesta del servidor, o cobrar, lo suelta.
@@ -3806,6 +3837,112 @@ $('conectar-impresora').addEventListener('click', async () => {
   pintarImpresora();
   if (motivo) { $('impresora-estado').textContent = motivo; pintarAvisos({ impresora: 'rojo' }); }   // despues de pintar: pintar lo pisaba
 });
+
+/* ---------- Meta semanal de la tienda en la franja (#940) ---------- */
+// Un bloque aparte (antes de los `await` del arranque: una impresora o un catálogo lentos no lo retrasan): lo único que toca el resto de la caja es una llamada, `refrescarMeta()`, al terminar un cobro. Solo porcentajes: el servidor
+// (GET /api/caja/meta, #935) no manda pesos y aquí no se pide ni se muestra ninguno. El «?» es el tercer panel de PANELES (Esc, escaneo y foco ya resueltos).
+const META = { datos: null, viejo: false, enVuelo: false, repetir: false, vistas: null, avisoHasta: 0, avisoTexto: '', temporizadorAviso: 0 };
+const META_CADA_MS = 180000;       // cada 3 minutos; un solo temporizador
+const META_ESPERA_MS = 8000;       // una petición lenta se corta sola: nunca queda colgada
+const META_AVISO_MS = 10000;
+// retos.js (sin dependencias, también lo usa /retos) se baja aparte con import(): si no llega, la barra no aparece y la caja sigue igual (un import estático
+// que fallara dejaría toda la caja muerta). Está en la copia sin red del service worker.
+let RETOS = null;
+import('/retos.js').then((m) => { RETOS = m; refrescarMeta(); }, () => {});
+const pctMeta = (n) => Math.max(0, Math.min(100, Math.floor(n)));
+
+/** Lo que llega solo sirve si trae el formato esperado (un portal cautivo o Access contestan otra cosa): si no, cuenta como error y se conserva el último dato. */
+function metaValida(d) {
+  return !!d && typeof d === 'object' && Array.isArray(d.metas) && Number.isFinite(d.dia)
+    && d.metas.every((m) => m && Number.isInteger(m.n) && Number.isFinite(m.pct) && typeof m.lograda === 'boolean');
+}
+
+/** La lista del «?»: las metas con su porcentaje; las logradas, marcadas. */
+function htmlPanelMetas(panel) {
+  return '<h3>Metas de la semana</h3>' + panel.lista.map((m) => `
+    <div class="meta-fila${m.lograda ? ' lograda' : ''}"><span>${m.lograda ? '✓ ' : ''}${escapar(m.etiqueta)}</span>
+      <span class="m" aria-hidden="true"><i style="width:${m.lograda ? 100 : pctMeta(m.pct)}%"></i></span><b>${m.lograda ? 'Lograda' : `${pctMeta(m.pct)} %`}</b></div>`).join('')
+    + '<p>Es el avance de toda la tienda esta semana, no el de una persona.</p>';
+}
+
+function pintarMeta() {
+  const d = META.datos;
+  const panel = RETOS.panelMetas(d?.metas);
+  $('franja-meta').hidden = !d || panel.vacio;   // sin dato o sin metas: oculta (y la franja se esconde si tampoco hay promo)
+  if ($('franja-meta').hidden) {
+    $('panel-meta').hidden = true;   // solo el suyo: «Avisos» o «Más» abiertos no se tocan
+    $('abrir-meta').setAttribute('aria-expanded', 'false');
+    return;
+  }
+  const completa = panel.completa;
+  const pct = completa ? 100 : pctMeta(panel.actual.pct);
+  const nombre = completa ? 'Todas las metas' : panel.actual.etiqueta;
+  const marca = RETOS.ritmoPct(d.dia);
+  $('franja-meta').classList.toggle('viejo', META.viejo);
+  $('franja-meta').title = META.viejo ? 'Sin conexión: se muestra el último dato.' : '';
+  $('meta-nombre').textContent = nombre;
+  $('meta-relleno').style.width = `${pct}%`;
+  $('meta-marca').hidden = completa;
+  $('meta-marca').style.left = `${marca}%`;
+  $('meta-barra').setAttribute('aria-label', completa
+    ? 'La tienda logró todas las metas de la semana.'
+    : `La tienda lleva ${pct} por ciento de la meta «${nombre}». El ritmo esperado hoy es ${marca} por ciento.`);
+  $('meta-pct').textContent = `${pct} %`;
+  const aviso = Date.now() < META.avisoHasta;
+  const delante = RETOS.porDelante(d.metas, d.dia);
+  $('meta-ritmo').textContent = aviso ? META.avisoTexto : completa ? '★ ¡Todas las metas logradas!' : delante ? '▲ Por delante del ritmo' : '▼ Por detrás del ritmo';
+  $('meta-ritmo').classList.toggle('aviso', aviso || completa);
+  $('meta-ritmo').classList.toggle('atras', !aviso && !completa && !delante);
+  $('panel-meta').innerHTML = htmlPanelMetas(panel);
+}
+
+/** Dato nuevo y bueno. Una meta lograda desde la última vez avisa un momento en la franja; la primera lectura solo fija el punto de partida. */
+function recibirMeta(d) {
+  const logradas = RETOS.panelMetas(d.metas).logradas;
+  if (META.vistas !== null && logradas > META.vistas) {
+    const nuevas = RETOS.metasNuevas(d.metas, META.vistas);
+    META.avisoTexto = `¡Lograda: ${nuevas[nuevas.length - 1].etiqueta}!`;
+    META.avisoHasta = Date.now() + META_AVISO_MS;
+    clearTimeout(META.temporizadorAviso);
+    META.temporizadorAviso = setTimeout(pintarMeta, META_AVISO_MS + 50);   // solo apaga el aviso: no consulta nada
+  }
+  META.vistas = logradas;   // si baja (semana nueva) vuelve a contar desde ahí
+  META.datos = d;
+  META.viejo = false;
+  pintarMeta();
+}
+
+/** Una consulta. Nunca lanza: con error o sin red se queda el último dato, atenuado (y, si nunca hubo, la franja sigue oculta). */
+async function traerMeta() {
+  try {
+    const r = await fetch('/api/caja/meta', { signal: AbortSignal.timeout(META_ESPERA_MS) });
+    const d = r.ok ? await r.json() : null;
+    if (!metaValida(d)) throw new Error('meta');
+    recibirMeta(d);
+  } catch {
+    META.viejo = true;
+    try { pintarMeta(); } catch { /* la franja no puede estorbar */ }
+  }
+}
+
+/**
+ * Pide la meta sin esperar a nadie: no devuelve nada que esperar y no lanza. Si ya hay una petición en camino no se apila otra: pide UNA repetición
+ * al terminar (la que iba pudo salir antes del cobro). Con la pestaña oculta no consulta; al volver a verse sí.
+ */
+function refrescarMeta() {
+  try {
+    if (META.enVuelo) { META.repetir = true; return; }
+    if (document.hidden || !RETOS) return;
+    META.enVuelo = true;
+    META.repetir = false;
+    traerMeta().catch(() => {}).finally(() => { META.enVuelo = false; if (META.repetir) refrescarMeta(); });
+  } catch { META.enVuelo = false; }
+}
+setInterval(refrescarMeta, META_CADA_MS);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refrescarMeta(); });
+addEventListener('online', refrescarMeta);
+refrescarMeta();   // al abrir la caja
+/* ---------- fin de la meta semanal (#940) ---------- */
 
 pintarRed();
 await cargarCatalogo();

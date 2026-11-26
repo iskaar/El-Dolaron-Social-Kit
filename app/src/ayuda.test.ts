@@ -219,7 +219,7 @@ test('sin red: la guía va en el service worker de la caja', () => {
   assert.ok(rutas.includes('/ayuda.js') && rutas.includes('/ayuda-contenido.js'));
   // Cada módulo que importa la guía también tiene copia.
   for (const [, modulo] of leer('public/ayuda.js').matchAll(/from '(\.?\/[^']+\.js)'/g)) assert.ok(rutas.includes(modulo.replace(/^\./, '')), `${modulo} falta en RUTAS`);
-  assert.match(sw, /const CACHE = 'caja-v3'/);
+  assert.match(sw, /const CACHE = 'caja-v4'/);
 });
 
 const cuenta = (...roles: Rol[]) => ({ correo: 'x@prueba.mx', nombre: '', caja: '', activo: true, editar_inventario: false, roles });

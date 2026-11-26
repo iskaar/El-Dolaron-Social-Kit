@@ -186,7 +186,7 @@ test('#931 el escaneo vive junto a su aviso: #aviso conserva su nodo y su lugar 
     'cobrar-sin-dinero', 'socio', 'dolarones', 'pedido-cargado', 'datos-transferencia', 'rechazadas', 'impresiones-aviso', 'abrir-impresion-fallida', 'promo-cupo', 'buenfin', 'franja-meta',
     'corte', 'pendientes', 'reloj', 'catalogo-info', 'impresora-estado', 'conectar-impresora', 'impresiones-destino', 'aviso-remoto'];
   for (const id of ids) assert.equal(fuente.split(`id="${id}"`).length - 1, 1, `#${id} está una vez`);
-  assert.match(fuente, /<div id="franja-meta" hidden><\/div>/, 'el lugar de la meta queda oculto y vacío');
+  assert.match(fuente, /<div id="franja-meta" hidden>\s*<span id="meta-nombre"><\/span>/, 'la barra de la meta (#940) vive en su lugar, oculta hasta que llega el dato');
 });
 
 test('#931 cobro: efectivo, rápidos, cambio y los botones de cobro están juntos fuera de la parte que se desplaza; socio, Dolarones, pedido y transferencia, dentro', () => {
@@ -269,7 +269,7 @@ test('#931 «Avisos» dice con palabras «venta rechazada» y se pone rojo mient
 
 test('#931 franja: sin promo ni barra de meta a la vista no ocupa lugar; con cualquiera reaparece (regla CSS sobre sus hijos)', () => {
   assert.match(fuente, /#franja:not\(:has\(> :not\(\[hidden\]\)\)\) \{ display: none; \}/);
-  assert.match(fuente, /<div id="franja">\s*<div id="franja-meta" hidden><\/div>\s*<span id="promo-cupo" role="status" hidden><\/span>\s*<span id="buenfin" role="status" hidden><\/span>/);
+  assert.match(fuente, /<div id="franja">\s*<div id="franja-meta" hidden>[\s\S]*?<\/div>\s*<span id="promo-cupo" role="status" hidden><\/span>\s*<span id="buenfin" role="status" hidden><\/span>/);
 });
 
 test('#931 lo que una acción revela se acerca a la vista dentro de la parte que se desplaza, sin tocar el foco', () => {
