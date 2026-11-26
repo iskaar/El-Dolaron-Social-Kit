@@ -67,6 +67,7 @@ test('#499: filtra por categoría, talla y rango de precio en pesos; disponibili
     assert.deepEqual(nombres(await buscar('categoria=ropa&talla=m')), ['Blusa M', 'Blusa cara M']);
     assert.deepEqual(nombres(await buscar('talla=Ni%C3%B1o%206%20a%C3%B1os')), ['Playera niño']);
     assert.deepEqual(nombres(await buscar('categoria=ropa&talla=M&max=200')), ['Blusa M']);
+    // #934: las bandas de precio («Ropa $300») no salen; antes tapaban las piezas de verdad.
     assert.deepEqual(nombres(await buscar('min=300&max=500')), ['Bin de camisas', 'Licuadora', 'Pantalón de mezclilla']);
     const ropa = await buscar('categoria=ropa');
     const de = (n: string) => ropa.find((p) => p.nombre === n)!.disponibilidad;

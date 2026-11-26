@@ -4,9 +4,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { PUERTA } from './prueba-caja.ts';
 import {
-  agregar, leerMultiplicador, avisoExistencia, avisoDondeHay, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE,
-  debePreguntarSocio, descuentoDe, TOPE_DESCUENTO, puedeVenderEnMano, MOTIVOS_EN_MANO, SIN_RED_EN_MANO, moverSugerencia, esBusquedaPorTexto, cobroEnDuda,
+  agregarYMarcar, ordenEnPantalla, leerMultiplicador, avisoExistencia, avisoDondeHay, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE,
+  debePreguntarSocio, descuentoDe, TOPE_DESCUENTO, puedeVenderEnMano, MOTIVOS_EN_MANO, SIN_RED_EN_MANO, moverSugerencia, esBusquedaPorTexto,
 } from '../public/venta.js';
 import { codigoDeDigitos } from '../public/code128.js';
 
@@ -55,7 +56,7 @@ function montar(piezas: any[], { enLinea = true } = {}) {
   const pintados: number[] = [];
   const red = { onLine: enLinea };
   const contexto: Record<string, unknown> = {
-    $, catalogo, agregar, leerMultiplicador, codigoDeDigitos, avisoExistencia, avisoDondeHay, fetch: () => new Promise(() => {}), puedeVenderEnMano, MOTIVOS_EN_MANO, SIN_RED_EN_MANO, Map, Date, Math, cobroEnDuda,
+    $, cerrarPaneles() {}, catalogo, agregarYMarcar, leerMultiplicador, codigoDeDigitos, avisoExistencia, avisoDondeHay, fetch: () => new Promise(() => {}), puedeVenderEnMano, MOTIVOS_EN_MANO, SIN_RED_EN_MANO, Map, Date, Math, ...PUERTA,
     precioHoy: (p: any) => p.precio, navigator: red, cargarPedido() {}, buscarSocio() {}, cargarCatalogo: async () => {},
     pintar: () => pintados.push(1), sonar() {}, TONO_RECHAZO: {}, escapar: String, pesos: String, moverSugerencia, esBusquedaPorTexto, TONO_PIEZA: {}, document: { createElement: () => elemento() },
   };
@@ -189,7 +190,7 @@ test('el renglón del ticket lleva la insignia, y pintar() quita la oferta al em
 
 /* ---------- con el folio en duda el ticket no se toca ---------- */
 
-const AVISO_DUDA = 'Primero termina el cobro pendiente: toca otra vez el mismo botón.';
+const AVISO_DUDA = 'Primero termina el cobro pendiente: toca otra vez el botón «Tarjeta».';   // el nombre del botón del cobro dudoso (#933)
 
 test('folio en duda (#830): escanear, agregar «en la mano» y el motivo no cambian el ticket ni el folio; sin duda todo sigue igual', () => {
   for (const marcado of [true, false]) {
@@ -236,7 +237,7 @@ test('folio en duda: ✕ (renglón y descuento), quitar descuento, quitar socio 
     ${entre("$('quitar-descuento').addEventListener('click'", "$('pedir-descuento').addEventListener")}
     ${entre("$('quitar-socio').addEventListener('click'", '\n\n')}
     ${entre('function quitarPedido()', "$('quitar-pedido')")}
-    ({ quitarPedido, estado: () => ({ idVenta, pedidoCargado, descuento, lineas }), sinDuda: () => { cobroIncierto = null; } })`, { $, L: lineas, cobroEnDuda });
+    ({ quitarPedido, estado: () => ({ idVenta, pedidoCargado, descuento, lineas }), sinDuda: () => { cobroIncierto = null; } })`, { $, L: lineas, ...PUERTA });
   const toque = (el: any, e: any = {}) => el.oyentes.click({ shiftKey: false, ...e });
   const intentos = () => {
     toque(ticket, { target: { dataset: { quitar: '0' } } });
@@ -245,7 +246,7 @@ test('folio en duda: ✕ (renglón y descuento), quitar descuento, quitar socio 
     rutinas.quitarPedido();
   };
   intentos();
-  assert.equal(aviso.textContent, AVISO_DUDA);
+  assert.equal(aviso.textContent, 'Primero termina el cobro pendiente: toca otra vez el mismo botón.');   // sin botón conocido, el genérico
   assert.deepEqual(JSON.parse(JSON.stringify(rutinas.estado())), { idVenta: 'folio-1', pedidoCargado: { id: 'p' }, descuento: { x: 1 }, lineas: [{ codigo: 'ED-000001', cantidad: 1 }] });
   // Sin duda (la caja de siempre): quitar sí reinicia el folio.
   rutinas.sinDuda();

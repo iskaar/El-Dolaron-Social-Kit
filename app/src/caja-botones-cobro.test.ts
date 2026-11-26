@@ -6,9 +6,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { PUERTA } from './prueba-caja.ts';
 import {
   totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio,
-  descuentoDe, TOPE_DESCUENTO, huellaTicket, TICKET_VIGENTE_MS, maximoCanje, montosRapidos, montoTransferidoRazonable, MINIMO_REGALO, SIN_RED_EN_MANO, cobroEnDuda, fotoDeVenta, ventaRecuperada,
+  descuentoDe, TOPE_DESCUENTO, huellaTicket, promoInauguracion, TICKET_VIGENTE_MS, maximoCanje, montosRapidos, montoTransferidoRazonable, MINIMO_REGALO, SIN_RED_EN_MANO, ordenEnPantalla, 
 } from '../public/venta.js';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
@@ -77,11 +78,15 @@ interface Opciones {
   recargar?: boolean;                           // arranca como una caja recién abierta: el ticket sale del almacén
   enMano?: boolean;                             // #832: el renglón lleva «La tengo en la mano»
   enLinea?: boolean;                            // navigator.onLine (por omisión, sí)
+  lineas?: any[];                               // #931: el ticket de la prueba, en el orden de captura
   vales?: unknown[];                            // #933: vales ya cargados en el ticket (con `socio` de vale)
   codigo?: string;                              // #933: código de socio o de vale con el que se cobra
   sinPromo?: boolean;                           // #933: «Ya usó la promo» tocado
   dolaronesReal?: boolean;                      // #933: `dolaronesPedidos` real (lee el campo de Dolarones) en vez del número fijo
   socio?: Record<string, unknown> | null;       // #933: socio ya ligado al ticket (si no, el de `dolarones`)
+  caja?: string;                                // #933: la caja que muestra el selector (cambia entre el intento y el reintento)
+  promoRestantes?: number;                      // #933: cupo de la promo al armar (por omisión 5)
+  promo?: boolean;                              // #933: promoActual/totalNeto REALES, con una promo vigente que se puede apagar a mitad de la duda
 }
 
 const respuestaOk = async () => ({ ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null, saldo_pedido: 0 }) });
@@ -94,6 +99,9 @@ function armar(op: Opciones = {}) {
   const guardadas: unknown[] = [];
   const preguntas: number[] = [];
   const cajones: number[] = [];
+  const impresos: any[][] = [];                // lo que se manda a imprimir: (venta, lineas)
+  const crudas: string[] = [];                 // el cuerpo de cada petición, tal cual salió (#933: el reintento debe ser idéntico byte a byte)
+  const vivo = { caja: op.sinCaja ? '' : op.caja ?? 'Caja 1', remota: !!op.remota };   // lo que la pantalla dice AHORA y puede cambiar entre intentos
   const almacen = op.almacen ?? {};
   const $ = (id: string) => p.el(id);
   $('efectivo').value = op.efectivo ?? '300';
@@ -106,25 +114,31 @@ function armar(op: Opciones = {}) {
     ? { id: 's1', numero: 7, disponible: 500000, regalo_disponible: 0, maximo: 500000, expira_en: '2099-01-01T00:00:00Z', vale: false } : null;
   let n = 0;
   const contexto: Record<string, any> = {
-    crypto, Date, JSON, $, AbortSignal, Object, Math, Number, String, vistos: [] as unknown[], totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados,
+    crypto, Date, JSON, ordenEnPantalla, $, AbortSignal, Object, Math, Number, String, vistos: [] as unknown[], totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados,
     anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, descuentoDe, TOPE_DESCUENTO, maximoCanje, montosRapidos, montoTransferidoRazonable,
-    MINIMO_REGALO, cobroEnDuda, fotoDeVenta, ventaRecuperada, navigator: { onLine: op.enLinea ?? true }, window: { open() {} }, ocultarEnMano() {}, SIN_RED_EN_MANO,
+    MINIMO_REGALO, ...PUERTA, addEventListener() {}, location: { reload() {} }, navigator: { onLine: op.enLinea ?? true }, window: { open() {} }, ocultarEnMano() {}, SIN_RED_EN_MANO,
     localStorage: { getItem: (k: string) => almacen[k] ?? null, setItem: (k: string, v: string) => { almacen[k] = v; } },
     document: { querySelectorAll: (s: string) => (s === '#botones-cobro button' ? BOTONES.map($) : []), createElement: () => ({ style: {}, textContent: '' }) },
-    lineas: op.recargar ? [] : [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: op.precio ?? 30000, cantidad: 1, ...(op.enMano ? { en_mano: { motivo: 'no_se', esperado: 0 } } : {}) }],
+    lineas: op.recargar ? [] : op.lineas ?? [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: op.precio ?? 30000, cantidad: 1, ...(op.enMano ? { en_mano: { motivo: 'no_se', esperado: 0 } } : {}) }],
     errorImpresora: () => 'no conectada', socio, valesCargados: op.vales ?? [], catalogo: new Map(), pedidoCargado: op.recargar ? null : op.pedido ?? null,
     descuento: op.descuento ? { huella: huellaTicket([{ producto_id: 'p1', cantidad: 1 }], op.precio ?? 30000), ...op.descuento } : null,
     huellaTicket, TICKET_VIGENTE_MS, quitarDescuentoEnServidor() {}, descuentoCerrado: () => false, revisarVencimientoDescuento: () => false,
     preguntarSocio: async () => { preguntas.push(1); return op.respuestaSocio ?? 'cobrar'; }, abrirAlta() {},
-    impresionRemota: () => !!op.remota, cajaActual: () => (op.sinCaja ? '' : 'Caja 1'), ...(op.dolaronesReal ? {} : { dolaronesPedidos: () => op.dolarones ?? 0 }),
+    impresionRemota: () => vivo.remota, cajaActual: () => vivo.caja, ...(op.dolaronesReal ? {} : { dolaronesPedidos: () => op.dolarones ?? 0 }),
     descuentoAplicado: () => 0, promoActual: () => 0, totalNeto: () => op.precio ?? 30000, pintarDescuento() {}, promoAgotada() {},
     pintarPromoCupo() {}, revisarCancelarArmado() {}, pintarImpresionRemota() {}, escapar: String, pesos: String, dolares: String,
     quitarSocio() {}, sincronizar() {}, cargarCatalogo() {}, pintarImpresora() {}, promoConfig: null,
-    abrirCajon: async () => { cajones.push(1); return true; }, imprimirTicket: async () => true,
+    abrirCajon: async () => { cajones.push(1); return true; }, imprimirTicket: async (...args: any[]) => { impresos.push(args); return true; },
     store: async (almacenIdb: string, _m: string, fn: any) => fn({ put(v: unknown) { if (almacenIdb === 'ventas') guardadas.push(v); } }),
-    fetch: async (_ruta: string, o: any) => { enviadas.push(JSON.parse(o.body)); n++; return (op.fetch ?? respuestaOk)(n); },
+    fetch: async (_ruta: string, o: any) => { crudas.push(o.body); enviadas.push(JSON.parse(o.body)); n++; return (op.fetch ?? respuestaOk)(n); },
   };
   const avisoRojo = fuente.slice(fuente.indexOf('const avisoRojo ='), fuente.indexOf('\n', fuente.indexOf('const avisoRojo =')));
+  if (op.promo) {
+    for (const k of ['promoActual', 'totalNeto']) delete contexto[k];
+    contexto.promoInauguracion = promoInauguracion;
+    contexto.promoConfig = { desde: '2020-01-01T00:00:00Z', hasta: '2099-01-01T00:00:00Z', restantes: op.promoRestantes ?? 5 };
+  }
+  const promoReal = op.promo ? entre('const promoActual =', 'function pintarDescuento(') : '';
   const falla = entre('function textoFalla(', '/**\n * Escribir o escanear P-17');
   const conDolarones = entre('async function cobrarConDolarones(', '/* ---------- pedidos por WhatsApp');
   const conPedido = entre('async function cobrarConPedido(', '/* ---------- cobro: primero');
@@ -137,12 +151,13 @@ function armar(op: Opciones = {}) {
   const rutinas = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, folioIncierto = null, cobroIncierto = null,
       usarTodos = false, sinPromo = ${!!op.sinPromo}, codigoSocio = ${JSON.stringify(op.codigo ?? (op.dolarones ? 'DC-x' : ''))};
     ${op.dolaronesReal ? entre('function dolaronesPedidos()', '/* ---------- descuentos con') : ''}
+    ${promoReal}
     ${pintar}\n${guardado}\n${avisoRojo}\n${falla}\n${conDolarones}\n${conPedido}\n${errorClave}\n${exigirCaja}\n${cobro}\n${cableado}
     ({ pintar, estado: () => ({ idVenta, folioIncierto, cobroIncierto }), venta: () => JSON.parse(JSON.stringify({ socio, codigoSocio, valesCargados, sinPromo, usarTodos })) })`, contexto);
   rutinas.pintar();                                          // como al abrir la caja
 
   return {
-    p, $, enviadas, guardadas, cajones, almacen, contexto, rutinas, preguntas,
+    p, $, enviadas, crudas, vivo, guardadas, cajones, almacen, contexto, rutinas, preguntas, impresos,
     venta: () => rutinas.venta() as { socio: any; codigoSocio: string; valesCargados: any[]; sinPromo: boolean; usarTodos: boolean },
     estado: () => rutinas.estado() as { idVenta: string | null; folioIncierto: string | null; cobroIncierto: any },
     habilitados: () => BOTONES.filter((id) => !$(id).disabled),
@@ -638,22 +653,139 @@ test('#832 en la mano: la marca viaja en su línea (motivo y existencia que vio 
   assert.deepEqual(Object.keys(normal.enviadas[0].lineas[0]), ['codigo', 'nombre', 'precio', 'cantidad', 'producto_id']);
 });
 
-/* ---------- #933: recargar con el cobro en duda conserva lo que define la venta; el reintento sale idéntico ---------- */
+/* ---------- #931: lo último escaneado arriba, solo en pantalla ---------- */
+
+// Orden de captura A, B, C. B se escaneó otra vez al final (sumó una pieza): en pantalla va primero, en los datos sigue en su lugar.
+const TICKET_931 = [
+  { producto_id: 'pa', codigo: 'ED-A', nombre: 'Pieza A', precio: 10000, cantidad: 1, tocada: 1000 },
+  { producto_id: 'pb', codigo: 'ED-B', nombre: 'Pieza B', precio: 20000, cantidad: 2, tocada: 3000 },
+  { producto_id: 'pc', codigo: 'ED-C', nombre: 'Pieza C', precio: 30000, cantidad: 1, tocada: 2000 },
+];
+const codigosEnPantalla = (html: string) => [...html.matchAll(/class="codigo">(ED-[A-C])/g)].map((m) => m[1]);
+
+test('#931 pantalla: el ticket dibuja lo último escaneado arriba (incluida una pieza repetida que ya estaba) y el ✕ quita la línea real, no la de pantalla', async () => {
+  const c = armar({ lineas: structuredClone(TICKET_931).map((l) => ({ ...l, tocada: l.tocada + Date.now() })) });
+  assert.deepEqual(codigosEnPantalla(c.$('ticket').innerHTML), ['ED-B', 'ED-C', 'ED-A']);
+  // Cada ✕ lleva el índice REAL en `lineas` (B es la 1, aunque salga primero).
+  assert.deepEqual([...c.$('ticket').innerHTML.matchAll(/data-quitar="(\d+)"/g)].map((m) => m[1]), ['1', '2', '0']);
+  assert.deepEqual(c.contexto.lineas.map((l: any) => l.codigo), ['ED-A', 'ED-B', 'ED-C'], 'pintar() no reordena los datos');
+  // Sin sello (ticket de antes de este cambio o de un pedido) cae al más nuevo primero por posición.
+  const viejo = armar({ lineas: TICKET_931.map(({ tocada, ...l }) => l) });
+  assert.deepEqual(codigosEnPantalla(viejo.$('ticket').innerHTML), ['ED-C', 'ED-B', 'ED-A']);
+});
+
+test('#931 pantalla: solo el renglón recién tocado se resalta (y sigue donde lo dejó la animación); uno viejo no', () => {
+  const ahora = Date.now();
+  const c = armar({ lineas: [{ ...TICKET_931[0], tocada: ahora - 60_000 }, { ...TICKET_931[1], tocada: ahora - 300 }] });
+  const html: string = c.$('ticket').innerHTML;
+  assert.equal((html.match(/class="renglon nuevo"/g) ?? []).length, 1);
+  assert.match(html, /class="renglon nuevo" style="animation-delay:-\d+ms"[\s\S]*ED-B/);
+  assert.ok(html.indexOf('renglon nuevo') < html.indexOf('ED-A'), 'el resaltado es el de arriba');
+  assert.equal(c.$('ticket').scrollTop, 0);
+});
+
+for (const forma of ['con red', 'sin red (se encola)']) {
+  test(`#931 lo que se envía, se encola y se imprime sale en el orden de captura y sin el dato de pantalla (${forma})`, async () => {
+    const c = armar({ lineas: structuredClone(TICKET_931), fetch: forma === 'con red' ? respuestaOk : sinRed });
+    // Antes de cobrar la pantalla dibuja B primero: si el envío usara ese orden, esta prueba lo vería.
+    assert.deepEqual(codigosEnPantalla(c.$('ticket').innerHTML), ['ED-B', 'ED-C', 'ED-A']);
+    await c.clic('cobrar-tarjeta');
+    const salida = forma === 'con red' ? c.enviadas[0].lineas : (c.guardadas[0] as any).lineas;
+    assert.deepEqual(salida.map((l: any) => l.codigo), ['ED-A', 'ED-B', 'ED-C']);
+    assert.ok(salida.every((l: any) => !('tocada' in l)), 'el sello de pantalla no viaja');
+    assert.deepEqual(c.impresos[0][1].map((l: any) => l.codigo), ['ED-A', 'ED-B', 'ED-C'], 'el ticket impreso lleva el mismo orden');
+  });
+}
+
+test('#931 pantalla: con el reloj atrasado (sello en el futuro) ningún renglón se resalta ni fija el scroll arriba', () => {
+  const futuro = Date.now() + 3_600_000;
+  const c = armar({ lineas: TICKET_931.map((l) => ({ ...l, tocada: futuro })) });
+  assert.equal((c.$('ticket').innerHTML.match(/renglon nuevo/g) ?? []).length, 0);
+  assert.equal(c.$('ticket').scrollTop, undefined);
+});
+
+/* ---------- #933: el reintento de un cobro en duda manda EXACTAMENTE lo que se mandó ---------- */
 
 const SOCIO_D = { id: 's1', numero: 7, nombre: 'Ana', disponible: 500000, regalo_disponible: 0, maximo: 500000, expira_en: '2099-01-01T00:00:00Z', vale: false };
 const SOCIO_VALE = { vale: true, disponible: 20000, maximo: 20000, regalo_disponible: 0, expira_en: '2099-01-01T00:00:00Z' };
 const timeoutUnaVez = (n: number) => (n === 1 ? Promise.reject(new DOMException('timeout', 'TimeoutError')) : respuestaOk());
 
-/** La caja se cierra y se vuelve a abrir con el mismo almacén: el campo de efectivo y el de Dolarones están vacíos, el socio no está. */
+/** La caja se cierra y se vuelve a abrir con el mismo almacén: efectivo y Dolarones vacíos, sin socio, y lo «vivo» (caja, quién atendió, impresión, promo) puede ser otro. */
 const recargada = (antes: ReturnType<typeof armar>, op: Opciones = {}) =>
   armar({ almacen: antes.almacen, recargar: true, efectivo: '', socio: null, dolaronesReal: true, fetch: respuestaOk, ...op });
+
+/** Lo que cambia entre el primer intento y el reintento sin que el cajero toque el ticket: se apaga la promo, se cae /api/yo, cambia el turno o la impresora. */
+const cambiarLoVivo = (c: ReturnType<typeof armar>) => {
+  c.vivo.caja = 'Caja 3';
+  c.vivo.remota = true;
+  c.$('vendedora').value = '';
+  c.contexto.promoConfig = { ...c.contexto.promoConfig, restantes: 0 };
+};
+const VIVO_ANTES = { promo: true, dolaronesReal: true, caja: 'Caja 1', valores: { vendedora: 'turno@prueba.mx' } };
+const VIVO_DESPUES = { promo: true, promoRestantes: 0, caja: 'Caja 3', remota: true, valores: { vendedora: '' } };
+
+test('#933 sin recargar: aunque cambien la caja, quién atendió, la impresora y la promo, el reintento sale idéntico byte a byte y el botón sigue ahí', async () => {
+  const c = armar({ ...VIVO_ANTES, socio: SOCIO_D, codigo: 'DC-x', valores: { ...VIVO_ANTES.valores, dolarones: '100' }, efectivo: '100', fetch: timeoutUnaVez });
+  await c.clic('cobrar-efectivo');
+  assert.equal(c.enviadas[0].promo, 10000, 'el primer intento llevaba la promo');
+  assert.equal(c.enviadas[0].caja, 'Caja 1');
+  assert.equal(c.enviadas[0].vendedora, 'turno@prueba.mx');
+  const total = c.$('total').textContent;
+  cambiarLoVivo(c);
+  c.rutinas.pintar();                                          // el refresco de cada minuto
+  assert.equal(c.$('total').textContent, total, 'con el cobro en duda los totales son los del primer intento');
+  assert.deepEqual(c.habilitados(), ['cobrar-efectivo']);
+  await c.clic('cobrar-efectivo');
+  assert.equal(c.crudas.length, 2);
+  assert.equal(c.crudas[1], c.crudas[0], 'mismo cuerpo, byte a byte');
+  assert.match(c.$('aviso').textContent, /^Cobrado/);
+  assert.equal(c.estado().cobroIncierto, null);
+});
+
+test('#933 recargando: aunque lo vivo sea otro, el reintento sale idéntico byte a byte (Dolarones + efectivo + promo + socio)', async () => {
+  const antes = armar({ ...VIVO_ANTES, socio: SOCIO_D, codigo: 'DC-x', valores: { ...VIVO_ANTES.valores, dolarones: '100' }, efectivo: '100', fetch: timeoutUnaVez });
+  await antes.clic('cobrar-efectivo');
+  const despues = recargada(antes, VIVO_DESPUES);
+  assert.equal(despues.estado().idVenta, antes.estado().idVenta);
+  assert.deepEqual(despues.habilitados(), ['cobrar-efectivo']);
+  assert.equal(despues.$('total').textContent, antes.$('total').textContent, 'la promo apagada no mueve el total');
+  await despues.clic('cobrar-efectivo');
+  assert.deepEqual(despues.crudas, [antes.crudas[0]]);
+  assert.match(despues.$('aviso').textContent, /^Cobrado/);
+});
+
+for (const [nombre, recarga] of [['sin recargar', false], ['recargando', true]] as const) {
+  test(`#933 «Cobrar: ya está pagado» (${nombre}): la forma de pago se resolvió con la impresora del primer intento; si luego está en modo remoto el cuerpo no cambia`, async () => {
+    const antes = armar({ ...VIVO_ANTES, socio: SOCIO_D, codigo: 'DC-x', valores: { ...VIVO_ANTES.valores, dolarones: '200' }, efectivo: '', fetch: timeoutUnaVez });
+    await antes.clic('cobrar-sin-dinero');
+    assert.equal(antes.enviadas[0].forma_pago, 'efectivo');
+    assert.equal(antes.enviadas[0].imprimir_en, undefined);
+    let c = antes;
+    if (recarga) c = recargada(antes, VIVO_DESPUES); else cambiarLoVivo(antes);
+    c.rutinas.pintar();
+    assert.equal(c.$('cobrar-sin-dinero').hidden, false, 'el botón que hay que tocar sigue a la vista');
+    assert.equal(c.$('botones-dinero').hidden, true);
+    assert.deepEqual(c.habilitados(), ['cobrar-sin-dinero']);
+    await c.clic('cobrar-sin-dinero');
+    assert.equal(c.crudas.at(-1), antes.crudas[0]);
+    assert.match(c.$('aviso').textContent, /^Cobrado/);
+  });
+}
+
+test('#933 recargando con impresión remota en el primer intento: el reintento sigue yendo a esa caja aunque ya no esté el modo remoto', async () => {
+  const antes = armar({ ...VIVO_ANTES, remota: true, socio: SOCIO_D, codigo: 'DC-x', valores: { ...VIVO_ANTES.valores, dolarones: '100' }, efectivo: '', fetch: timeoutUnaVez });
+  await antes.clic('cobrar-tarjeta');
+  assert.equal(antes.enviadas[0].imprimir_en, 'Caja 2');
+  assert.equal(antes.enviadas[0].forma_pago, 'tarjeta');
+  const despues = recargada(antes, { ...VIVO_DESPUES, remota: false, caja: 'Caja 1' });
+  await despues.clic('cobrar-tarjeta');
+  assert.deepEqual(despues.crudas, [antes.crudas[0]]);
+});
 
 test('#933 recargar con el cobro en duda: Dolarones que cubren todo. El botón sigue ahí y el reintento manda el mismo socio, código y Dolarones', async () => {
   const antes = armar({ dolaronesReal: true, socio: SOCIO_D, codigo: 'DC-x', valores: { dolarones: '300' }, efectivo: '', fetch: timeoutUnaVez });
   assert.equal(antes.$('cobrar-sin-dinero').hidden, false, 'Dolarones cubren todo: un solo botón');
   await antes.clic('cobrar-sin-dinero');
-  assert.deepEqual(antes.habilitados(), ['cobrar-sin-dinero']);
-  assert.equal(antes.enviadas.length, 1);
   assert.equal(antes.enviadas[0].dolarones, 30000);
   assert.equal(antes.enviadas[0].cliente_id, 's1');
   assert.equal(antes.enviadas[0].codigo_socio, 'DC-x');
@@ -663,23 +795,9 @@ test('#933 recargar con el cobro en duda: Dolarones que cubren todo. El botón s
   assert.equal(despues.venta().codigoSocio, 'DC-x');
   assert.equal(despues.$('dolarones').value, '300');
   assert.equal(despues.$('cobrar-sin-dinero').hidden, false, 'el botón que hay que tocar existe tras recargar');
-  assert.equal(despues.$('botones-dinero').hidden, true);
   assert.deepEqual(despues.habilitados(), ['cobrar-sin-dinero']);
   await despues.clic('cobrar-sin-dinero');
-  assert.deepEqual(despues.enviadas, [antes.enviadas[0]], 'la misma venta, con el mismo folio');
-  assert.match(despues.$('aviso').textContent, /^Cobrado/);
-});
-
-test('#933 recargar con el cobro en duda: Dolarones + efectivo. El efectivo guardado es solo el resto y se compara con lo que queda por pagar', async () => {
-  const antes = armar({ dolaronesReal: true, socio: SOCIO_D, codigo: 'DC-x', valores: { dolarones: '100' }, efectivo: '200', fetch: timeoutUnaVez });
-  await antes.clic('cobrar-efectivo');
-  assert.equal(antes.enviadas[0].dolarones, 10000);
-  assert.equal(antes.enviadas[0].efectivo, 20000);
-  const despues = recargada(antes);
-  assert.deepEqual(despues.habilitados(), ['cobrar-efectivo']);
-  await despues.clic('cobrar-efectivo');
-  assert.deepEqual(despues.enviadas, [antes.enviadas[0]]);
-  assert.match(despues.$('aviso').textContent, /^Cobrado/, 'sin los Dolarones saldría «Faltan $100.00»');
+  assert.deepEqual(despues.crudas, [antes.crudas[0]], 'la misma venta, con el mismo folio');
 });
 
 test('#933 recargar con el cobro en duda: vales juntos en el ticket', async () => {
@@ -690,10 +808,10 @@ test('#933 recargar con el cobro en duda: vales juntos en el ticket', async () =
   const despues = recargada(antes);
   assert.deepEqual(despues.venta().valesCargados, vales);
   await despues.clic('cobrar-efectivo');
-  assert.deepEqual(despues.enviadas, [antes.enviadas[0]]);
+  assert.deepEqual(despues.crudas, [antes.crudas[0]]);
 });
 
-test('#933 recargar con el cobro en duda: socio con pedido y «ya usó la promo». Sin socio el reintento sería OTRA venta para el servidor', async () => {
+test('#933 recargar con el cobro en duda: socio con pedido y «ya usó la promo»', async () => {
   const antes = armar({ pedido: PEDIDO_PARCIAL, socio: SOCIO_D, sinPromo: true, efectivo: '200', dolaronesReal: true, fetch: sinRed });
   await antes.clic('cobrar-efectivo');
   assert.equal(antes.enviadas[0].cliente_id, 's1');
@@ -701,7 +819,21 @@ test('#933 recargar con el cobro en duda: socio con pedido y «ya usó la promo�
   assert.equal(despues.venta().sinPromo, true, '«Ya usó la promo» sigue tocado');
   assert.equal(despues.venta().usarTodos, false);
   await despues.clic('cobrar-efectivo');
-  assert.deepEqual(despues.enviadas, [antes.enviadas[0]], 'mismo cliente_id');
+  assert.deepEqual(despues.crudas, [antes.crudas[0]], 'mismo cliente_id');
+});
+
+test('#933 con el cobro en duda caja, «¿Quién atendió?», «Imprimir en otra caja», «Cancelar venta» y «Pedir descuento» se ven apagados; al resolverse vuelven (y el que ya estaba apagado sigue)', async () => {
+  const c = armar({ ...VIVO_ANTES, socio: SOCIO_D, codigo: 'DC-x', valores: { ...VIVO_ANTES.valores, dolarones: '100' }, efectivo: '100',
+    fetch: (n) => (n === 1 ? timeout() : rechazo('Código de socio usado, vencido o actualizado.', 403)()) });
+  c.$('caja-nombre').disabled = true;                          // la caja asignada por gerencia: apagada desde siempre
+  const apagados = () => ['caja-nombre', 'vendedora', 'imprimir-en', 'modo-remoto', 'cancelar', 'pedir-descuento'].filter((id) => c.$(id).disabled);
+  assert.deepEqual(apagados(), ['caja-nombre']);
+  await c.clic('cobrar-efectivo');
+  assert.deepEqual(apagados(), ['caja-nombre', 'vendedora', 'imprimir-en', 'modo-remoto', 'cancelar', 'pedir-descuento']);
+  await c.clic('cobrar-efectivo');                             // el servidor contesta: la duda se cierra
+  assert.equal(c.estado().cobroIncierto, null);
+  // («Imprimir en otra caja» y su casilla las vuelve a encender pintarImpresionRemota(), que aquí es un doble: ver impresiones.test.ts.)
+  assert.deepEqual(apagados().filter((id) => !['imprimir-en', 'modo-remoto'].includes(id)), ['caja-nombre'], 'solo sigue apagada la que gerencia asignó');
 });
 
 test('#933 lo guardado de la venta existe solo mientras dura la duda: sin duda, tras la respuesta del servidor y tras cobrar no queda código ni socio en el navegador', async () => {
@@ -713,13 +845,14 @@ test('#933 lo guardado de la venta existe solo mientras dura la duda: sin duda, 
   const duda = armar({ dolaronesReal: true, socio: SOCIO_D, codigo: 'DC-x', valores: { dolarones: '100' }, efectivo: '200', fetch: (n) => (n === 1 ? timeout() : rechazo('Código de socio usado, vencido o actualizado.', 403)()) });
   await duda.clic('cobrar-efectivo');
   assert.equal(guardado(duda).venta.codigoSocio, 'DC-x');
+  assert.equal(JSON.parse(duda.almacen['caja-ticket']).cobroIncierto.cuerpo.codigo_socio, 'DC-x');
   await duda.clic('cobrar-efectivo');                                   // el servidor contesta: la duda se cierra
   assert.equal(duda.estado().cobroIncierto, null);
   assert.equal(guardado(duda).venta, undefined);
   assert.doesNotMatch(duda.almacen['caja-ticket'], /DC-x/);
 });
 
-test('#933 compatibilidad: un ticket guardado por la versión anterior (con cobro en duda y sin lo nuevo, o con basura) carga como siempre y nada se borra', async () => {
+test('#933 compatibilidad: un ticket con cobro en duda guardado por la versión anterior (sin cuerpo) carga como siempre y se puede cancelar; uno con basura se ignora', async () => {
   const lineas = [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }];
   const viejo = { guardado: Date.now(), lineas, descuento: null, idVenta: 'f1', creadoEnVenta: '2026-11-25T12:00:00.000Z', pedidoCargado: null,
     cobroIncierto: { id: 'f1', boton: 'tarjeta', efectivo: 0, transf: null } };
@@ -728,7 +861,9 @@ test('#933 compatibilidad: un ticket guardado por la versión anterior (con cobr
   assert.equal(c.estado().idVenta, 'f1');
   assert.equal(c.estado().cobroIncierto.boton, 'tarjeta');
   assert.equal(c.venta().socio, null);
-  assert.deepEqual(c.habilitados(), ['cobrar-tarjeta']);
+  assert.equal(c.$('cancelar').disabled, false, 'sin cuerpo guardado no hay repetición idéntica posible: «Cancelar venta» sigue disponible');
+  assert.equal(c.$('pedir-descuento').disabled, true);
+  assert.deepEqual(c.habilitados().filter((id) => id.startsWith('cobrar-')), ['cobrar-tarjeta']);
   await c.clic('cobrar-tarjeta');
   assert.equal(c.enviadas[0].id, 'f1');
   assert.equal(c.enviadas[0].cliente_id, null);
@@ -747,6 +882,6 @@ test('#933 con el cobro en duda el reintento no pregunta «¿el cliente es socio
   assert.equal(c.preguntas.length, 1, 'la primera vez sí se pregunta (#730)');
   await c.clic('cobrar-efectivo');
   assert.equal(c.preguntas.length, 1, 'el reintento va directo');
-  assert.deepEqual(c.enviadas[1], c.enviadas[0]);
+  assert.equal(c.crudas[1], c.crudas[0]);
   assert.match(c.$('aviso').textContent, /^Cobrado/);
 });

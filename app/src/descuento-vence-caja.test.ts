@@ -4,7 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { totales, huellaTicket, cobroEnDuda } from '../public/venta.js';
+import { totales, huellaTicket } from '../public/venta.js';
+import { PUERTA } from './prueba-caja.ts';
 
 const html = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
 const entre = (desde: string, hasta: string) => {
@@ -98,7 +99,7 @@ test('#845 pintar() no suelta el descuento ni el folio mientras un cobro está e
   const correr = (cobroIncierto: unknown) => {
     const e: Record<string, any> = { descuento: { id: 'd1', estado: 'aprobada', huella: 'otra|1' }, idVenta: 'f1', cobroIncierto };
     const lineas = [{ producto_id: 'p1', cantidad: 2, precio: 25000 }];
-    const contexto: Record<string, unknown> = { totales, huellaTicket, cobroEnDuda, lineas, revisarVencimientoDescuento() {}, quitarDescuentoEnServidor() {}, pintarDescuento() {}, descuentoCerrado: () => false };
+    const contexto: Record<string, unknown> = { totales, huellaTicket, ...PUERTA, lineas, revisarVencimientoDescuento() {}, quitarDescuentoEnServidor() {}, pintarDescuento() {}, descuentoCerrado: () => false };
     for (const k of ['descuento', 'idVenta', 'cobroIncierto']) Object.defineProperty(contexto, k, { get: () => e[k], set: (v) => { e[k] = v; }, enumerable: true });
     runInNewContext(bloque, contexto);
     return e;

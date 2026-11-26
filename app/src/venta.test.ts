@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { cobroEnDuda } from '../public/venta.js';
+import { PUERTA } from './prueba-caja.ts';
 import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, BILLETES, montoTransferidoRazonable, EXCEDENTE_MAXIMO, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
@@ -215,7 +215,7 @@ const cobroPedido = (fetchSimulado: () => Promise<unknown>, forma = 'efectivo', 
     return elementos.get(id);
   };
   const contexto: Record<string, unknown> = {
-    crypto, Date, $, AbortSignal, Object, Math, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, montoTransferidoRazonable, cobroEnDuda,
+    crypto, Date, $, AbortSignal, Object, Math, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, montoTransferidoRazonable, ...PUERTA,
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
     socio: opciones.socio ?? null, valesCargados: [], catalogo: new Map(), debePreguntarSocio, navigator: { onLine: !opciones.sinRed },
     preguntarSocio: async () => { preguntasSocio.push(1); return opciones.respuestaSocio ?? 'cobrar'; }, abrirAlta: () => abiertas.push('/socios'), pedidoCargado: opciones.sinPedido ? null : { id: 'ped-1', folio: 17, saldo: 10000 },
