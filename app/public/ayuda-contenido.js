@@ -1248,6 +1248,20 @@ export const ESCENARIOS = [
     textos: ['Más opciones', ['srv-worker', 'El folio ya pertenece a otra venta'], 'Ventas de hoy (toca un ticket para ver el desglose)', 'Cancelar venta', 'Ayuda'],
   },
   {
+    id: 'caja-rechaza-tras-terminal', categoria: 'fallas', titulo: 'La terminal ya cobró y la caja rechaza la venta («Si la terminal ya cobró»)',
+    palabras: ['rechazó la venta', 'ya no está disponible', 'terminal ya cobró', 'ya transfirió', 'no vuelvas a cobrar', 'cobrar dos veces', 'rechazo'],
+    pasos: [
+      'No vuelvas a cobrar en la terminal ni pidas otra transferencia: ese dinero ya se cobró.',
+      'Lee el aviso en rojo: dice qué corregir (por ejemplo, quitar la pieza que ya no está disponible).',
+      'Corrige el ticket y toca otra vez el mismo botón de cobro («Tarjeta» o «Transferencia»), sin cobrar de nuevo.',
+      'Si el total ya no es el que se cobró, toca «Ayuda»: gerencia cobra o devuelve la diferencia.',
+    ],
+    ojo: 'Solo sale cuando el sistema contesta que no puede registrar la venta. Si dice «No se supo si se cobró», es otro caso: no cambies nada y toca otra vez el mismo botón.',
+    ver: ['terminal-cobro-no-registro', 'sistema-registro-otro-total', 'cobrar-tarjeta'],
+    pantalla: 'caja',
+    textos: ['Si la terminal ya cobró', 'Tarjeta', 'Transferencia', 'Ayuda', 'No se supo si se cobró'],
+  },
+  {
     id: 'sistema-registro-otro-total', categoria: 'fallas', titulo: 'Después de «Cobrado.» sale en rojo «El sistema registró» otro total',
     palabras: ['otro total', 'total distinto', 'no coincide el total', 'cambió el precio', 'el total cambió', 'diferencia en el ticket'],
     pasos: [
