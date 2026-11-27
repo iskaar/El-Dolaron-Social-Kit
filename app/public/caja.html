@@ -1157,24 +1157,36 @@ const TRASLAPE_MS = 2 * 60_000;   // lo que cambio mientras viajaba la consulta 
 let catalogoDesde = null;         // hora del SERVIDOR desde la que se piden cambios
 let catalogoCompleto = 0;
 
-async function cargarCatalogo() {
+// Límite de cada petición del catálogo (#946): con la red lenta de una tienda el catálogo completo tarda decenas de segundos; sin límite la descarga
+// quedaba colgada y todo lo que la esperaba también. Es calibración: se ajusta aquí.
+const CATALOGO_LIMITE_MS = 90_000;   // holgado a propósito: un límite corto en una red lenta dejaría el catálogo completo sin bajar nunca
+let catalogoEnCurso = null;       // la descarga que corre: las demás llamadas esperan esta misma (una a la vez)
+
+/** Baja el catálogo (completo o solo cambios). Nunca falla: sin red o pasado el límite sigue la copia que ya hay y lo dice en el pie. */
+function cargarCatalogo() {
+  return catalogoEnCurso ??= descargarCatalogo().finally(() => { catalogoEnCurso = null; });
+}
+async function descargarCatalogo() {
   if (!catalogo.size) {
-    const guardado = await store('catalogo', 'readonly', (s) => s.get('piezas'));
-    if (guardado) {
-      catalogo = new Map(guardado.datos.map((p) => [p.codigo, p]));
-      $('catalogo-info').textContent = `${catalogo.size} códigos en memoria`;
-    }
+    // La copia local primero: sirve para cobrar aunque la descarga tarde o falle. Si no se puede leer, se sigue con la red.
+    try {
+      const guardado = await store('catalogo', 'readonly', (s) => s.get('piezas'));
+      if (guardado && !catalogo.size) {
+        catalogo = new Map(guardado.datos.map((p) => [p.codigo, p]));
+        $('catalogo-info').textContent = `${catalogo.size} códigos en memoria`;
+      }
+    } catch { /* sin copia local */ }
   }
   try {
     if (!catalogoDesde || Date.now() - catalogoCompleto > CATALOGO_COMPLETO_MS) {
-      const respuesta = await fetch('/api/catalogo');
+      const respuesta = await fetch('/api/catalogo', { signal: AbortSignal.timeout(CATALOGO_LIMITE_MS) });
       const piezas = await respuesta.json();
       catalogo = new Map(piezas.map((p) => [p.codigo, p]));
       const servidor = Date.parse(respuesta.headers.get('date') ?? '');
       catalogoDesde = new Date((Number.isFinite(servidor) ? servidor : Date.now()) - TRASLAPE_MS);
       catalogoCompleto = Date.now();
     } else {
-      const consulta = await fetch(`/api/catalogo?desde=${encodeURIComponent(catalogoDesde.toISOString())}`);
+      const consulta = await fetch(`/api/catalogo?desde=${encodeURIComponent(catalogoDesde.toISOString())}`, { signal: AbortSignal.timeout(CATALOGO_LIMITE_MS) });
       const { ahora, piezas } = await consulta.json();
       for (const p of piezas) {
         if (p.precio > 0 || p.estado_fisico === 'caducado') catalogo.set(p.codigo, p);
@@ -1186,8 +1198,9 @@ async function cargarCatalogo() {
     await store('catalogo', 'readwrite', (s) => s.put({ clave: 'piezas', datos, fecha: Date.now() }));
     $('catalogo-info').textContent = `${catalogo.size} códigos · actualizado`;
     pintarAvisos({ catalogo: 'ok' });
-  } catch {
-    $('catalogo-info').textContent = `${catalogo.size} códigos · sin actualizar`;   // asignado completo: con `+=` se repetía cada minuto sin red
+  } catch (e) {
+    // asignado completo: con `+=` se repetía cada minuto sin red
+    $('catalogo-info').textContent = `${catalogo.size} códigos · sin actualizar${e?.name === 'TimeoutError' ? ' (la red tardó demasiado)' : ''}`;
     pintarAvisos({ catalogo: 'aviso' });   // la caja cobra con su copia: ámbar, no rojo
   }
 }
@@ -1376,12 +1389,14 @@ function agregarCodigo(leido, reintento = false) {
     return false;
   }
   if (!pieza) {
-    $('aviso').textContent = catalogo.size === 0
+    const rechazo = { aviso: catalogo.size === 0
       ? 'El catálogo no ha cargado. Recarga la página con red (F5).'
-      : `Código no encontrado: ${codigo}`;
+      : `Código no encontrado: ${codigo}` };
+    $('aviso').textContent = rechazo.aviso;
     $('aviso').style.color = '#D72B32';
     // La pieza pudo etiquetarse después de abrir la caja: se baja el catálogo y se reintenta una vez.
-    if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (buscarPieza(codigo)) agregarCodigo(leido, true); });
+    const sigue = escaneoVigente(rechazo);
+    if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (sigue() && buscarPieza(codigo)) agregarCodigo(leido, true); });
     return false;
   }
 
@@ -1400,14 +1415,16 @@ function agregarCodigo(leido, reintento = false) {
       .reduce((suma, l) => suma + l.cantidad, 0);
     const sinExistencia = avisoExistencia(pieza.nombre, pieza.stock, enTicket, cantidad);
     if (sinExistencia) {
+      const rechazo = { aviso: sinExistencia };
       $('aviso').textContent = sinExistencia;
       $('aviso').style.color = '#D72B32';
       if (puedeVenderEnMano(pieza, enTicket)) ofrecerEnMano(pieza);
       // #884: el último mensaje de avisoExistencia (0 aquí y fuera del ticket) no dice cuál de las tres cosas pasó: se le pregunta al servidor.
-      if (pieza.stock <= 0 && enTicket === 0 && navigator.onLine) dondeHay(pieza, sinExistencia);
+      if (pieza.stock <= 0 && enTicket === 0 && navigator.onLine) dondeHay(pieza, sinExistencia, rechazo);
       // La existencia local puede estar vieja (otra caja, una devolución): se baja el catálogo una vez, como con «no encontrado», y si
       // ahora sí hay, entra. El aviso ya está en pantalla: no se retrasa.
-      if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (catalogo.get(pieza.codigo)?.stock > pieza.stock) escanear(leido, true); });
+      const sigue = escaneoVigente(rechazo);
+      if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (sigue() && catalogo.get(pieza.codigo)?.stock > pieza.stock) escanear(leido, true); });
       return false;
     }
   }
@@ -1421,14 +1438,30 @@ function agregarCodigo(leido, reintento = false) {
 }
 
 /**
+ * #946: ¿el reintento tardío del catálogo sigue siendo de este cliente? Se llama al rechazar el escaneo y devuelve la pregunta para cuando
+ * termine la descarga: sí solo si el ticket es el mismo y el aviso en pantalla sigue siendo el de ese rechazo (`rechazo.aviso`, que `dondeHay`
+ * actualiza si lo reemplaza). Si no, no se agrega nada ni suena.
+ * «Mismo ticket» = el mismo arreglo `lineas`: cada pieza que entra, cada cobro terminado y cada cancelación lo reemplazan por otro nuevo
+ * (solo la ✕ de un renglón lo cambia en el lugar, y eso sigue siendo el mismo ticket), así que no hace falta un contador aparte que cobrar() tuviera que subir.
+ */
+function escaneoVigente(rechazo) {
+  const ticket = lineas;
+  return () => ticket === lineas && $('aviso').textContent === rechazo.aviso;
+}
+
+/**
  * #884: dónde sí hay la pieza que aquí no hay. Sin esperar: el aviso de siempre ya está en pantalla y esta respuesta lo reemplaza solo si
  * sigue ahí (un escaneo posterior, o la pieza que la recarga ya agregó, lo habrían cambiado). Sin red o con error se queda el de siempre.
  * No toca el foco: el siguiente Enter del lector sigue cayendo en #codigo.
  */
-function dondeHay(pieza, avisoInmediato) {
+function dondeHay(pieza, avisoInmediato, rechazo) {
   fetch(`/api/existencia?codigo=${encodeURIComponent(pieza.codigo)}`)
     .then((r) => (r.ok ? r.json() : null))
-    .then((datos) => { if (datos && $('aviso').textContent === avisoInmediato) $('aviso').textContent = avisoDondeHay(pieza.nombre, datos); })
+    .then((datos) => {
+      if (!datos || $('aviso').textContent !== avisoInmediato) return;
+      $('aviso').textContent = avisoDondeHay(pieza.nombre, datos);
+      if (rechazo) rechazo.aviso = $('aviso').textContent;   // #946: el reintento tardío sigue reconociendo este aviso como el de su escaneo
+    })
     .catch(() => {});
 }
 
@@ -4011,7 +4044,9 @@ refrescarMeta();   // al abrir la caja
 /* ---------- fin de la meta semanal (#940) ---------- */
 
 pintarRed();
-await cargarCatalogo();
+// Sin esperar (#946): el catálogo baja de la red mientras se pinta el ticket recuperado, se manda la cola y se reconecta la impresora. Nada de lo que
+// sigue lo usa (pintar, el descuento, el socio y la cola leen el ticket y el servidor); la copia local entra primero y cualquier escaneo usa lo que haya.
+cargarCatalogo();
 if (ticketRecuperado) {
   pintarDescuento();   // si seguía esperando a gerencia, vuelve a preguntar
   if (socio) pintarSocio();   // con un cobro en duda vuelve también el socio de esa venta (#933)
