@@ -1159,7 +1159,7 @@ let catalogoCompleto = 0;
 
 // Límite de cada petición del catálogo (#946): con la red lenta de una tienda el catálogo completo tarda decenas de segundos; sin límite la descarga
 // quedaba colgada y todo lo que la esperaba también. Es calibración: se ajusta aquí.
-const CATALOGO_LIMITE_MS = 30_000;
+const CATALOGO_LIMITE_MS = 90_000;   // holgado a propósito: un límite corto en una red lenta dejaría el catálogo completo sin bajar nunca
 let catalogoEnCurso = null;       // la descarga que corre: las demás llamadas esperan esta misma (una a la vez)
 
 /** Baja el catálogo (completo o solo cambios). Nunca falla: sin red o pasado el límite sigue la copia que ya hay y lo dice en el pie. */
@@ -1441,8 +1441,8 @@ function agregarCodigo(leido, reintento = false) {
  * #946: ¿el reintento tardío del catálogo sigue siendo de este cliente? Se llama al rechazar el escaneo y devuelve la pregunta para cuando
  * termine la descarga: sí solo si el ticket es el mismo y el aviso en pantalla sigue siendo el de ese rechazo (`rechazo.aviso`, que `dondeHay`
  * actualiza si lo reemplaza). Si no, no se agrega nada ni suena.
- * «Mismo ticket» = el mismo arreglo `lineas`: cada pieza que entra o sale, cada cobro terminado y cada cancelación lo reemplazan por otro nuevo
- * (nunca se muta en el lugar para cambiar de ticket), así que no hace falta un contador aparte que cobrar() tuviera que subir.
+ * «Mismo ticket» = el mismo arreglo `lineas`: cada pieza que entra, cada cobro terminado y cada cancelación lo reemplazan por otro nuevo
+ * (solo la ✕ de un renglón lo cambia en el lugar, y eso sigue siendo el mismo ticket), así que no hace falta un contador aparte que cobrar() tuviera que subir.
  */
 function escaneoVigente(rechazo) {
   const ticket = lineas;
