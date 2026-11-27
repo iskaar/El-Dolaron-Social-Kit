@@ -51,7 +51,7 @@ function montar() {
     if (!els.has(id)) els.set(id, id === 'dialogo-ticket' ? dialogo : elemento(id === 'dialogo-devolucion' ? { open: false } : {}));
     return els.get(id);
   };
-  const servidor = { cancelada: false, solicitud: diferida<any>(), peticiones: [] as string[] };
+  const servidor = { cancelada: false, solicitud: diferida<any>(), peticiones: [] as string[], ticket: ticketServidor as (e: { cancelada: boolean }) => unknown };
   const impresos: any[] = [];
   const vales: any[] = [];
   const contexto: Record<string, unknown> = {
@@ -67,7 +67,7 @@ function montar() {
     fetch: (url: string, init?: { method?: string }) => {
       servidor.peticiones.push(`${init?.method ?? 'GET'} ${url.split('?')[0]}`);
       if (url.includes('devoluciones-pedidas')) return Promise.resolve(respuesta([]));
-      if (!init?.method) return Promise.resolve(respuesta(ticketServidor(servidor)));
+      if (!init?.method) return Promise.resolve(respuesta(servidor.ticket(servidor)));
       return servidor.solicitud.promesa;   // el POST espera a que la prueba responda
     },
   };
@@ -171,4 +171,88 @@ test('#945 un fallo con la ventana cerrada también se ve en el aviso principal'
   await pendiente;
   assert.match(c.$('aviso').textContent, /Ya no se puede\./);
   assert.equal(c.vales.length, 0);
+});
+
+/* ---------- ticket mixto (#956) ---------- */
+
+const mixtoServidor = (estado: { cancelada: boolean }) => ({ ...ticketServidor(estado), forma_pago: 'mixto', total: 5000, efectivo: 2000, cambio: 0, anticipo: 0 });
+
+test('#956 cancelar un ticket mixto: el aviso dice cuánto devolver en efectivo y cuánto cancelar en la terminal, y el comprobante lleva las dos partes', async () => {
+  const c = montar();
+  c.servidor.ticket = mixtoServidor;
+  await c.abrirTicket('VENTA-0001');
+  const pendiente = c.clic({ confirmarTodo: '' });
+  c.servidor.cancelada = true;
+  c.servidor.solicitud.resolver(respuesta({ id: 'DEV-1', devuelto: 5000, en_efectivo: 2000, en_tarjeta: 3000 }, 200));
+  await pendiente;
+  assert.match(c.$('ticket-aviso').textContent, /^Ticket cancelado\. Devuelve \$20 en efectivo y cancela \$30 en la terminal y regresa las piezas al anaquel\./);
+  assert.equal(c.impresos.length, 1);
+  assert.equal(c.impresos[0].titulo, 'CANCELACION DE TICKET');
+  assert.equal(c.impresos[0].en_efectivo, 2000);
+  assert.equal(c.impresos[0].en_tarjeta, 3000);
+  // Sin esa respuesta (otra forma de pago) el aviso es el de siempre.
+  const normal = montar();
+  await normal.abrirTicket('VENTA-0001');
+  const otra = normal.clic({ confirmarTodo: '' });
+  normal.servidor.cancelada = true;
+  normal.servidor.solicitud.resolver(respuesta({ id: 'DEV-1', devuelto: 5000 }, 200));
+  await otra;
+  assert.match(normal.$('ticket-aviso').textContent, /^Ticket cancelado\. Devuelve \$50 y regresa/);
+  assert.equal(normal.impresos[0].en_tarjeta, undefined);
+});
+
+test('#956 un mixto al que el servidor rechaza cancelar (409 con piezas devueltas) muestra el mensaje del servidor y no imprime', async () => {
+  const c = montar();
+  c.servidor.ticket = mixtoServidor;
+  await c.abrirTicket('VENTA-0001');
+  const pendiente = c.clic({ confirmarTodo: '' });
+  c.servidor.solicitud.resolver(respuesta({ error: 'Este ticket mixto ya tiene piezas devueltas: devuelve lo que queda pieza por pieza.' }, 409));
+  await pendiente;
+  assert.match(c.$('ticket-aviso').textContent, /ya tiene piezas devueltas/);
+  assert.equal(c.impresos.length, 0);
+});
+
+test('#956 el detalle de un ticket mixto: Efectivo y Tarjeta en vez de recibido/cambio, sin corregir y la nota de por qué', async () => {
+  const previo = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: () => ({ textContent: '' }), head: { append() {} } } });
+  try {
+    const { pintarDetalle, renglonTicket, formularioPieza, partesMixto } = await import('../public/ticket.js');
+    const t = { id: 'VENTA-0001', creado_en: '2026-11-26T10:00:00Z', forma_pago: 'mixto', total: 30000, dolarones: 0, dolarones_devueltos: 0, devuelto: 0, anticipo: 0,
+      efectivo: 10000, cambio: 0, cancelada: 0, corregible: [], correcciones: [],
+      lineas: [{ id: 1, nombre: 'Pieza', codigo: 'ED-1', precio: 30000, cantidad: 1, cancelada_cantidad: 0 }], devoluciones: [] };
+    assert.deepEqual(partesMixto(t), { efectivo: 10000, tarjeta: 20000 });
+    assert.deepEqual(partesMixto({ ...t, dolarones: 5000, anticipo: 5000 }), { efectivo: 10000, tarjeta: 10000 }, 'Dolarones y anticipo salen antes de repartir');
+    const html = pintarDetalle(t, { editable: true });
+    assert.match(html, /Pagado en efectivo<\/td><td class="num">\$100\.00/);
+    assert.match(html, /Pagado con tarjeta<\/td><td class="num">\$200\.00/);
+    assert.doesNotMatch(html, /Efectivo recibido \/ cambio/);
+    assert.match(html, /Un ticket mixto no se corrige: cancélalo y vuelve a cobrar\./);
+    assert.doesNotMatch(html, /data-corregir-pago/);
+    assert.match(renglonTicket(t), /· Mixto/);
+    assert.doesNotMatch(pintarDetalle(t), /Un ticket mixto no se corrige/, 'en reportes (solo consulta) no hay nada que explicar');
+    // Una pieza de un mixto: sin elegir cómo se devuelve (siempre efectivo, del cajón) y con la nota.
+    const mixto = formularioPieza(1, 1, null, 'mixto');
+    assert.doesNotMatch(mixto, /<select/);
+    assert.doesNotMatch(mixto, /devolver-en/);
+    assert.match(mixto, /se devuelve en efectivo, del cajón/);
+    assert.match(formularioPieza(1, 1, null, 'tarjeta'), /<select class="devolver-en"/);
+    assert.doesNotMatch(formularioPieza(1, 1, null, 'efectivo'), /<select/);
+    // El de otra forma conserva «Efectivo recibido / cambio».
+    assert.match(pintarDetalle({ ...t, forma_pago: 'efectivo' }), /Efectivo recibido \/ cambio/);
+  } finally {
+    if (previo) Object.defineProperty(globalThis, 'document', previo); else delete (globalThis as any).document;
+  }
+});
+
+test('#956 el comprobante de una pieza devuelta de un mixto sale en efectivo y el de la cancelación lleva las dos partes', async () => {
+  const { comprobanteDevolucion, comprobanteCancelacion } = await import('../public/ticket.js');
+  const t: any = { creado_en: '2026-11-26T10:00:00Z', forma_pago: 'mixto', total: 30000, dolarones: 0, dolarones_devueltos: 0, devuelto: 0, anticipo: 0, efectivo: 10000, cambio: 0,
+    cancelada_caja: 'Caja 1', cancelada_por: 'cajero', cancelada_en: '2026-11-26T10:05:00Z', motivo_cancelacion: 'motivo',
+    lineas: [{ nombre: 'Pieza', precio: 30000, cantidad: 1, cancelada_cantidad: 0 }],
+    devoluciones: [{ id: 'x', nombre: 'Pieza', cantidad: 1, importe: 10000, dolarones: 0, caja: 'Caja 1', autor: 'cajero', motivo: 'm', creado_en: '2026-11-26T10:01:00Z' }] };
+  assert.equal(comprobanteDevolucion(t, 0).forma_pago, 'efectivo');
+  const cancelacion = comprobanteCancelacion(t);
+  assert.equal(cancelacion.en_efectivo, 10000);
+  assert.equal(cancelacion.en_tarjeta, 20000);
+  assert.equal((comprobanteCancelacion({ ...t, forma_pago: 'tarjeta' }) as any).en_tarjeta, undefined);
 });

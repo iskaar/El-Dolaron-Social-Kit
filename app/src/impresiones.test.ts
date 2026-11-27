@@ -213,6 +213,7 @@ test('modo remoto sólo sin impresora: esconde «Cobrar en efectivo» y deshabil
   modos.pintarImpresionRemota();
   assert.equal(modos.impresionRemota(), true);
   assert.equal($('cobrar-efectivo').hidden, true);
+  assert.equal($('cobrar-mixto').hidden, true, '#956: un mixto no se cobra desde el celular');
   assert.equal($('rapidos').hidden, true);
   assert.equal($('efectivo').disabled, true);
   assert.equal($('abrir-cajon').disabled, true);
@@ -222,6 +223,7 @@ test('modo remoto sólo sin impresora: esconde «Cobrar en efectivo» y deshabil
   assert.equal(modos.impresionRemota(), false);
   assert.equal($('opcion-impresion-remota').hidden, true);
   assert.equal($('cobrar-efectivo').hidden, false);
+  assert.equal($('cobrar-mixto').hidden, false);
   assert.equal($('rapidos').hidden, false);
 });
 
@@ -277,10 +279,12 @@ test('#933 con un cobro en duda «Efectivo» y el destino de la impresión son l
   conectada = true;                                         // y ahora hay impresora: el primer intento fue remoto y el reintento también
   modos.pintarImpresionRemota();
   assert.equal($('cobrar-efectivo').hidden, true);
+  assert.equal($('cobrar-mixto').hidden, true);
   assert.equal($('destino-impresion').hidden, false);
   contexto.cobroIncierto = null;                            // sin duda manda lo de ahora
   modos.pintarImpresionRemota();
   assert.equal($('cobrar-efectivo').hidden, false);
+  assert.equal($('cobrar-mixto').hidden, false);
 });
 
 test('sincronizar reenvía el destino remoto y elimina la venta sólo después de aceptarla', async () => {

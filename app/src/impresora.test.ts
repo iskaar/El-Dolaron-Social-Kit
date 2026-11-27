@@ -338,3 +338,47 @@ test('QR del vale (Issue #258): URL al portal con el código tras #; la caja lo 
   const texto = new TextDecoder().decode(Uint8Array.from(pedazos.flatMap((p) => [...p])));
   assert.equal(texto.split('registrate y recibe el doble').length - 1, 1);
 });
+
+// ---- Pago mixto (#956) ----
+
+const textoDe = (pedazos: Uint8Array[], desde = 0) => new TextDecoder().decode(Uint8Array.from(pedazos.slice(desde).flatMap((p) => [...p])));
+
+test('#956 el ticket de un pago mixto trae Efectivo y Tarjeta, sin Cambio ni la palabra TARJETA suelta', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirTicket } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  const lineas = [{ nombre: 'Pieza de prueba', precio: 30000, cantidad: 1 }];
+  const venta = { total: 30000, forma_pago: 'mixto', efectivo: 10000, cambio: 0, creado_en: '2026-11-26T17:00:00Z' };
+  assert.equal(await imprimirTicket(venta, lineas), true);
+  const texto = textoDe(pedazos);
+  assert.match(texto, /TOTAL +\$300\.00\nEfectivo +\$100\.00\nTarjeta +\$200\.00\n-+\n/);
+  assert.doesNotMatch(texto, /Cambio/);
+  assert.doesNotMatch(texto, /\nTARJETA\n/);
+  // Con Dolarones y anticipo el reparto es sobre lo que se pagó en dinero.
+  const antes = pedazos.length;
+  await imprimirTicket({ ...venta, dolarones: 5000, anticipo: 5000, pedido_folio: 17 }, lineas);
+  const con = textoDe(pedazos, antes);
+  assert.match(con, /A pagar +\$200\.00\nEfectivo +\$100\.00\nTarjeta +\$100\.00\n/);
+  // Una reimpresión trae la parte en efectivo en `efectivo`: es la misma cuenta.
+  const otra = pedazos.length;
+  await imprimirTicket({ total: 30000, forma_pago: 'efectivo', efectivo: 30000, cambio: 0, creado_en: '2026-11-26T17:00:00Z' }, lineas);
+  assert.match(textoDe(pedazos, otra), /Efectivo +\$300\.00\nCambio +\$0\.00\n/);
+});
+
+test('#956 el comprobante de cancelar un mixto lleva las dos salidas: efectivo del cajón y cancelar en la terminal', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirDevolucion } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  const base = { titulo: 'CANCELACION DE TICKET', caja: 'Caja 1', cajero: 'cajero', creado_en: '2026-11-26T18:00:00Z', ticket_creado_en: '2026-11-26T17:00:00Z',
+    forma_pago: 'mixto', piezas: [{ nombre: 'Pieza', cantidad: 1, importe: 30000 }], dinero: 30000, dolarones: 0, motivo: 'Se arrepintio' };
+  assert.equal(await imprimirDevolucion({ ...base, en_efectivo: 10000, en_tarjeta: 20000 }), true);
+  const texto = textoDe(pedazos);
+  assert.match(texto, /DEVUELTO EN EFECTIVO +\$100\.00\nCANCELAR EN TERMINAL +\$200\.00\n/);
+  assert.doesNotMatch(texto, /DEVUELTO EN TARJETA/);
+  // Una pieza de un mixto se devuelve siempre en efectivo: el comprobante dice una sola salida.
+  const antes = pedazos.length;
+  await imprimirDevolucion({ ...base, titulo: 'DEVOLUCION DE PIEZAS', forma_pago: 'efectivo', dinero: 10000 });
+  const pieza = textoDe(pedazos, antes);
+  assert.match(pieza, /DEVUELTO EN EFECTIVO +\$100\.00/);
+  assert.doesNotMatch(pieza, /CANCELAR EN TERMINAL/);
+});

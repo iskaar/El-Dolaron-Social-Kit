@@ -467,7 +467,7 @@ export const cobroSinCuerpo = ({ idVenta, cobroIncierto }) => cobroEnDuda({ idVe
 
 /** El botón que hay que volver a tocar, tal como lo nombra la caja. */
 export const botonDeCobro = (cobroIncierto) =>
-  ({ efectivo: 'el botón «Efectivo»', tarjeta: 'el botón «Tarjeta»', transferencia: 'el botón «Transferencia»', 'sin-dinero': 'el botón «Cobrar: ya está pagado»' })[cobroIncierto?.boton] ?? 'el mismo botón';
+  ({ efectivo: 'el botón «Efectivo»', tarjeta: 'el botón «Tarjeta»', transferencia: 'el botón «Transferencia»', mixto: 'el botón «Mixto»', 'sin-dinero': 'el botón «Cobrar: ya está pagado»' })[cobroIncierto?.boton] ?? 'el mismo botón';
 
 /** Los códigos con que se cobra con Dolarones: del vale (o de los vales juntos) o del socio. Van aparte: nunca a la cola ni al ticket impreso. */
 export const codigosDeVenta = (socio, valesCargados, codigoSocio) =>
