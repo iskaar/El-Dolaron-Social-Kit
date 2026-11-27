@@ -1394,7 +1394,8 @@ function agregarCodigo(leido, reintento = false) {
     $('aviso').textContent = rechazo.aviso;
     $('aviso').style.color = '#D72B32';
     // La pieza pudo etiquetarse después de abrir la caja: se baja el catálogo y se reintenta una vez.
-    if (!reintento && navigator.onLine) reintentarTrasCatalogo(rechazo, () => buscarPieza(codigo), () => agregarCodigo(leido, true));
+    const sigue = escaneoVigente(rechazo);
+    if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (sigue() && buscarPieza(codigo)) agregarCodigo(leido, true); });
     return false;
   }
 
@@ -1421,7 +1422,8 @@ function agregarCodigo(leido, reintento = false) {
       if (pieza.stock <= 0 && enTicket === 0 && navigator.onLine) dondeHay(pieza, sinExistencia, rechazo);
       // La existencia local puede estar vieja (otra caja, una devolución): se baja el catálogo una vez, como con «no encontrado», y si
       // ahora sí hay, entra. El aviso ya está en pantalla: no se retrasa.
-      if (!reintento && navigator.onLine) reintentarTrasCatalogo(rechazo, () => catalogo.get(pieza.codigo)?.stock > pieza.stock, () => escanear(leido, true));
+      const sigue = escaneoVigente(rechazo);
+      if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (sigue() && catalogo.get(pieza.codigo)?.stock > pieza.stock) escanear(leido, true); });
       return false;
     }
   }
@@ -1435,17 +1437,15 @@ function agregarCodigo(leido, reintento = false) {
 }
 
 /**
- * #946: reintenta un escaneo rechazado cuando termina de bajar el catálogo, pero solo si nada cambió desde ese escaneo: el ticket es el mismo
- * y el aviso en pantalla sigue siendo el de ese rechazo (`rechazo.aviso`, que `dondeHay` actualiza si lo reemplaza). Si no, el reintento ya no es
- * de este cliente y no hace nada, ni suena.
+ * #946: ¿el reintento tardío del catálogo sigue siendo de este cliente? Se llama al rechazar el escaneo y devuelve la pregunta para cuando
+ * termine la descarga: sí solo si el ticket es el mismo y el aviso en pantalla sigue siendo el de ese rechazo (`rechazo.aviso`, que `dondeHay`
+ * actualiza si lo reemplaza). Si no, no se agrega nada ni suena.
  * «Mismo ticket» = el mismo arreglo `lineas`: cada pieza que entra o sale, cada cobro terminado y cada cancelación lo reemplazan por otro nuevo
  * (nunca se muta en el lugar para cambiar de ticket), así que no hace falta un contador aparte que cobrar() tuviera que subir.
  */
-function reintentarTrasCatalogo(rechazo, hayNuevo, reintentar) {
+function escaneoVigente(rechazo) {
   const ticket = lineas;
-  cargarCatalogo().then(() => {
-    if (ticket === lineas && $('aviso').textContent === rechazo.aviso && hayNuevo()) reintentar();
-  });
+  return () => ticket === lineas && $('aviso').textContent === rechazo.aviso;
 }
 
 /**
