@@ -1993,7 +1993,7 @@ $('usar-maximo').addEventListener('click', () => {
  * mostrar "cobrado" antes de confirmarlo dejaría gastar dos veces. El código
  * de autorización sólo vive en memoria; nunca se encola en el disco.
  */
-async function cobrarConDolarones(venta, t, boton = 'el mismo botón de cobro', codigos = codigosDeVenta(socio, valesCargados, codigoSocio)) {
+async function cobrarConDolarones(venta, t, boton = 'el mismo botón de cobro', codigos = codigosDeVenta(socio, valesCargados, codigoSocio), siRechaza = '') {
   // Si la respuesta de este folio se perdió, reintentar va al servidor con el mismo folio y el mismo código aunque aquí parezca vencido
   // (#817): pedir un código nuevo cambiaría el folio y una venta ya registrada se registraría dos veces.
   const incierto = folioIncierto === venta.id;
@@ -2022,7 +2022,7 @@ async function cobrarConDolarones(venta, t, boton = 'el mismo botón de cobro', 
   const cuerpo = await respuesta.json().catch(() => ({}));
   if (!respuesta.ok) {
     if (cuerpo.promo_agotada) promoAgotada();
-    $('aviso').textContent = cuerpo.error ?? 'No se pudo cobrar con Dolarones.';
+    $('aviso').textContent = (cuerpo.error ?? 'No se pudo cobrar con Dolarones.') + (respuesta.status < 500 ? siRechaza : '');   // #944
     $('aviso').style.color = '#D72B32';
     return false;
   }
@@ -2112,7 +2112,7 @@ $('quitar-pedido').addEventListener('click', quitarPedido);
  * encolar la venta dejaría gastarlo dos veces. Un fallo de red deja el ticket abierto con el
  * mismo folio: reintentar no cobra doble.
  */
-async function cobrarConPedido(venta, boton = 'el mismo botón de cobro') {
+async function cobrarConPedido(venta, boton = 'el mismo botón de cobro', siRechaza = '') {
   let respuesta;
   try {
     respuesta = await fetch('/api/ventas', {
@@ -2128,7 +2128,7 @@ async function cobrarConPedido(venta, boton = 'el mismo botón de cobro') {
   const cuerpo = await respuesta.json().catch(() => ({}));
   if (!respuesta.ok) {
     if (cuerpo.promo_agotada) promoAgotada();
-    return avisoRojo(cuerpo.error ?? 'No se pudo cobrar el pedido.');
+    return avisoRojo((cuerpo.error ?? 'No se pudo cobrar el pedido.') + (respuesta.status < 500 ? siRechaza : ''));   // #944
   }
   return cuerpo;
 }
@@ -2285,6 +2285,13 @@ async function cobrar(forma) {
     }
   }
 
+  // #944: «primero la terminal, después la caja». Si el servidor RECHAZA la venta (4xx) cuando el dinero ya se cobró fuera de la caja (tarjeta o
+  // transferencia), el aviso del rechazo termina con esto en las tres rutas. No aplica a efectivo, a «ya está pagado» ni a un cobro sin respuesta
+  // (red, tiempo agotado, 5xx): ese es un cobro en duda y tiene su propio aviso (#933).
+  const siRechaza = sinDinero || t.aPagar <= 0 ? ''
+    : forma === 'tarjeta' ? ` Si la terminal ya cobró ${pesos(t.aPagar)}, no vuelvas a cobrar en la terminal. ${QUE_HACER_SI_RECHAZA}`
+    : forma === 'transferencia' ? ` Si el cliente ya transfirió ${pesos(t.aPagar)}, no le pidas otra transferencia. ${QUE_HACER_SI_RECHAZA}` : '';
+
   // El folio va ANTES del primer pintar(): pintar() guarda el ticket, y debe guardarlo con el folio con el que se envía (#817).
   if (!idVenta) {
     idVenta = crypto.randomUUID();
@@ -2317,10 +2324,10 @@ async function cobrar(forma) {
     let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: 0, saldo: socio.disponible };
     let registrada = null;   // lo que contestó el servidor al registrar la venta; null si se encoló sin respuesta
     if (usados > 0) {
-      registrada = await cobrarConDolarones(venta, t, nombres[boton], previo?.cuerpo ? codigosDeCuerpo(previo.cuerpo) : undefined);
+      registrada = await cobrarConDolarones(venta, t, nombres[boton], previo?.cuerpo ? codigosDeCuerpo(previo.cuerpo) : undefined, siRechaza);
       if (!registrada) return;
     } else if (pedidoCargado || transf || previo?.cuerpo?.clave_rastreo) {
-      registrada = await cobrarConPedido(venta, nombres[boton]);
+      registrada = await cobrarConPedido(venta, nombres[boton], siRechaza);
       if (!registrada) return;
     } else {
       // El servidor decide si la promoción ya empezó. Un timeout conserva la
@@ -2337,7 +2344,7 @@ async function cobrar(forma) {
         // #819: el servidor dice qué pieza ya no está («Quita X: ya no está disponible.»): ese renglón se resalta y el resto del ticket sigue.
         const faltan = new Set((cuerpo.faltantes ?? []).map((f) => f.producto_id));
         for (const l of lineas) l.sin_existencia = faltan.has(l.producto_id);
-        $('aviso').textContent = cuerpo.error || 'No se pudo confirmar la venta.';
+        $('aviso').textContent = (cuerpo.error || 'No se pudo confirmar la venta.') + siRechaza;
         $('aviso').style.color = '#D72B32';
         return;
       }
@@ -2462,6 +2469,7 @@ function aplicarRespuesta(venta, cuerpo, socioTicket, t) {
   return Number.isInteger(cuerpo.total) && cuerpo.total !== t.total
     ? { total: cuerpo.total, descuento: cuerpo.descuento ?? 0, cambio: cuerpo.cambio ?? 0 } : t;
 }
+const QUE_HACER_SI_RECHAZA = 'Corrige el ticket y toca otra vez el mismo botón de cobro; si el total cambia, llama a gerencia para cobrar o devolver la diferencia.';   // #944
 const avisoOtroTotal = (registrado, deLaCaja) => `El sistema registró ${pesos(registrado)}, no ${pesos(deLaCaja)}.`;
 
 /** Clave, monto, banco y foto del comprobante: de una transferencia no sobrevive nada al ticket siguiente. */
