@@ -51,3 +51,33 @@ test('#944 un ticket ya pagado con el saldo del pedido («Cobrar: ya está pagad
   assert.equal(JSON.parse(c.cuerpos[0]).forma_pago, 'tarjeta');
   assert.equal(c.$('aviso').textContent, RECHAZO);
 });
+
+// #956: con «Mixto» la terminal cobró solo la parte en tarjeta; el efectivo lo tiene quien cobra.
+const TARJETA_MIXTO: Record<Ruta, string> = { normal: '$200', dolarones: '$190', pedido: '$150' };   // lo que queda tras $100, $100 y $50 de efectivo
+const EFECTIVO_MIXTO: Record<Ruta, string> = { normal: '100', dolarones: '100', pedido: '50' };
+for (const ruta of ['normal', 'dolarones', 'pedido'] as Ruta[]) {
+  test(`#956 ruta ${ruta}: un rechazo del servidor después de cobrar «Mixto» dice cuánto ya cobró la terminal (solo la parte en tarjeta)`, async () => {
+    const c = montar({ ruta, forma: 'mixto', fetch: rechaza() });
+    c.$('efectivo').value = EFECTIVO_MIXTO[ruta];
+    await c.cobrar();
+    const aviso = c.$('aviso').textContent as string;
+    assert.ok(aviso.startsWith(RECHAZO), `el motivo del servidor va primero; salió: ${aviso}`);
+    assert.ok(aviso.includes(`Si la terminal ya cobró ${TARJETA_MIXTO[ruta]} de la parte en tarjeta, no vuelvas a cobrar en la terminal. Corrige el ticket`), aviso);
+    assert.match(aviso, /llama a gerencia para cobrar o devolver la diferencia\.$/);
+    assert.equal(c.$('aviso').style.color, '#D72B32');
+    const cuerpo = JSON.parse(c.cuerpos[0]);
+    assert.equal(cuerpo.forma_pago, 'mixto');
+    assert.equal(cuerpo.efectivo, Number(EFECTIVO_MIXTO[ruta]) * 100);
+    assert.equal(c.impresos.length, 0);
+    assert.equal(c.cuerpos.length, 1, 'no se reintenta solo');
+  });
+}
+
+test('#956 un cobro «Mixto» con red caída o 5xx es un cobro en duda: no lleva la nota del rechazo', async () => {
+  for (const fetch of [async () => { throw new TypeError('Failed to fetch'); }, rechaza(503)]) {
+    const c = montar({ ruta: 'pedido', forma: 'mixto', fetch });
+    c.$('efectivo').value = '50';
+    await c.cobrar();
+    assert.doesNotMatch(c.$('aviso').textContent, /ya cobró/, c.$('aviso').textContent);
+  }
+});

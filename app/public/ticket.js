@@ -11,7 +11,13 @@ const pesos = (centavos) => `$${dos(centavos)}`;
 const dolares = (centavos) => `${dos(centavos)} D`;
 const hora = (iso) => new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 const fecha = (iso) => new Date(iso).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
-const FORMAS = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia' };
+const FORMAS = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia', mixto: 'Mixto' };
+
+/** Un ticket mixto (#956): lo que entró en efectivo y lo que se cobró en la terminal. `cambio` es 0 en un mixto; se resta por si acaso. */
+export const partesMixto = (t) => ({
+  efectivo: t.efectivo - t.cambio,
+  tarjeta: t.total - t.dolarones - (t.anticipo ?? 0) - t.efectivo + t.cambio,
+});
 
 /** Lo que el ticket sigue valiendo: total menos lo devuelto por piezas, en dinero y en Dolarones. */
 export const vigente = (t) => (t.cancelada ? 0 : t.total - t.devuelto - t.dolarones_devueltos);
@@ -68,7 +74,9 @@ export function pintarDetalle(t, { editable = false, resaltar = [], fechas = { f
     ['Total cobrado', pesos(t.total)],
     t.dolarones ? ['Pagado con Dolarones', dolares(t.dolarones)] : null,
     t.anticipo ? [`Anticipo${t.pedido_folio ? ` P-${t.pedido_folio}` : ' de pedido'}`, `− ${pesos(t.anticipo)}`] : null,
-    t.efectivo ? ['Efectivo recibido / cambio', `${pesos(t.efectivo)} / ${pesos(t.cambio)}`] : null,
+    t.forma_pago === 'mixto' ? ['Pagado en efectivo', pesos(partesMixto(t).efectivo)] : null,
+    t.forma_pago === 'mixto' ? ['Pagado con tarjeta', pesos(partesMixto(t).tarjeta)] : null,
+    t.efectivo && t.forma_pago !== 'mixto' ? ['Efectivo recibido / cambio', `${pesos(t.efectivo)} / ${pesos(t.cambio)}`] : null,
     t.devuelto - (t.devuelto_cupon ?? 0) ? ['Devuelto en dinero', `− ${pesos(t.devuelto - (t.devuelto_cupon ?? 0))}`] : null,
     t.devuelto_cupon ? ['Cambiado por cupón', `− ${pesos(t.devuelto_cupon)}`] : null,
     t.dolarones_devueltos ? ['Regresado al saldo', `− ${dolares(t.dolarones_devueltos)}`] : null,
@@ -92,6 +100,9 @@ export function pintarDetalle(t, { editable = false, resaltar = [], fechas = { f
         <div>${fecha(c.creado_en)} ${hora(c.creado_en)} · ${escapar(c.caja || 'sin caja')} · ${escapar(c.autor)} · «${escapar(c.motivo)}»</div></li>`).join('')}
     </ul>`;
   const puedeCorregir = editable && !t.cancelada && (t.corregible ?? []).length > 0;
+  // #956: un mixto no se corrige (el servidor tampoco lo permite); sin esta nota no habría ningún botón ni razón.
+  const sinCorregir = editable && !t.cancelada && t.forma_pago === 'mixto'
+    ? '<p class="nota">Un ticket mixto no se corrige: cancélalo y vuelve a cobrar.</p>' : '';
 
   const esperando = !pendiente ? '' : `<p class="ticket-cancelado" role="status">Hay una devolución esperando a gerencia en este ticket${pendiente.resumen ? `: ${escapar(pendiente.resumen)}` : ''}.
       ${editable ? `<button type="button" class="secundario" data-retirar-solicitud="${escapar(pendiente.id)}">Retirar la solicitud</button>` : ''}</p>`;
@@ -111,6 +122,7 @@ export function pintarDetalle(t, { editable = false, resaltar = [], fechas = { f
     <table class="cifras">${cifras.map(([a, b, clase = '']) => `<tr class="${clase}"><td>${a}</td><td class="num">${b}</td></tr>`).join('')}</table>
     ${historial}
     ${corregida}
+    ${sinCorregir}
     ${puedeCorregir ? `<div class="corregir-pago"><button type="button" class="secundario" data-corregir-pago>Corregir forma de pago</button><div id="form-pago" hidden></div></div>` : ''}
     ${editable && !t.cancelada && !t.socio ? '<button type="button" class="secundario" data-imprimir-vale>Imprimir vale</button>' : ''}
     ${puedeCancelar ? `
@@ -125,7 +137,7 @@ export function comprobanteDevolucion(t, i) {
   const d = t.devoluciones[i];
   return {
     titulo: 'DEVOLUCION DE PIEZAS', caja: d.caja, cajero: d.autor, creado_en: d.creado_en,
-    ticket_creado_en: t.creado_en, forma_pago: d.forma_pago ?? t.forma_pago,
+    ticket_creado_en: t.creado_en, forma_pago: d.forma_pago ?? (t.forma_pago === 'mixto' ? 'efectivo' : t.forma_pago),   // un mixto devuelve piezas siempre en efectivo (#956)
     piezas: [{ nombre: d.nombre, cantidad: d.cantidad, importe: d.importe + (d.cupon ?? 0) + d.dolarones }],
     dinero: d.importe, dolarones: d.dolarones, cupon: d.cupon ?? 0, motivo: d.motivo,
   };
@@ -140,6 +152,8 @@ export function comprobanteCancelacion(t) {
       nombre: l.nombre, cantidad: l.cantidad - l.cancelada_cantidad, importe: l.precio * (l.cantidad - l.cancelada_cantidad),
     })),
     dinero: t.total - t.dolarones - t.devuelto, dolarones: t.dolarones - t.dolarones_devueltos, motivo: t.motivo_cancelacion,
+    // Un mixto (#956): la parte en efectivo sale del cajón y la de tarjeta se cancela en la terminal; el comprobante lleva las dos.
+    ...(t.forma_pago === 'mixto' ? { en_efectivo: partesMixto(t).efectivo, en_tarjeta: partesMixto(t).tarjeta } : {}),
   };
 }
 
@@ -152,7 +166,7 @@ const botonCupon = (cupon, dato) => cupon
 
 /** El formulario de una pieza: cuantas (si hay mas de una) y el motivo. */
 export function formularioPieza(lineaId, quedan, cupon = null, forma = 'efectivo') {
-  // Con tarjeta o transferencia, el cajero dice por donde regresa el dinero: el corte lo cuenta asi.
+  // Con tarjeta o transferencia, el cajero dice por donde regresa el dinero: el corte lo cuenta asi. Un mixto (#956) siempre regresa en efectivo: no hay que elegir.
   return `
     <div class="form-cancelar">
       ${quedan > 1 ? `<label>Cuántas <input type="number" class="cantidad-cancelar" min="1" max="${quedan}" value="1" inputmode="numeric"></label>` : ''}
@@ -160,7 +174,8 @@ export function formularioPieza(lineaId, quedan, cupon = null, forma = 'efectivo
       ${botonCupon(cupon, `data-cupon-linea="${lineaId}"`)}
       <div class="dinero">
         <small>${cupon ? 'Si el cliente prefiere su dinero' : 'Para devolver dinero'}: lo aprueba tu supervisor o gerencia (con su PIN aquí, o enviando la solicitud a gerencia).</small>
-        ${forma !== 'efectivo' ? `<select class="devolver-en" aria-label="Cómo se devuelve el dinero">
+        ${forma === 'mixto' ? '<small>El dinero se devuelve en efectivo, del cajón; la parte pagada con tarjeta no se mueve.</small>' : ''}
+        ${forma !== 'efectivo' && forma !== 'mixto' ? `<select class="devolver-en" aria-label="Cómo se devuelve el dinero">
           <option value="">¿Cómo se devuelve el dinero?</option>
           <option value="${forma}">${forma === 'tarjeta' ? 'A la tarjeta, en la terminal' : 'Por transferencia'}</option>
           <option value="efectivo">En efectivo, del cajón</option>

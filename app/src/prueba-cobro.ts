@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio,
+import { totales, efectivoAlcanza, mixtoValido, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio,
   descuentoDe, TOPE_DESCUENTO } from '../public/venta.js';
 import { PUERTA } from './prueba-caja.ts';
 
@@ -54,7 +54,7 @@ export function montar(op: Opciones = {}) {
     return elementos.get(id);
   };
   const contexto: Record<string, unknown> = {
-    crypto, Date, $, AbortSignal, Object, Math, Number, JSON, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido,
+    crypto, Date, $, AbortSignal, Object, Math, Number, JSON, totales, efectivoAlcanza, mixtoValido, saldoCanjeable, dolaronesGanados, anticipoDePedido,
     transferenciaDe, CLAVE_DESDE, debePreguntarSocio, descuentoDe, TOPE_DESCUENTO, ...PUERTA, navigator: { onLine: true },
     document: { createElement: () => ({ style: {}, textContent: '' }) },
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: PRECIO, cantidad: 1 }],

@@ -8,8 +8,8 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { PUERTA } from './prueba-caja.ts';
 import {
-  totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio,
-  descuentoDe, TOPE_DESCUENTO, huellaTicket, promoInauguracion, TICKET_VIGENTE_MS, maximoCanje, montosRapidos, montoTransferidoRazonable, MINIMO_REGALO, SIN_RED_EN_MANO, ordenEnPantalla, 
+  totales, efectivoAlcanza, mixtoValido, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio,
+  descuentoDe, TOPE_DESCUENTO, huellaTicket, promoInauguracion, TICKET_VIGENTE_MS, maximoCanje, montosRapidos, montoTransferidoRazonable, MINIMO_REGALO, SIN_RED_EN_MANO, ordenEnPantalla, botonDeCobro,
 } from '../public/venta.js';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
@@ -22,10 +22,10 @@ const entre = (desde: string, hasta: string) => {
 };
 
 const FORMA: Record<string, string> = {
-  'cobrar-efectivo': 'efectivo', 'cobrar-tarjeta': 'tarjeta', 'cobrar-transferencia': 'transferencia', 'cobrar-sin-dinero': 'sin-dinero',
+  'cobrar-efectivo': 'efectivo', 'cobrar-tarjeta': 'tarjeta', 'cobrar-transferencia': 'transferencia', 'cobrar-mixto': 'mixto', 'cobrar-sin-dinero': 'sin-dinero',
 };
 const BOTONES = Object.keys(FORMA);
-const DE_DINERO = ['cobrar-efectivo', 'cobrar-tarjeta', 'cobrar-transferencia'];
+const DE_DINERO = ['cobrar-efectivo', 'cobrar-tarjeta', 'cobrar-transferencia', 'cobrar-mixto'];
 const CAMPOS = new Set(['codigo', 'efectivo', 'socio', 'clave-rastreo', 'monto-transferido']);
 const ESCANEO = '7501234567890';
 
@@ -114,7 +114,7 @@ function armar(op: Opciones = {}) {
     ? { id: 's1', numero: 7, disponible: 500000, regalo_disponible: 0, maximo: 500000, expira_en: '2099-01-01T00:00:00Z', vale: false } : null;
   let n = 0;
   const contexto: Record<string, any> = {
-    crypto, Date, JSON, ordenEnPantalla, $, AbortSignal, Object, Math, Number, String, vistos: [] as unknown[], totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados,
+    crypto, Date, JSON, ordenEnPantalla, $, AbortSignal, Object, Math, Number, String, vistos: [] as unknown[], totales, efectivoAlcanza, mixtoValido, saldoCanjeable, dolaronesGanados,
     anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, descuentoDe, TOPE_DESCUENTO, maximoCanje, montosRapidos, montoTransferidoRazonable,
     MINIMO_REGALO, ...PUERTA, addEventListener() {}, location: { reload() {} }, navigator: { onLine: op.enLinea ?? true }, window: { open() {} }, ocultarEnMano() {}, SIN_RED_EN_MANO,
     localStorage: { getItem: (k: string) => almacen[k] ?? null, setItem: (k: string, v: string) => { almacen[k] = v; } },
@@ -372,6 +372,93 @@ test('#830 tarjeta: un clic cobra con tarjeta, no manda efectivo y borra lo que 
   assert.equal(pendiente.$('efectivo').value, '');
 });
 
+/* ---------- «Mixto» (#956): parte en efectivo y el resto con tarjeta ---------- */
+
+test('#956 mixto: con menos efectivo que el total manda forma «mixto» y esa parte, abre el cajón y dice las dos partes', async () => {
+  const c = armar({ efectivo: '100' });                    // $300 por cobrar: $100 en efectivo y $200 en la terminal
+  await c.clic('cobrar-mixto');
+  assert.equal(c.enviadas.length, 1);
+  assert.equal(c.enviadas[0].forma_pago, 'mixto');
+  assert.equal(c.enviadas[0].efectivo, 10000);
+  await respiro();
+  assert.equal(c.cajones.length, 1, 'hay efectivo de por medio: el cajón se abre');
+  assert.equal(c.$('aviso').textContent, 'Cobrado. Efectivo 10000 · tarjeta 20000');
+  assert.equal(c.impresos.length, 1);
+  assert.equal(c.impresos[0][0].forma_pago, 'mixto', 'el ticket impreso lleva las dos partes');
+  assert.equal(c.impresos[0][0].efectivo, 10000);
+  assert.equal(c.p.activo, 'codigo');
+  // El anticipo sale del total antes de repartir: con $100 de anticipo quedan $200 por cobrar.
+  const pedido = armar({ efectivo: '50', pedido: PEDIDO_PARCIAL });
+  await pedido.clic('cobrar-mixto');
+  assert.equal(pedido.enviadas[0].efectivo, 5000);
+  assert.match(pedido.$('aviso').textContent, /^Cobrado\. Efectivo 5000 · tarjeta 15000/);
+});
+
+test('#956 mixto: sin efectivo o con efectivo igual o mayor al total no cobra y dice qué escribir', async () => {
+  for (const efectivo of ['', '300', '500']) {
+    const c = armar({ efectivo });
+    await c.clic('cobrar-mixto');
+    assert.equal(c.enviadas.length, 0, `efectivo «${efectivo}»`);
+    assert.equal(c.guardadas.length, 0);
+    assert.equal(c.cajones.length, 0);
+    assert.equal(c.$('aviso').textContent, 'Para «Mixto» escribe en «Efectivo recibido» lo que el cliente da en efectivo (menos que el total) y cobra el resto en la terminal.');
+    assert.equal(c.$('aviso').style.color, '#D72B32');
+    assert.equal(c.p.activo, 'codigo', 'el lector sigue en su campo: un escaneo no cae en el efectivo');
+    assert.equal(c.$('efectivo').value, efectivo, 'no se borra lo escrito');
+    assert.equal(c.estado().idVenta, null, 'un cobro que no sale no gasta el folio');
+  }
+  assert.equal(mixtoValido({ total: 30000, efectivo: 30000 }), false);
+});
+
+test('#956 mixto: conserva «Efectivo recibido» (Tarjeta lo borra)', async () => {
+  const rechazada = armar({ efectivo: '100', fetch: rechazo('No hay existencia suficiente para completar la venta.') });
+  await rechazada.clic('cobrar-mixto');
+  assert.equal(rechazada.enviadas.length, 1);
+  assert.equal(rechazada.$('efectivo').value, '100', 'Mixto no borra el efectivo');
+  const tarjeta = armar({ efectivo: '100', fetch: rechazo('No hay existencia suficiente para completar la venta.') });
+  await tarjeta.clic('cobrar-tarjeta');
+  assert.equal(tarjeta.enviadas[0].forma_pago, 'tarjeta');
+  assert.equal(tarjeta.enviadas[0].efectivo, 0);
+  assert.equal(tarjeta.$('efectivo').value, '', 'Tarjeta sí lo borra');
+});
+
+test('#956 mixto: un rechazo del servidor dice que la parte en tarjeta ya se cobró en la terminal', async () => {
+  const c = armar({ efectivo: '100', fetch: rechazo('No hay existencia suficiente para completar la venta.') });
+  await c.clic('cobrar-mixto');
+  assert.match(c.$('aviso').textContent, /^No hay existencia suficiente.* Si la terminal ya cobró 20000 de la parte en tarjeta, no vuelvas a cobrar en la terminal\. Corrige el ticket/);
+  assert.equal(c.cajones.length, 0);
+});
+
+test('#956 mixto: sin red se encola igual que otra venta, con su forma y su efectivo, y el ticket impreso lleva las dos partes', async () => {
+  const c = armar({ efectivo: '100', fetch: sinRed });
+  await c.clic('cobrar-mixto');
+  assert.equal(c.guardadas.length, 1);
+  assert.equal((c.guardadas[0] as any).forma_pago, 'mixto');
+  assert.equal((c.guardadas[0] as any).efectivo, 10000);
+  assert.equal((c.guardadas[0] as any).sin_red, true);
+  assert.equal(c.cajones.length, 1);
+  assert.equal(c.impresos[0][0].forma_pago, 'mixto');
+  assert.match(c.$('aviso').textContent, /^Cobrado\. Efectivo 10000 · tarjeta 20000/);
+});
+
+test('#956 mixto: en el celular (otra caja) no se cobra y lo dice', async () => {
+  const c = armar({ efectivo: '100', remota: true });
+  await c.$('cobrar-mixto').disparar('click');
+  assert.equal(c.enviadas.length, 0);
+  assert.equal(c.$('aviso').textContent, 'En el celular sólo tarjeta o transferencia');
+});
+
+test('#956 mixto: «Faltan» ofrece «Mixto» y el botón se habilita como los demás', async () => {
+  const c = armar({ efectivo: '100' });
+  assert.match(c.$('cambio').textContent, /^Faltan 20000 · «Mixto» cobra el resto con tarjeta$/);
+  assert.equal(c.$('cobrar-mixto').disabled, false);
+  assert.match(fuente, /<button id="cobrar-mixto" type="button" data-forma="mixto" aria-label="[^"]+" disabled>Mixto<\/button>/);
+  const vacio = armar();
+  vacio.contexto.lineas = [];
+  vacio.rutinas.pintar();
+  assert.equal(vacio.$('cobrar-mixto').disabled, true, 'sin piezas no hay nada que cobrar');
+});
+
 test('#830 efectivo: cobra solo con el monto recibido; el cambio sale de lo escrito y vacío ya no es «exacto»', async () => {
   const vacio = armar({ efectivo: '' });
   await vacio.clic('cobrar-efectivo');
@@ -515,6 +602,27 @@ test('#830 folio en duda: tras un timeout solo se deja tocar el mismo botón y e
   assert.deepEqual(c.enviadas[1], c.enviadas[0], 'cuerpo idéntico: mismo folio, forma, efectivo y fecha');
   assert.equal(c.enviadas[1].efectivo, 20000);
   assert.match(c.$('aviso').textContent, /^Cobrado/);
+  assert.equal(c.estado().cobroIncierto, null);
+});
+
+test('#956 folio en duda con «Mixto»: solo se deja tocar «Mixto» y el reintento manda el mismo reparto aunque cambie el efectivo', async () => {
+  const c = armar({ pedido: PEDIDO_PARCIAL, efectivo: '50', fetch: (n) => (n === 1 ? sinRed() : respuestaOk()) });
+  await c.clic('cobrar-mixto');
+  assert.equal(c.enviadas.length, 1);
+  assert.match(c.$('aviso').textContent, /Toca otra vez el botón «Mixto»: con el mismo folio no se cobra dos veces/);
+  assert.equal(c.estado().cobroIncierto.boton, 'mixto');
+  assert.equal(c.estado().cobroIncierto.efectivo, 5000);
+  assert.equal(botonDeCobro(c.estado().cobroIncierto), 'el botón «Mixto»', 'el aviso de «primero termina el cobro pendiente» nombra el botón');
+  assert.deepEqual(c.habilitados(), ['cobrar-mixto'], 'solo el mismo botón');
+  await c.clic('cobrar-tarjeta');
+  await c.$('cobrar-tarjeta').disparar('click');
+  assert.equal(c.enviadas.length, 1);
+  assert.match(c.$('aviso').textContent, /^El cobro anterior quedó en duda\. Toca otra vez el botón «Mixto»/);
+  c.$('efectivo').value = '150';
+  await c.clic('cobrar-mixto');
+  assert.equal(c.enviadas.length, 2);
+  assert.deepEqual(c.enviadas[1], c.enviadas[0], 'mismo folio, forma y reparto');
+  assert.equal(c.enviadas[1].efectivo, 5000);
   assert.equal(c.estado().cobroIncierto, null);
 });
 

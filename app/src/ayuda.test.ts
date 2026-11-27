@@ -252,3 +252,22 @@ test('el host del portal público y el del capturista en el celular no sirven /a
   // Host del capturista (celular): lo que no está en su lista de rutas da 404; por omisión la guía no está.
   for (const ruta of ['/ayuda', '/ayuda.html', '/ayuda.js', '/ayuda-contenido.js']) assert.equal(permitidaParaVendedor(ruta, 'GET'), false, ruta);
 });
+
+test('#956 el escenario del pago mixto enseña el botón «Mixto» y ya no manda a cobrar en dos tickets', () => {
+  const ids = (texto: string) => buscar(escenarios, texto, '').map((e) => e.id);
+  const e = escenarios.find((x) => x.id === 'pago-mixto')!;
+  const dicho = [e.titulo, ...e.pasos, e.ojo ?? ''].join(' ');
+  assert.ok(e.pasos.some((p) => p.includes('«Mixto»')), 'un paso toca «Mixto»');
+  assert.ok(e.pasos.some((p) => p.includes('«Efectivo recibido»')), 'un paso dice dónde escribir el efectivo');
+  assert.ok(e.textos.includes('Mixto'), '«Mixto» se comprueba contra la pantalla de la caja');
+  assert.match(dicho, /terminal/);
+  assert.match(e.ojo ?? '', /no se corrige: cancélalo y vuelve a cobrar/);
+  assert.match(e.ojo ?? '', /siempre en efectivo/);
+  assert.doesNotMatch(dicho, /solo lleva una forma de pago|otro ticket|dos tickets/i);
+  assert.ok(ids('mixto').includes('pago-mixto'));
+  assert.ok(ids('parte en efectivo').includes('pago-mixto'));
+  // Nadie más en la guía dice que un ticket lleva una sola forma de pago.
+  for (const x of escenarios) assert.doesNotMatch([...x.pasos, x.ojo ?? ''].join(' '), /solo lleva una forma de pago/, x.id);
+  // Quien corrige formas de pago sabe que un mixto no se corrige.
+  assert.match(escenarios.find((x) => x.id === 'corregir-forma-de-pago')!.ojo!, /Un ticket mixto/);
+});

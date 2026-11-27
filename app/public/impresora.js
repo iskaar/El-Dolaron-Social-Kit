@@ -260,7 +260,7 @@ export function imprimirVale(vale) {
 }
 
 /**
- * @param venta {{ total: number, forma_pago: 'efectivo'|'tarjeta'|'transferencia', efectivo: number, cambio: number, creado_en: string,
+ * @param venta {{ total: number, forma_pago: 'efectivo'|'tarjeta'|'transferencia'|'mixto', efectivo: number, cambio: number, creado_en: string,
  *   dolarones?: number, socio?: { numero: number, ganados: number, bono_promo?: number, saldo: number } | null }}
  * @param lineas {{ nombre: string, precio: number, cantidad: number }[]}
  */
@@ -301,7 +301,12 @@ export async function imprimirTicket(venta, lineas) {
   if (venta.dolarones > 0 || venta.anticipo > 0) {
     partes.push(renglonMonto('A pagar', pesos(venta.total - (venta.dolarones || 0) - (venta.anticipo || 0))));
   }
-  if (venta.forma_pago === 'efectivo') {
+  if (venta.forma_pago === 'mixto') {
+    // #956: `efectivo` es la parte en efectivo (sin cambio) y el resto se cobró en la terminal; no hay renglón «Cambio».
+    const efectivo = venta.efectivo - (venta.cambio || 0);
+    partes.push(renglonMonto('Efectivo', pesos(efectivo)));
+    partes.push(renglonMonto('Tarjeta', pesos(venta.total - (venta.dolarones || 0) - (venta.anticipo || 0) - efectivo)));
+  } else if (venta.forma_pago === 'efectivo') {
     partes.push(renglonMonto('Efectivo', pesos(venta.efectivo)));
     partes.push(renglonMonto('Cambio', pesos(venta.cambio)));
   } else {
@@ -456,7 +461,8 @@ export function imprimirRetiro(retiro) {
  * lo recibe; se guarda con el corte.
  * @param d {{ titulo: string, caja: string, cajero: string, creado_en: string, ticket_creado_en: string,
  *   forma_pago: string, piezas: { nombre: string, cantidad: number, importe: number }[],
- *   dinero: number, dolarones: number, motivo: string }}
+ *   dinero: number, dolarones: number, motivo: string, en_efectivo?: number, en_tarjeta?: number }}
+ *   `en_efectivo` y `en_tarjeta` solo vienen al cancelar un ticket mixto (#956): una parte sale del cajón y la otra se cancela en la terminal.
  */
 export function imprimirDevolucion(d) {
   const salida = d.forma_pago === 'efectivo' ? 'EFECTIVO' : d.forma_pago === 'transferencia' ? 'TRANSFERENCIA' : 'TARJETA';
@@ -473,7 +479,9 @@ export function imprimirDevolucion(d) {
     ]),
     separador(),
     negritas(true),
-    ...(d.dinero || !d.cupon ? [renglonMonto(`DEVUELTO EN ${salida}`, importe(d.dinero))] : []),
+    ...(d.en_tarjeta !== undefined
+      ? [renglonMonto('DEVUELTO EN EFECTIVO', importe(d.en_efectivo)), renglonMonto('CANCELAR EN TERMINAL', importe(d.en_tarjeta))]
+      : d.dinero || !d.cupon ? [renglonMonto(`DEVUELTO EN ${salida}`, importe(d.dinero))] : []),
     ...(d.cupon ? [renglonMonto('CAMBIADO POR CUPON', importe(d.cupon))] : []),
     negritas(false),
     ...(d.dolarones ? [renglonMonto('Regresado al saldo (Dolarones)', `${d.dolarones / 100} D`)] : []),

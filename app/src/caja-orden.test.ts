@@ -182,7 +182,7 @@ test('#931 el escaneo vive junto a su aviso: #aviso conserva su nodo y su lugar 
   assert.match(fuente, /<div id="aviso" role="status"><\/div>/);
   assert.ok(fuente.indexOf('id="codigo"') < fuente.indexOf('id="aviso"') && fuente.indexOf('id="aviso"') < fuente.indexOf('id="ticket"'));
   const ids = ['abrir-corte', 'abrir-retiro', 'abrir-guia', 'pedir-ayuda', 'alta-socios', 'marcar-entrada', 'cerrar-sesion', 'pedir-descuento', 'abrir-devolucion', 'abrir-cajon', 'cancelar',
-    'tickets', 'vale-folio', 'vale-por-folio', 'cupon-manual', 'modo-remoto', 'imprimir-en', 'efectivo', 'rapidos', 'cambio', 'cobrar-efectivo', 'cobrar-tarjeta', 'cobrar-transferencia',
+    'tickets', 'vale-folio', 'vale-por-folio', 'cupon-manual', 'modo-remoto', 'imprimir-en', 'efectivo', 'rapidos', 'cambio', 'cobrar-efectivo', 'cobrar-tarjeta', 'cobrar-transferencia', 'cobrar-mixto',
     'cobrar-sin-dinero', 'socio', 'dolarones', 'pedido-cargado', 'datos-transferencia', 'rechazadas', 'impresiones-aviso', 'abrir-impresion-fallida', 'promo-cupo', 'buenfin', 'franja-meta',
     'corte', 'pendientes', 'reloj', 'catalogo-info', 'impresora-estado', 'conectar-impresora', 'impresiones-destino', 'aviso-remoto'];
   for (const id of ids) assert.equal(fuente.split(`id="${id}"`).length - 1, 1, `#${id} está una vez`);
@@ -193,7 +193,7 @@ test('#931 cobro: efectivo, rápidos, cambio y los botones de cobro están junto
   const medio = entre('<div id="cobro-medio">', '<div id="cobro-pago">');
   const pago = entre('<div id="cobro-pago">', '</section>');
   for (const id of ['socio', 'dolarones', 'pedido-cargado', 'datos-transferencia', 'vendedora', 'mas-opciones']) assert.ok(medio.includes(`id="${id}"`), `${id} se desplaza`);
-  for (const id of ['efectivo', 'rapidos', 'cambio', 'cobrar-efectivo', 'cobrar-tarjeta', 'cobrar-transferencia', 'cobrar-sin-dinero', 'aviso-remoto', 'cancelar', 'abrir-cajon', 'abrir-devolucion', 'pedir-descuento'])
+  for (const id of ['efectivo', 'rapidos', 'cambio', 'cobrar-efectivo', 'cobrar-tarjeta', 'cobrar-transferencia', 'cobrar-mixto', 'cobrar-sin-dinero', 'aviso-remoto', 'cancelar', 'abrir-cajon', 'abrir-devolucion', 'pedir-descuento'])
     assert.ok(pago.includes(`id="${id}"`), `${id} no se desplaza`);
   // Si ni así cabe (ventana baja, zoom), la columna entera se desplaza: la parte de en medio tiene su mínimo y #cobro su respaldo.
   assert.match(fuente, /#cobro-medio \{ flex: 1 1 auto; min-height: 130px; overflow-y: auto;/);
@@ -214,6 +214,7 @@ test('#931 «Imprimir en otra caja» vive en «Más opciones», pero con el modo
   assert.equal(el['aviso-remoto'].hidden, false);
   assert.match(el['aviso-remoto'].textContent, /se imprime en otra caja.*no hay «Efectivo»/);
   assert.equal(el['cobrar-efectivo'].hidden, true);
+  assert.equal(el['cobrar-mixto'].hidden, true);
   assert.match(el['mas-opciones-resumen'].textContent, /otra caja/);
   correr(false);
   assert.equal(el['aviso-remoto'].hidden, true);

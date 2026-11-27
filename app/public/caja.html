@@ -133,16 +133,17 @@
   #aviso-remoto[hidden] { display: none; }
   #cambio.falta { color: var(--rojo); }
   #cambio.ok { color: var(--verde); }
-  /* Tres botones de cobro, sin ninguno por omisión (#830): el clic es a la vez la forma de pago y el cobro. */
+  /* Cuatro botones de cobro (#956 suma «Mixto»), sin ninguno por omisión (#830): el clic es a la vez la forma de pago y el cobro. */
   #botones-cobro { margin-top: 2px; }
   #botones-cobro [hidden] { display: none; }
   #cobrar-en { font-size: 12px; color: #5b6478; margin-bottom: 2px; }
-  #fila-cobro { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }   /* sin «Efectivo» (celular) quedan dos */
+  #fila-cobro { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }   /* cuatro botones en dos filas (#956: «Transferencia» no cabe en cuatro columnas); sin «Efectivo» ni «Mixto» (celular) quedan dos en una fila */
   #botones-cobro button { width: 100%; min-height: 52px; padding: 6px 2px; font-size: 16px; font-weight: 800; border: 0; border-radius: 12px; color: #fff; cursor: pointer; }
   #botones-cobro #cobrar-sin-dinero { font-size: 18px; }
   #cobrar-efectivo, #cobrar-sin-dinero { background: var(--verde); }
   #cobrar-tarjeta { background: var(--azul); }
   #cobrar-transferencia { background: #7b3fa0; }
+  #cobrar-mixto { background: #b45f06; }   /* #956: parte en efectivo y el resto con tarjeta */
   #botones-cobro button:disabled { background: #c8cfda; cursor: not-allowed; }
   #dev-lista { max-height: 50vh; overflow-y: auto; margin-top: 8px; }
   /* Lo poco frecuente, junto y discreto (#931). Sin «Pedir descuento» (ticket vacío) quedan tres. */
@@ -474,6 +475,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
               <button id="cobrar-efectivo" type="button" data-forma="efectivo" aria-label="Cobrar en efectivo" disabled>Efectivo</button>
               <button id="cobrar-tarjeta" type="button" data-forma="tarjeta" aria-label="Cobrar con tarjeta" disabled>Tarjeta</button>
               <button id="cobrar-transferencia" type="button" data-forma="transferencia" aria-label="Cobrar por transferencia" disabled>Transferencia</button>
+              <button id="cobrar-mixto" type="button" data-forma="mixto" aria-label="Cobrar una parte en efectivo y el resto con tarjeta" disabled>Mixto</button>
             </div>
           </div>
           <!-- Dolarones, vale o pedido cubren todo: no hay forma de pago que elegir, un solo botón cierra la venta. -->
@@ -677,7 +679,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw-caja.js'
 </dialog>
 <script type="module">
 import { CATEGORIAS_GASTO } from '/categorias.js';
-import { totales, agregarYMarcar, ordenEnPantalla, leerMultiplicador, efectivoAlcanza, montosRapidos, montoTransferidoRazonable, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, TOPE_DESCUENTO_CAJERO, TICKET_VIGENTE_MS, huellaTicket, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
+import { totales, agregarYMarcar, ordenEnPantalla, leerMultiplicador, efectivoAlcanza, mixtoValido, montosRapidos, montoTransferidoRazonable, dolaronesGanados, saldoCanjeable, maximoCanje, MINIMO_REGALO, descuentoDe, TOPE_DESCUENTO, TOPE_DESCUENTO_CAJERO, TICKET_VIGENTE_MS, huellaTicket, DENOMINACIONES, contadoDe, promoInauguracion, letreroPromo, desfaseReloj, anticipoDePedido, transferenciaDe, CLAVE_DESDE, BANCOS, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin,
   esBusquedaPorTexto, avisoExistencia, avisoDondeHay, moverSugerencia, cancelarPideConfirmar, nVentas, avisoCorteSinEnviar, gastoRequiereDueno, pesosExactos, centavosDeTexto, alertaConteo,
   MOTIVOS_EN_MANO, SIN_RED_EN_MANO, puedeVenderEnMano, LIBRE_ID, LIBRE_PRECIO_MIN, LIBRE_PRECIO_MAX, descripcionLibre, resumenAvisos, cobroEnDuda, cobroSinCuerpo, botonDeCobro, codigosDeCuerpo, codigosDeVenta, cuerpoSinCodigos, fotoDeVenta, ventaRecuperada } from '/venta.js';
 import { abrirCamara } from '/camara.js';
@@ -1104,6 +1106,7 @@ function pintarImpresionRemota() {
   $('modo-remoto').disabled = cobrando;
   $('imprimir-en').disabled = cobrando;
   $('cobrar-efectivo').hidden = remota;
+  $('cobrar-mixto').hidden = remota;   // #956: el servidor no cobra un mixto desde el celular
   $('rapidos').hidden = remota;
   $('efectivo').disabled = cobrando || remota;
   for (const id of ['abrir-cajon', 'abrir-retiro', 'abrir-corte']) $(id).disabled = remota;
@@ -1316,7 +1319,7 @@ function pintar() {
   const sinCobro = cobrando || (!congelada && (t.total === 0 || usados > t.total || usados > canjeable || !autorizado));
   // Con el folio en duda solo se deja tocar el mismo botón (#830): otro mandaría otra forma o efectivo con el mismo folio.
   const incierto = enDuda ? cobroIncierto : null;
-  for (const id of ['cobrar-efectivo', 'cobrar-tarjeta', 'cobrar-transferencia', 'cobrar-sin-dinero']) $(id).disabled = sinCobro || (!!incierto && $(id).dataset.forma !== incierto.boton);
+  for (const id of ['cobrar-efectivo', 'cobrar-tarjeta', 'cobrar-transferencia', 'cobrar-mixto', 'cobrar-sin-dinero']) $(id).disabled = sinCobro || (!!incierto && $(id).dataset.forma !== incierto.boton);
   $('rapidos').innerHTML = montosRapidos(t.aPagar).map((m) =>
     `<button type="button" data-centavos="${m.centavos}"${cobrando ? ' disabled' : ''}>${m.exacto ? 'Exacto' : pesos(m.centavos)}</button>`).join('');
   $('codigo-autorizacion').textContent = socio?.vale
@@ -1337,7 +1340,7 @@ function pintar() {
   if (!efectivo) {
     cambio.textContent = '';
   } else if (t.falta > 0) {
-    cambio.textContent = `Faltan ${pesos(t.falta)}`;
+    cambio.textContent = `Faltan ${pesos(t.falta)}` + ($('cobrar-mixto').hidden ? '' : ' · «Mixto» cobra el resto con tarjeta');   // #956
     cambio.className = 'falta';
   } else {
     cambio.textContent = `Cambio ${pesos(t.cambio)}`;
@@ -2198,8 +2201,8 @@ $('comprobante').addEventListener('change', async () => {
 $('banco-emisor').append(...[...BANCOS, ['otro', 'Otro banco (no se verifica sola)']].map(([codigo, nombre]) => new Option(nombre, codigo)));
 
 /**
- * Cobra con la forma que trae el botón tocado (#830): 'efectivo', 'tarjeta' o 'transferencia'; 'sin-dinero' solo cuando Dolarones, vale o pedido
- * cubren todo el ticket. No hay forma por omisión ni estado entre toques: sin una de esas cuatro, no se cobra (17/10, #260).
+ * Cobra con la forma que trae el botón tocado (#830): 'efectivo', 'tarjeta', 'transferencia' o 'mixto' (#956: lo de «Efectivo recibido» en efectivo y el resto
+ * con tarjeta); 'sin-dinero' solo cuando Dolarones, vale o pedido cubren todo el ticket. No hay forma por omisión ni estado entre toques: sin una de esas, no se cobra (17/10, #260).
  */
 async function cobrar(forma) {
   if (cobrando) return;                 // doble clic: el primero ya va en camino
@@ -2209,8 +2212,8 @@ async function cobrar(forma) {
   $('codigo').focus();
   const boton = forma;                  // lo que se tocó; `forma` pasa a ser lo que se registra
   const sinDinero = forma === 'sin-dinero';
-  if (!sinDinero && !['efectivo', 'tarjeta', 'transferencia'].includes(forma)) return;
-  const nombres = { efectivo: 'el botón «Efectivo»', tarjeta: 'el botón «Tarjeta»', transferencia: 'el botón «Transferencia»', 'sin-dinero': 'el botón «Cobrar: ya está pagado»' };
+  if (!sinDinero && !['efectivo', 'tarjeta', 'transferencia', 'mixto'].includes(forma)) return;
+  const nombres = { efectivo: 'el botón «Efectivo»', tarjeta: 'el botón «Tarjeta»', transferencia: 'el botón «Transferencia»', mixto: 'el botón «Mixto»', 'sin-dinero': 'el botón «Cobrar: ya está pagado»' };
   // Folio en duda (#830): el servidor liga el folio a la forma, al efectivo y a la clave. El reintento sale con lo guardado, del mismo botón.
   const previo = cobroEnDuda({ idVenta, cobroIncierto }) ? cobroIncierto : null;
   if (previo && boton !== previo.boton) return avisoRojo(`El cobro anterior quedó en duda. Toca otra vez ${nombres[previo.boton]}: con el mismo folio no se cobra dos veces.`);
@@ -2227,11 +2230,11 @@ async function cobrar(forma) {
     if (efectivo) $('efectivo').value = String(efectivo / 100);
     if (previo.transf) { $('clave-rastreo').value = previo.transf.clave; $('monto-transferido').value = previo.transf.monto; $('banco-emisor').value = previo.transf.banco; }
   }
-  // La forma elegida manda: tarjeta o transferencia borran lo que hubiera en «Efectivo recibido».
-  if (forma !== 'efectivo' && efectivo) { efectivo = 0; $('efectivo').value = ''; pintar(); }
+  // La forma elegida manda: tarjeta o transferencia borran lo que hubiera en «Efectivo recibido»; «Mixto» lo conserva: es la parte en efectivo.
+  if (forma !== 'efectivo' && forma !== 'mixto' && efectivo) { efectivo = 0; $('efectivo').value = ''; pintar(); }
   if (forma !== 'transferencia') $('datos-transferencia').hidden = true;
   const imprimirEn = previo?.cuerpo ? previo.cuerpo.imprimir_en : impresionRemota() ? $('imprimir-en').value : undefined;
-  if (!previo?.cuerpo && imprimirEn && forma === 'efectivo') {
+  if (!previo?.cuerpo && imprimirEn && (forma === 'efectivo' || forma === 'mixto')) {
     $('aviso').textContent = 'En el celular sólo tarjeta o transferencia';
     $('codigo').focus();   // en los retornos de aquí en adelante el foco sale de «Cobrar»: el Enter del lector no lo vuelve a pulsar (#817)
     return;
@@ -2267,6 +2270,13 @@ async function cobrar(forma) {
   if (!previo?.cuerpo && forma === 'efectivo' && t.aPagar > 0 && efectivo === 0) {
     $('aviso').textContent = 'Escribe cuánto te dio el cliente: toca «Exacto», un billete o escríbelo en «Efectivo recibido».';
     $('aviso').style.color = '#D72B32';
+    return;
+  }
+  // #956: «Mixto» lleva algo en efectivo y algo con tarjeta; sin cambio, quien cobra escribe la parte exacta. Mismo criterio que el servidor (mixtoValido).
+  if (!previo?.cuerpo && forma === 'mixto' && !mixtoValido({ total: t.aPagar, efectivo })) {
+    $('aviso').textContent = 'Para «Mixto» escribe en «Efectivo recibido» lo que el cliente da en efectivo (menos que el total) y cobra el resto en la terminal.';
+    $('aviso').style.color = '#D72B32';
+    $('codigo').focus();   // igual que «Escribe cuánto te dio el cliente»: lo que escanee el lector no puede caer en #efectivo
     return;
   }
   if (!previo?.cuerpo && !efectivoAlcanza({ formaPago: forma, total: t.aPagar, efectivo })) {
@@ -2324,6 +2334,7 @@ async function cobrar(forma) {
   // (red, tiempo agotado, 5xx): ese es un cobro en duda y tiene su propio aviso (#933).
   const siRechaza = sinDinero || t.aPagar <= 0 ? ''
     : forma === 'tarjeta' ? ` Si la terminal ya cobró ${pesos(t.aPagar)}, no vuelvas a cobrar en la terminal. ${QUE_HACER_SI_RECHAZA}`
+    : forma === 'mixto' ? ` Si la terminal ya cobró ${pesos(t.aPagar - efectivo)} de la parte en tarjeta, no vuelvas a cobrar en la terminal. ${QUE_HACER_SI_RECHAZA}`
     : forma === 'transferencia' ? ` Si el cliente ya transfirió ${pesos(t.aPagar)}, no le pidas otra transferencia. ${QUE_HACER_SI_RECHAZA}` : '';
 
   // El folio va ANTES del primer pintar(): pintar() guarda el ticket, y debe guardarlo con el folio con el que se envía (#817).
@@ -2341,7 +2352,7 @@ async function cobrar(forma) {
         ({ codigo, nombre, precio, ...(precio_lista > precio ? { precio_lista } : {}), cantidad, producto_id, ...(en_mano ? { en_mano } : {}),
           ...(descripcion === undefined ? {} : { descripcion }) })),   // #880: solo la linea «sin etiqueta» la trae
       forma_pago: forma,
-      efectivo: forma === 'efectivo' ? efectivo : 0,
+      efectivo: forma === 'efectivo' || forma === 'mixto' ? efectivo : 0,
       creado_en: creadoEnVenta,
       cliente_id: socio?.id ?? null,
       dolarones: usados,
@@ -2411,7 +2422,7 @@ async function cobrar(forma) {
     let nodoAviso = null;
     const fallo = (clave) => { const falla = textoFalla(clave); if (falla) (nodoAviso ? pintarFalla(falla, nodoAviso) : fallas.push(falla)); };
     if (!venta.imprimir_en) {
-      if (forma === 'efectivo' && efectivo > 0) abrirCajon()?.then((abrio) => { if (!abrio) fallo('cajon'); });
+      if ((forma === 'efectivo' || forma === 'mixto') && efectivo > 0) abrirCajon()?.then((abrio) => { if (!abrio) fallo('cajon'); });
       imprimirTicket({ ...venta, total: cobro.total, descuento: cobro.descuento, cambio: cobro.cambio, socio: socioTicket,
         ...(pedidoCargado ? { pedido_folio: pedidoCargado.folio } : {}) }, venta.lineas)
         .then((impreso) => { pintarImpresora(); if (!impreso) fallo('ticket'); });
@@ -2435,7 +2446,8 @@ async function cobrar(forma) {
     await store('catalogo', 'readwrite', (s) => s.put({ clave: 'piezas', datos: [...catalogo.values()], fecha: Date.now() }));
 
     const ganados = socioTicket?.ganados || venta.vale_emitido?.importe || 0;
-    $('aviso').textContent = (forma === 'efectivo' && efectivo > 0 ? `Cobrado. Cambio ${pesos(cobro.cambio)}` : 'Cobrado.')
+    $('aviso').textContent = (forma === 'efectivo' && efectivo > 0 ? `Cobrado. Cambio ${pesos(cobro.cambio)}`
+      : forma === 'mixto' ? `Cobrado. Efectivo ${pesos(efectivo)} · tarjeta ${pesos(cobro.total - (venta.dolarones ?? 0) - (venta.anticipo ?? 0) - efectivo)}` : 'Cobrado.')
       + (ganados ? ` · Ganó ${dolares(ganados)}` : '')
       + (socioTicket?.bono_promo > 0 ? ` · Bono noviembre: +${dolares(socioTicket.bono_promo)}` : '')
       + (venta.referido_liberado > 0 ? ` · ${avisoReferido(venta.referido_liberado)}` : '');
@@ -3145,11 +3157,16 @@ $('ticket-contenido').addEventListener('click', async (e) => {
   }
 });
 
+/** Qué entrega quien cancela. Un ticket mixto (#956) saca una parte del cajón y cancela la otra en la terminal. */
+const queDevolver = (c) => c.en_tarjeta !== undefined
+  ? `Devuelve ${pesos(c.en_efectivo)} en efectivo y cancela ${pesos(c.en_tarjeta)} en la terminal`
+  : `Devuelve ${pesos(c.dinero)}`;
+
 /** Lo que sigue a una cancelacion enviada (pieza o ticket): aviso, ticket al dia, comprobante y existencias. */
 async function terminarCancelacion(r, cuerpo, { linea, cantidad, ticketId }) {
   const pieza = linea ? (cantidad > 1 ? 'las piezas' : 'la pieza') : 'las piezas';
   const texto = r.ok
-    ? `${linea ? 'Pieza cancelada' : 'Ticket cancelado'}. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa ${pieza} al anaquel.`
+    ? `${linea ? 'Pieza cancelada' : 'Ticket cancelado'}. ${queDevolver({ dinero: cuerpo.devuelto ?? 0, en_efectivo: cuerpo.en_efectivo, en_tarjeta: cuerpo.en_tarjeta })} y regresa ${pieza} al anaquel.`
       + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} regresaron al socio o al mismo vale, con su vencimiento original.` : '')
     : (cuerpo.error ?? 'No se pudo cancelar.');
   if (ticketVisible(ticketId)) idCancelacion = null;
@@ -3237,7 +3254,7 @@ async function consultarAprobacion() {
   if (abierto) {
     await abrirTicket(ticketId);
     $('ticket-aviso').textContent = aprobada
-      ? `${texto} Devuelve ${pesos(comprobanteCancelacion(ticketAbierto).dinero)} y regresa las piezas al anaquel.` : texto;
+      ? `${texto} ${queDevolver(comprobanteCancelacion(ticketAbierto))} y regresa las piezas al anaquel.` : texto;
     $('ticket-aviso').style.color = aprobada ? '#1f7a4d' : '#D72B32';
     if (aprobada && ticketAbierto?.cancelada) await imprimirComprobante(comprobanteCancelacion(ticketAbierto));
   } else {
