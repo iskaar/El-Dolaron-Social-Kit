@@ -1157,24 +1157,36 @@ const TRASLAPE_MS = 2 * 60_000;   // lo que cambio mientras viajaba la consulta 
 let catalogoDesde = null;         // hora del SERVIDOR desde la que se piden cambios
 let catalogoCompleto = 0;
 
-async function cargarCatalogo() {
+// Límite de cada petición del catálogo (#946): con la red lenta de una tienda el catálogo completo tarda decenas de segundos; sin límite la descarga
+// quedaba colgada y todo lo que la esperaba también. Es calibración: se ajusta aquí.
+const CATALOGO_LIMITE_MS = 90_000;   // holgado a propósito: un límite corto en una red lenta dejaría el catálogo completo sin bajar nunca
+let catalogoEnCurso = null;       // la descarga que corre: las demás llamadas esperan esta misma (una a la vez)
+
+/** Baja el catálogo (completo o solo cambios). Nunca falla: sin red o pasado el límite sigue la copia que ya hay y lo dice en el pie. */
+function cargarCatalogo() {
+  return catalogoEnCurso ??= descargarCatalogo().finally(() => { catalogoEnCurso = null; });
+}
+async function descargarCatalogo() {
   if (!catalogo.size) {
-    const guardado = await store('catalogo', 'readonly', (s) => s.get('piezas'));
-    if (guardado) {
-      catalogo = new Map(guardado.datos.map((p) => [p.codigo, p]));
-      $('catalogo-info').textContent = `${catalogo.size} códigos en memoria`;
-    }
+    // La copia local primero: sirve para cobrar aunque la descarga tarde o falle. Si no se puede leer, se sigue con la red.
+    try {
+      const guardado = await store('catalogo', 'readonly', (s) => s.get('piezas'));
+      if (guardado && !catalogo.size) {
+        catalogo = new Map(guardado.datos.map((p) => [p.codigo, p]));
+        $('catalogo-info').textContent = `${catalogo.size} códigos en memoria`;
+      }
+    } catch { /* sin copia local */ }
   }
   try {
     if (!catalogoDesde || Date.now() - catalogoCompleto > CATALOGO_COMPLETO_MS) {
-      const respuesta = await fetch('/api/catalogo');
+      const respuesta = await fetch('/api/catalogo', { signal: AbortSignal.timeout(CATALOGO_LIMITE_MS) });
       const piezas = await respuesta.json();
       catalogo = new Map(piezas.map((p) => [p.codigo, p]));
       const servidor = Date.parse(respuesta.headers.get('date') ?? '');
       catalogoDesde = new Date((Number.isFinite(servidor) ? servidor : Date.now()) - TRASLAPE_MS);
       catalogoCompleto = Date.now();
     } else {
-      const consulta = await fetch(`/api/catalogo?desde=${encodeURIComponent(catalogoDesde.toISOString())}`);
+      const consulta = await fetch(`/api/catalogo?desde=${encodeURIComponent(catalogoDesde.toISOString())}`, { signal: AbortSignal.timeout(CATALOGO_LIMITE_MS) });
       const { ahora, piezas } = await consulta.json();
       for (const p of piezas) {
         if (p.precio > 0 || p.estado_fisico === 'caducado') catalogo.set(p.codigo, p);
@@ -1186,8 +1198,9 @@ async function cargarCatalogo() {
     await store('catalogo', 'readwrite', (s) => s.put({ clave: 'piezas', datos, fecha: Date.now() }));
     $('catalogo-info').textContent = `${catalogo.size} códigos · actualizado`;
     pintarAvisos({ catalogo: 'ok' });
-  } catch {
-    $('catalogo-info').textContent = `${catalogo.size} códigos · sin actualizar`;   // asignado completo: con `+=` se repetía cada minuto sin red
+  } catch (e) {
+    // asignado completo: con `+=` se repetía cada minuto sin red
+    $('catalogo-info').textContent = `${catalogo.size} códigos · sin actualizar${e?.name === 'TimeoutError' ? ' (la red tardó demasiado)' : ''}`;
     pintarAvisos({ catalogo: 'aviso' });   // la caja cobra con su copia: ámbar, no rojo
   }
 }
@@ -1224,6 +1237,7 @@ function pintar() {
     pintarDescuento(habiaSolicitud && subtotal > 0 ? 'El ticket cambió: el descuento ya no aplica. Pide otro.' : '');
   }
   $('pedir-descuento').hidden = subtotal === 0 || (!!descuento && !descuentoCerrado());
+  pintarTopeDescuento();   // #949: el tope depende del subtotal; solo toca «Enviar a gerencia» y su aviso, nada de lo que apaga la duda del cobro (#933)
   if (subtotal === 0) $('descuento-form').hidden = true;
   guardarTicket();
 
@@ -1375,12 +1389,14 @@ function agregarCodigo(leido, reintento = false) {
     return false;
   }
   if (!pieza) {
-    $('aviso').textContent = catalogo.size === 0
+    const rechazo = { aviso: catalogo.size === 0
       ? 'El catálogo no ha cargado. Recarga la página con red (F5).'
-      : `Código no encontrado: ${codigo}`;
+      : `Código no encontrado: ${codigo}` };
+    $('aviso').textContent = rechazo.aviso;
     $('aviso').style.color = '#D72B32';
     // La pieza pudo etiquetarse después de abrir la caja: se baja el catálogo y se reintenta una vez.
-    if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (buscarPieza(codigo)) agregarCodigo(leido, true); });
+    const sigue = escaneoVigente(rechazo);
+    if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (sigue() && buscarPieza(codigo)) agregarCodigo(leido, true); });
     return false;
   }
 
@@ -1399,14 +1415,16 @@ function agregarCodigo(leido, reintento = false) {
       .reduce((suma, l) => suma + l.cantidad, 0);
     const sinExistencia = avisoExistencia(pieza.nombre, pieza.stock, enTicket, cantidad);
     if (sinExistencia) {
+      const rechazo = { aviso: sinExistencia };
       $('aviso').textContent = sinExistencia;
       $('aviso').style.color = '#D72B32';
       if (puedeVenderEnMano(pieza, enTicket)) ofrecerEnMano(pieza);
       // #884: el último mensaje de avisoExistencia (0 aquí y fuera del ticket) no dice cuál de las tres cosas pasó: se le pregunta al servidor.
-      if (pieza.stock <= 0 && enTicket === 0 && navigator.onLine) dondeHay(pieza, sinExistencia);
+      if (pieza.stock <= 0 && enTicket === 0 && navigator.onLine) dondeHay(pieza, sinExistencia, rechazo);
       // La existencia local puede estar vieja (otra caja, una devolución): se baja el catálogo una vez, como con «no encontrado», y si
       // ahora sí hay, entra. El aviso ya está en pantalla: no se retrasa.
-      if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (catalogo.get(pieza.codigo)?.stock > pieza.stock) escanear(leido, true); });
+      const sigue = escaneoVigente(rechazo);
+      if (!reintento && navigator.onLine) cargarCatalogo().then(() => { if (sigue() && catalogo.get(pieza.codigo)?.stock > pieza.stock) escanear(leido, true); });
       return false;
     }
   }
@@ -1420,14 +1438,30 @@ function agregarCodigo(leido, reintento = false) {
 }
 
 /**
+ * #946: ¿el reintento tardío del catálogo sigue siendo de este cliente? Se llama al rechazar el escaneo y devuelve la pregunta para cuando
+ * termine la descarga: sí solo si el ticket es el mismo y el aviso en pantalla sigue siendo el de ese rechazo (`rechazo.aviso`, que `dondeHay`
+ * actualiza si lo reemplaza). Si no, no se agrega nada ni suena.
+ * «Mismo ticket» = el mismo arreglo `lineas`: cada pieza que entra, cada cobro terminado y cada cancelación lo reemplazan por otro nuevo
+ * (solo la ✕ de un renglón lo cambia en el lugar, y eso sigue siendo el mismo ticket), así que no hace falta un contador aparte que cobrar() tuviera que subir.
+ */
+function escaneoVigente(rechazo) {
+  const ticket = lineas;
+  return () => ticket === lineas && $('aviso').textContent === rechazo.aviso;
+}
+
+/**
  * #884: dónde sí hay la pieza que aquí no hay. Sin esperar: el aviso de siempre ya está en pantalla y esta respuesta lo reemplaza solo si
  * sigue ahí (un escaneo posterior, o la pieza que la recarga ya agregó, lo habrían cambiado). Sin red o con error se queda el de siempre.
  * No toca el foco: el siguiente Enter del lector sigue cayendo en #codigo.
  */
-function dondeHay(pieza, avisoInmediato) {
+function dondeHay(pieza, avisoInmediato, rechazo) {
   fetch(`/api/existencia?codigo=${encodeURIComponent(pieza.codigo)}`)
     .then((r) => (r.ok ? r.json() : null))
-    .then((datos) => { if (datos && $('aviso').textContent === avisoInmediato) $('aviso').textContent = avisoDondeHay(pieza.nombre, datos); })
+    .then((datos) => {
+      if (!datos || $('aviso').textContent !== avisoInmediato) return;
+      $('aviso').textContent = avisoDondeHay(pieza.nombre, datos);
+      if (rechazo) rechazo.aviso = $('aviso').textContent;   // #946: el reintento tardío sigue reconociendo este aviso como el de su escaneo
+    })
     .catch(() => {});
 }
 
@@ -2532,7 +2566,14 @@ async function sincronizar() {
         break;                                   // sin red: se registra al volver
       }
       if (respuesta.status >= 500) break;
-      if (respuesta.status >= 400) console.error('Cajon: el servidor rechazo la apertura', apertura, respuesta.status);
+      if ([401, 408, 429].includes(respuesta.status)) break;   // sesión caducada o saturación pasajera: se reintenta sola, como las ventas (#949)
+      if (respuesta.status >= 400) {
+        // El servidor la rechazó (identificador, fecha, caja que no es de la tienda, permiso): ya no se reenvía, pero la pantalla lo dice (#949).
+        const rechazo = await respuesta.json().catch(() => null);
+        console.error('Cajon: el servidor rechazo la apertura', apertura, respuesta.status);
+        $('aviso').textContent = `El servidor no registró una apertura del cajón. ${rechazo?.error ? `${rechazo.error} ` : ''}Avísale a gerencia.`;
+        $('aviso').style.color = '#D72B32';
+      }
       await store('cajon', 'readwrite', (s) => s.delete(apertura.id));
     }
   } finally {
@@ -2721,9 +2762,30 @@ async function abrirTicket(id, resaltar = encontradas.get(id) ?? []) {
     if (!cuerpo.cancelada) $('ticket-contenido').insertAdjacentHTML('beforeend',
       `<p class="nota">Venta: ${escapar(cuerpo.id)}</p><button type="button" data-imprimir-ticket>Reimprimir ticket</button>`);
     revisarDevoluciones();   // #837: si hay una devolución de dinero resuelta que esta caja no ha mostrado, aparece ahora
+    return cuerpo;
   } catch (error) {
     $('ticket-contenido').innerHTML = `<p class="nota" style="color:#D72B32">${escapar(error.message || 'Sin red: para ver el ticket hace falta conexión.')}</p>`;
+    return null;
   }
+}
+
+// Lo que sigue a una petición de dinero (#945): el cajero pudo cerrar la ventana mientras esperaba (Cerrar o Esc ponen ticketAbierto en null),
+// así que esos finales no leen ticketAbierto: usan el id que copiaron ANTES de esperar, y el aviso va a la ventana si sigue abierta con ese ticket
+// o, si no, al aviso principal (visible, sin reabrir la ventana ni mover el foco del lector).
+const ticketVisible = (id) => $('dialogo-ticket').open && ticketAbierto?.id === id;
+function avisoTicket(id, texto, color) {
+  const aviso = ticketVisible(id) ? $('ticket-aviso') : $('aviso');
+  aviso.textContent = aviso === $('aviso') ? `Venta ${String(id).slice(0, 8)}: ${texto}` : texto;
+  aviso.style.color = color;
+  return aviso;
+}
+/** El ticket al dia: pintado en su ventana si sigue abierta; si no, solo sus datos (para el comprobante), sin reabrirla. */
+async function ticketAlDia(id) {
+  if (ticketVisible(id)) return abrirTicket(id);
+  try {
+    const r = await fetch(`/api/ventas/${id}?caja=${encodeURIComponent(cajaActual())}`);
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
 }
 
 $('ticket-cerrar').addEventListener('click', () => $('dialogo-ticket').close());
@@ -2900,10 +2962,13 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     const panel = boton.closest('.aprobacion');
     const aviso = panel.querySelector('.aviso-aprobacion');
     aviso.textContent = '';
-    const pieza = aprobacionCancelar.linea;   // devolución de dinero de una pieza (#837) o cancelación del ticket completo
+    const ticketId = ticketAbierto.id;       // copias de lo que hace falta ANTES de esperar la red: la ventana puede cerrarse (#945)
+    const aprobacion = aprobacionCancelar;
+    const fallo = (texto) => { aviso.textContent = texto; if (!ticketVisible(ticketId)) avisoTicket(ticketId, texto, '#D72B32'); };
+    const pieza = aprobacion.linea;   // devolución de dinero de una pieza (#837) o cancelación del ticket completo
     const peticion = pieza
-      ? { id: aprobacionCancelar.id, cantidad: aprobacionCancelar.cantidad, devolver_en: aprobacionCancelar.devolver_en, motivo: aprobacionCancelar.motivo, caja: cajaActual() }
-      : { motivo: aprobacionCancelar.motivo, caja: cajaActual() };
+      ? { id: aprobacion.id, cantidad: aprobacion.cantidad, devolver_en: aprobacion.devolver_en, motivo: aprobacion.motivo, caja: cajaActual() }
+      : { motivo: aprobacion.motivo, caja: cajaActual() };
     if (d.aprobarPin !== undefined) {
       const campoPin = panel.querySelector('.pin-dueno');
       if (!/^\d{6}$/.test(campoPin.value)) { aviso.textContent = 'El PIN es de 6 dígitos.'; campoPin.focus(); return; }
@@ -2915,29 +2980,29 @@ $('ticket-contenido').addEventListener('click', async (e) => {
     for (const b of panel.querySelectorAll('button')) b.disabled = true;
     let r, cuerpo;
     try {
-      r = await fetch(pieza ? `/api/ventas/${ticketAbierto.id}/lineas/${pieza}/cancelar` : `/api/ventas/${ticketAbierto.id}/cancelar`, {
+      r = await fetch(pieza ? `/api/ventas/${ticketId}/lineas/${pieza}/cancelar` : `/api/ventas/${ticketId}/cancelar`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(peticion),
       });
       cuerpo = await r.json();
     } catch {
       for (const b of panel.querySelectorAll('button')) b.disabled = false;
-      aviso.textContent = 'Sin red: no se pudo confirmar la cancelación. Reabre el ticket antes de devolver dinero o mercancía.';
+      fallo('Sin red: no se pudo confirmar la cancelación. Reabre el ticket antes de devolver dinero o mercancía.');
       return;
     }
     if (r.status === 202) {
       panel.innerHTML = `<p class="esperando">Esperando aprobación de gerencia…</p>
         <p class="nota">Puedes cerrar esta ventana: avisaremos aquí cuando responda.</p>`;
       if (pieza) revisarDevoluciones();   // la solicitud de una pieza se vigila con lo que dice el servidor (sobrevive a recargar y a varias a la vez)
-      else esperarAprobacion(cuerpo.solicitud_id, ticketAbierto.id);
+      else esperarAprobacion(cuerpo.solicitud_id, ticketId);
       return;
     }
     if (!r.ok) {
       for (const b of panel.querySelectorAll('button')) b.disabled = false;
-      aviso.textContent = cuerpo.error ?? 'No se pudo cancelar.';
+      fallo(cuerpo.error ?? 'No se pudo cancelar.');
       if (d.aprobarPin !== undefined) { panel.querySelector('.pin-dueno').value = ''; panel.querySelector('.pin-dueno').focus(); }
       return;
     }
-    await terminarCancelacion(r, cuerpo, pieza ? { linea: pieza, cantidad: aprobacionCancelar.cantidad } : { linea: undefined, cantidad: 1 });
+    await terminarCancelacion(r, cuerpo, pieza ? { linea: pieza, cantidad: aprobacion.cantidad, ticketId } : { linea: undefined, cantidad: 1, ticketId });
     return;
   }
 
@@ -2970,34 +3035,40 @@ $('ticket-contenido').addEventListener('click', async (e) => {
       return;
     }
     for (const b of form.querySelectorAll('button')) b.disabled = true;
+    const ticketId = ticketAbierto.id;   // copia ANTES de esperar la red: la ventana puede cerrarse (#945)
     let r, cuerpo;
     try {
-      r = await fetch(`/api/ventas/${ticketAbierto.id}/cupon`, {
+      r = await fetch(`/api/ventas/${ticketId}/cupon`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id: idCancelacion, motivo, caja: cajaActual(),
-          lineas: d.cuponLinea ? [{ linea: Number(d.cuponLinea), cantidad }] : 'todo' }),
+          lineas: d.cuponLinea ? [{ linea: Number(d.cuponLinea), cantidad }] : 'todo', ...aprobacionCupon(form) }),
       });
       cuerpo = await r.json();
     } catch {
       for (const b of form.querySelectorAll('button')) b.disabled = false;
-      $('ticket-aviso').textContent = 'Sin red: no se pudo dar el cupón. Reabre el ticket antes de entregar nada.';
-      $('ticket-aviso').style.color = '#D72B32';
+      avisoTicket(ticketId, 'Sin red: no se pudo dar el cupón. Reabre el ticket antes de entregar nada.', '#D72B32');
+      return;
+    }
+    if (r.status === 403 && cuerpo.requiere_aprobacion) {   // #948: compra fuera del plazo de devoluciones
+      for (const b of form.querySelectorAll('button')) b.disabled = false;
+      if (!ticketVisible(ticketId)) { avisoTicket(ticketId, `${cuerpo.error ?? 'Hace falta aprobación.'} No se devolvió nada: reabre el ticket.`, '#D72B32'); return; }   // ventana cerrada a media petición (#945)
+      $('ticket-aviso').textContent = '';
+      pedirAprobacionCupon(form, cuerpo);
       return;
     }
     if (!r.ok) {
       for (const b of form.querySelectorAll('button')) b.disabled = false;
-      $('ticket-aviso').textContent = cuerpo.error ?? 'No se pudo dar el cupón.';
-      $('ticket-aviso').style.color = '#D72B32';
+      if (form.querySelector('.pin-cupon')) { form.querySelector('.pin-cupon').value = ''; form.querySelector('.pin-cupon').focus(); }
+      avisoTicket(ticketId, cuerpo.error ?? 'No se pudo dar el cupón.', '#D72B32');
       return;
     }
-    idCancelacion = null;
-    await abrirTicket(ticketAbierto.id);
+    if (ticketVisible(ticketId)) idCancelacion = null;
+    await ticketAlDia(ticketId);
     const impreso = await imprimirVale(cuerpo.cupon);
     pintarImpresora();
-    $('ticket-aviso').textContent = `Cupón de ${dolares(cuerpo.cupon.importe)} ${impreso ? 'impreso' : 'listo, pero no se imprimió: usa «Reimprimir cupón»'}.`
+    avisoTicket(ticketId, `Cupón de ${dolares(cuerpo.cupon.importe)} ${impreso ? 'impreso' : 'listo, pero no se imprimió: usa «Reimprimir cupón»'}.`
       + ' No sale dinero del cajón: regresa la pieza al anaquel y entrega el cupón.'
-      + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} pagados con Dolarones regresaron al socio.` : '');
-    $('ticket-aviso').style.color = impreso ? '#1f7a4d' : '#D72B32';
+      + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} pagados con Dolarones regresaron al socio.` : ''), impreso ? '#1f7a4d' : '#D72B32');
     await cargarTickets();
     await actualizarCorte();
     await cargarCatalogo();
@@ -3022,10 +3093,11 @@ $('ticket-contenido').addEventListener('click', async (e) => {
       return;
     }
     boton.disabled = true;
+    const ticketId = ticketAbierto.id;   // copia ANTES de esperar la red: la ventana puede cerrarse (#945)
     // La caja donde se devuelve el dinero: su corte cuenta la devolucion.
     const ruta = d.confirmarLinea
-      ? `/api/ventas/${ticketAbierto.id}/lineas/${d.confirmarLinea}/cancelar`
-      : `/api/ventas/${ticketAbierto.id}/cancelar`;
+      ? `/api/ventas/${ticketId}/lineas/${d.confirmarLinea}/cancelar`
+      : `/api/ventas/${ticketId}/cancelar`;
     let r, cuerpo;
     try {
       r = await fetch(ruta, {
@@ -3035,8 +3107,12 @@ $('ticket-contenido').addEventListener('click', async (e) => {
       cuerpo = await r.json();
     } catch {
       boton.disabled = false;
-      $('ticket-aviso').textContent = 'Sin red: no se pudo confirmar la cancelación. Reabre el ticket antes de devolver dinero o mercancía.';
-      $('ticket-aviso').style.color = '#D72B32';
+      avisoTicket(ticketId, 'Sin red: no se pudo confirmar la cancelación. Reabre el ticket antes de devolver dinero o mercancía.', '#D72B32');
+      return;
+    }
+    // Sin ventana no hay donde pedir el PIN: se avisa y no se guarda una aprobación a medias.
+    if (r.status === 403 && cuerpo.requiere_aprobacion && !ticketVisible(ticketId)) {
+      avisoTicket(ticketId, 'Hace falta la aprobación de gerencia: no se devolvió nada. Reabre el ticket y vuelve a intentarlo.', '#D72B32');
       return;
     }
     // Pasados 5 minutos del cobro el cajero necesita al dueño: se le ofrece en esta misma ventana.
@@ -3057,27 +3133,29 @@ $('ticket-contenido').addEventListener('click', async (e) => {
       form.parentElement.querySelector('.pin-dueno')?.focus();
       return;
     }
-    await terminarCancelacion(r, cuerpo, { linea: d.confirmarLinea, cantidad });
+    await terminarCancelacion(r, cuerpo, { linea: d.confirmarLinea, cantidad, ticketId });
   }
 });
 
 /** Lo que sigue a una cancelacion enviada (pieza o ticket): aviso, ticket al dia, comprobante y existencias. */
-async function terminarCancelacion(r, cuerpo, { linea, cantidad }) {
+async function terminarCancelacion(r, cuerpo, { linea, cantidad, ticketId }) {
   const pieza = linea ? (cantidad > 1 ? 'las piezas' : 'la pieza') : 'las piezas';
-  $('ticket-aviso').textContent = r.ok
+  const texto = r.ok
     ? `${linea ? 'Pieza cancelada' : 'Ticket cancelado'}. Devuelve ${pesos(cuerpo.devuelto ?? 0)} y regresa ${pieza} al anaquel.`
       + (cuerpo.dolarones ? ` Los ${dolares(cuerpo.dolarones)} regresaron al socio o al mismo vale, con su vencimiento original.` : '')
     : (cuerpo.error ?? 'No se pudo cancelar.');
-  $('ticket-aviso').style.color = r.ok ? '#1f7a4d' : '#D72B32';
-  idCancelacion = null;
-  const aviso = $('ticket-aviso').textContent;
-  await abrirTicket(ticketAbierto.id);
-  $('ticket-aviso').textContent = aviso;
+  if (ticketVisible(ticketId)) idCancelacion = null;
+  // Se imprime el ticket que devolvio el servidor, no ticketAbierto: la ventana pudo cerrarse mientras se esperaba (#945).
+  const ticket = await ticketAlDia(ticketId);
+  const aviso = avisoTicket(ticketId, texto, r.ok ? '#1f7a4d' : '#D72B32');
   // El comprobante sale solo la primera vez; un reenvio (duplicada, ya_estaba) se reimprime con su boton.
-  if (r.ok && !cuerpo.duplicada && !cuerpo.ya_estaba && ticketAbierto) {
-    const i = ticketAbierto.devoluciones.findIndex((x) => x.id === cuerpo.id);
-    if (!linea || i >= 0) {
-      await imprimirComprobante(linea ? comprobanteDevolucion(ticketAbierto, i) : comprobanteCancelacion(ticketAbierto));
+  if (r.ok && !cuerpo.duplicada && !cuerpo.ya_estaba) {
+    const i = ticket ? ticket.devoluciones.findIndex((x) => x.id === cuerpo.id) : -1;
+    if (ticket && (!linea || i >= 0)) {
+      await imprimirComprobante(linea ? comprobanteDevolucion(ticket, i) : comprobanteCancelacion(ticket), aviso);
+    } else if (!ticket) {
+      aviso.textContent += ' No se pudo traer el ticket para imprimir el comprobante: ábrelo y usa «Imprimir comprobante».';
+      aviso.style.color = '#D72B32';
     }
   }
   await cargarTickets();
@@ -3101,6 +3179,25 @@ function panelAprobacion({ error, duenos = [] }, conVolver = false) {
     <div class="aviso-dialogo aviso-aprobacion"></div>
   </div>`;
 }
+
+/**
+ * Cupón de una compra fuera del plazo de devoluciones (#948): el servidor pide al supervisor o a gerencia. Sus campos salen en el mismo formulario
+ * (sin ventana nueva) y la cajera toca «Devolver en cupón» otra vez con el PIN escrito; `aprobacionCupon` lo agrega al pedido, con el mismo id.
+ */
+function pedirAprobacionCupon(form, { error, duenos = [] }) {
+  form.querySelector('.aprobacion-cupon')?.remove();
+  const bloque = document.createElement('div');
+  bloque.className = 'aprobacion-cupon';
+  bloque.innerHTML = `<p class="nota" style="color:#D72B32;margin:0">${escapar(error)}</p>${duenos.length === 0
+    ? '<p class="nota">Nadie con permiso tiene PIN: pide a gerencia que entre a esta caja.</p>'
+    : `<select class="aprobador-cupon" aria-label="Quién aprueba">${duenos.map((u) => `<option value="${escapar(u.correo)}">${escapar(u.nombre || u.correo)}</option>`).join('')}</select>
+       <input type="password" class="pin-cupon" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN de quien aprueba (6 dígitos)">
+       <small>Escribe el PIN y toca «Devolver en cupón» otra vez.</small>`}`;
+  form.querySelector('.cupon').before(bloque);
+  bloque.querySelector('.pin-cupon')?.focus();
+}
+const aprobacionCupon = (form) => form.querySelector('.pin-cupon')
+  ? { aprobador: form.querySelector('.aprobador-cupon').value, pin: form.querySelector('.pin-cupon').value } : {};
 
 /** Pregunta cada 5 s si el dueño ya respondió; la caja puede seguir cobrando mientras tanto. */
 function esperarAprobacion(solicitudId, ticketId) {
@@ -3214,9 +3311,8 @@ async function revisarDevoluciones() {
 }
 
 /** Hoja de la devolucion para que el cliente firme; se guarda con el corte. */
-async function imprimirComprobante(datos) {
+async function imprimirComprobante(datos, aviso = $('ticket-aviso')) {
   const ok = await imprimirDevolucion(datos);
-  const aviso = $('ticket-aviso');
   aviso.textContent = `${aviso.textContent} ${ok
     ? 'Comprobante impreso: que lo firme el cliente y guárdalo con el corte.'
     : `No se imprimió el comprobante (${errorImpresora() || 'impresora no conectada'}). Conéctala y usa «Imprimir comprobante».`}`.trim();
@@ -3345,6 +3441,7 @@ async function abrirCajonRegistrado(aviso) {
   }
 }
 $('abrir-cajon').addEventListener('click', async () => {
+  if (!exigirCaja()) return;   // #949: sin caja elegida la apertura quedaba registrada sin caja
   await abrirCajonRegistrado($('aviso'));
   $('codigo').focus();
 });
@@ -3455,14 +3552,16 @@ $('retiro-registrar').addEventListener('click', async () => {
     }
     if (!r.ok) { $('retiro-aviso').textContent = retiro.error ?? 'No se pudo registrar.'; if (pidiendoPin) { $('retiro-pin').value = ''; $('retiro-pin').focus(); } return; }
     $('dialogo-retiro').close();
-    await abrirCajon();
+    const abrio = await abrirCajon();
     imprimirRetiro(retiro).then(pintarImpresora);
     // Lo que se muestra y se imprime es lo que el servidor registró, no lo que hay ahora en el campo.
-    $('aviso').textContent = retiro.tipo === 'gasto'
+    // El retiro ya quedó registrado: si el cajón no abrió, el aviso lo dice (#949, mismo texto que el cobro en efectivo, #817).
+    const falla = abrio ? null : textoFalla('cajon');
+    $('aviso').textContent = (retiro.tipo === 'gasto'
       ? `Gasto de ${pesos(retiro.importe)} registrado.`
       : retiro.tipo === 'terminal' ? `Pago de la terminal de ${pesos(retiro.importe)} registrado. Que firme el comprobante.`
-      : `Retiro de ${pesos(retiro.importe)} registrado. Firmen el comprobante.`;
-    $('aviso').style.color = '#1f7a4d';
+      : `Retiro de ${pesos(retiro.importe)} registrado. Firmen el comprobante.`) + (falla ? ` ${falla.texto}` : '');
+    $('aviso').style.color = falla && !falla.calmo ? '#D72B32' : '#1f7a4d';
     $('codigo').focus();
   } catch {
     $('retiro-aviso').textContent = 'Sin red: necesita conexión para quedar registrado.';
@@ -3964,7 +4063,9 @@ refrescarMeta();   // al abrir la caja
 /* ---------- fin de la meta semanal (#940) ---------- */
 
 pintarRed();
-await cargarCatalogo();
+// Sin esperar (#946): el catálogo baja de la red mientras se pinta el ticket recuperado, se manda la cola y se reconecta la impresora. Nada de lo que
+// sigue lo usa (pintar, el descuento, el socio y la cola leen el ticket y el servidor); la copia local entra primero y cualquier escaneo usa lo que haya.
+cargarCatalogo();
 if (ticketRecuperado) {
   pintarDescuento();   // si seguía esperando a gerencia, vuelve a preguntar
   if (socio) pintarSocio();   // con un cobro en duda vuelve también el socio de esa venta (#933)
