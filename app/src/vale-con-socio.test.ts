@@ -526,6 +526,71 @@ test('cupón nuevo con toda la parte de Dolarones pagada por el cupón viejo; re
   } finally { t.db.close(); }
 });
 
+// #927 + #948: el cupón de una compra fuera del plazo de devoluciones pide aprobación también en un ticket de socio + cupón, y con ella el
+// reparto (cuenta primero, cupón viejo al cupón nuevo) sale igual que dentro del plazo.
+test('fuera del plazo, devolver en cupón un ticket de socio + cupón pide aprobación sin escribir nada; con el PIN el reparto es el mismo y «Cancélalas normal» no gasta intentos (#927, #948)', async () => {
+  const t = abrir();
+  try {
+    const CAJERA = 'cajera@prueba.mx', SUP = 'sup@prueba.mx', PIN_SUP = '735190';
+    t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, caja, creado_en, actualizado_en) values
+      ('${CAJERA}', 'Cajera', 'cajero', 1, '', '', ''), ('${SUP}', 'Sara', 'cajero,supervisor', 1, '', '', '')`).run();
+    assert.equal((await t.pedir('/api/cuentas/pin', { correo: SUP, pin: PIN_SUP }, 'PUT')).status, 200);
+    const envejecer = (id: string) => t.db.prepare('update ventas set creado_en = ?, registrado_en = ? where id = ?')
+      .run(new Date(Date.now() - 8 * DIA).toISOString(), new Date(Date.now() - 8 * DIA).toISOString(), id);
+    const intentos = () => t.db.prepare('select coalesce(sum(fallos), 0) as n from intentos_aprobacion').get()!.n as number;   // PIN fallados
+
+    // El mismo ticket de la prueba «dinero primero…»: 3 piezas de $250, 50 D de cupón viejo, 300 D de la cuenta y $400 en efectivo; cobrado hace 8 días.
+    const m = await ticketMixto(t, 3, 5000, 30000);
+    // El que solo paga con Dolarones (50 D de cupón + 450 D de cuenta), también de hace 8 días.
+    const cero = await ticketMixto(t, 2, 5000, 45000);
+    envejecer(m.id);
+    envejecer(cero.id);
+    t.env.DEV_USUARIO = CAJERA;                                  // quien devuelve es una cajera: no aprueba sola
+
+    // Sin aprobación: 403, dice quién puede aprobar y no se escribe nada.
+    const antes = t.foto();
+    const sin = await m.devolver();
+    assert.equal(sin.status, 403, JSON.stringify(sin.cuerpo));
+    assert.equal(sin.cuerpo.requiere_aprobacion, true);
+    assert.equal(sin.cuerpo.fuera_de_plazo, true);
+    assert.ok(sin.cuerpo.duenos.some((u: { correo: string }) => u.correo === SUP));
+    assert.equal(t.foto(), antes);
+    assert.equal(nuevosCupones(t), 0);
+
+    // Con el PIN de la supervisora, pieza por pieza: los mismos importes que dentro del plazo.
+    const aprobado = { aprobador: SUP, pin: PIN_SUP };
+    const a = await m.devolver(aprobado);
+    assert.equal(a.status, 201, JSON.stringify(a.cuerpo));
+    assert.equal(a.cuerpo.cupon.importe, 25000);
+    assert.deepEqual([a.cuerpo.dolarones, a.cuerpo.dolarones_cuenta, a.cuerpo.cupon_papel], [0, 0, 0]);
+    const b = await m.devolver(aprobado);
+    assert.equal(b.cuerpo.cupon.importe, 15000);
+    assert.deepEqual([b.cuerpo.dolarones, b.cuerpo.dolarones_cuenta, b.cuerpo.cupon_papel], [10000, 10000, 0]);
+    const idC = crypto.randomUUID();
+    const c = await m.devolver({ ...aprobado, id: idC });
+    assert.equal(c.status, 201, JSON.stringify(c.cuerpo));
+    assert.equal(c.cuerpo.cupon.importe, 5000);
+    assert.deepEqual([c.cuerpo.dolarones, c.cuerpo.dolarones_cuenta, c.cuerpo.cupon_papel], [25000, 20000, 5000]);
+    assert.equal(t.lote(m.s.lote).restante, 35000, 'la cuenta recupera todo lo que gastó');
+    assert.equal(t.restante(m.cupon.id), 0, 'el cupón viejo no se restaura');
+    assert.deepEqual([bitacoraVieja(t, m.cupon.id, 'canje'), bitacoraVieja(t, m.cupon.id, 'reverso_canje'), bitacoraVieja(t, m.cupon.id, 'retiro')], [-5000, 5000, -5000]);
+    assert.deepEqual(m.venta(), { total: 75000, dolarones: 35000, devuelto: 40000, devuelto_cupon: 40000, dolarones_devueltos: 35000 });
+    assert.equal(t.db.prepare('select aprobado_por from vales_dolarones where id = ?').get(idC)!.aprobado_por, SUP, 'el cupón nuevo dice quién aprobó');
+    assert.equal(nuevosCupones(t), 3);
+    assert.equal(intentos(), 0);
+
+    // La pieza que pagó toda la cuenta: «Cancélalas normal» sale ANTES de mirar la aprobación; un PIN equivocado no cuenta como intento.
+    const fotoCero = t.foto();
+    for (const extra of [{}, { aprobador: SUP, pin: '000000' }]) {
+      const r = await cero.devolver(extra);
+      assert.equal(r.status, 409, JSON.stringify(r.cuerpo));
+      assert.match(r.cuerpo.error, /Cancélalas normal/);
+    }
+    assert.equal(intentos(), 0);
+    assert.equal(t.foto(), fotoCero);
+  } finally { t.db.close(); }
+});
+
 test('si el cupón viejo pagó todo y la pieza no mueve dinero, igual queda un cupón nuevo y el ticket ya no se cancela completo; el dinero de la pieza sigue bloqueado (#927)', async () => {
   const t = abrir();
   try {

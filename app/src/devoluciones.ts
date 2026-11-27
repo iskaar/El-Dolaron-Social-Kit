@@ -9,7 +9,7 @@
  * Reglas de Isaac (30/09):
  * - Dinero primero: la pieza se devuelve en dinero hasta lo que el cliente pago
  *   en dinero; solo el excedente regresa como Dolarones al saldo.
- * - Con motivo. Devolver en cupon lo hace el cajero solo; devolver DINERO lo aprueba el dueno o un supervisor (#837, 16/11/2026): ver cancelarPieza.
+ * - Con motivo. Devolver en cupon lo hace el cajero solo dentro de 7 dias (despues, #948, tambien lo aprueba el supervisor); devolver DINERO lo aprueba el dueno o un supervisor (#837, 16/11/2026): ver cancelarPieza.
  */
 
 import { cajaDe, nombreCaja } from './corte.ts';
@@ -401,6 +401,46 @@ export async function listarSolicitudes(env: Env, correo: string, caja: string):
   return json(results.map((f) => ({ ...f, hecha: !!f.hecha })));
 }
 
+/**
+ * Plazo de devoluciones (#948): hasta 7 dias despues de la compra la devolucion en cupon la autoriza el cajero; pasado ese plazo, el encargado
+ * (regla de gerencia que ya cita la guia de la caja, ayuda-contenido.js: «pasaron más de 7 días … llama al encargado»). Dias corridos de 24 h.
+ */
+export const PLAZO_DEVOLUCION_MS = 7 * 86_400_000;
+
+/**
+ * ¿Ya paso el plazo? `creado_en` lo manda la caja (G1 del 16/11: sin limite inferior), asi que se toma la mas antigua entre ella y `registrado_en`
+ * (la hora a la que la venta llego al servidor, que la caja no controla): una hora recien puesta a mano no rejuvenece una venta vieja, y una venta
+ * cobrada sin red se mide desde que se cobro. Una fecha ilegible se ignora; sin ninguna legible se trata como fuera de plazo.
+ */
+export function fueraDePlazo(creadoEn: string, registradoEn: string, ahoraMs: number): boolean {
+  const fechas = [creadoEn, registradoEn].map((f) => Date.parse(f)).filter(Number.isFinite);
+  return fechas.length === 0 || ahoraMs - Math.min(...fechas) > PLAZO_DEVOLUCION_MS;
+}
+
+/**
+ * Cupon de una venta fuera de plazo: lo aprueba el supervisor o gerencia, igual que devolver dinero (#837): ellos mismos con su sesion, o el cajero con el
+ * PIN de uno de ellos en esta caja (aprobadorConPin: mismo contador de intentos). Sin solicitud a distancia: esa resuelve UNA pieza de dinero (resolverDevolucion).
+ * `por`: quien aprobo (queda en el cupon, `aprobado_por`), o null dentro del plazo. Se llama ya validado el pedido: nada se escribe aqui.
+ */
+async function aprobacionFueraDePlazo(
+  env: Env, venta: Pick<VentaFila, 'id' | 'creado_en'>, cuerpo: { aprobador?: unknown; pin?: unknown }, correo: string, caja: string, tienda: string,
+): Promise<{ por: string | null } | { res: Response }> {
+  const registrada = await env.DB.prepare('select registrado_en from ventas where id = ?').bind(venta.id).first<{ registrado_en: string }>();
+  if (!fueraDePlazo(venta.creado_en, registrada?.registrado_en ?? '', Date.now())) return { por: null };
+  const usuario = await leerUsuario(env, correo);
+  if (usuario && apruebaDinero(usuario.roles)) return { por: correo };
+  if (cuerpo.aprobador) {
+    const aprobo = await aprobadorConPin(env, correo, cuerpo.aprobador, cuerpo.pin, caja, tienda);
+    return 'error' in aprobo ? { res: json({ error: aprobo.error }, aprobo.status) } : { por: aprobo.por };
+  }
+  return { res: json({
+    requiere_aprobacion: true, fuera_de_plazo: true,
+    error: 'Esta compra tiene más de 7 días: devolverla en cupón necesita la aprobación del supervisor o de gerencia. '
+      + 'Aprueba con el PIN del supervisor o de gerencia (si esta pantalla no lo ofrece, recarga la caja).',
+    duenos: await aprobadoresDeDinero(env, tienda),
+  }, 403) };
+}
+
 const piezasQueQuedan = async (env: Env, ventaId: string) => (await env.DB.prepare(
   'select sum(cantidad - cancelada_cantidad) as restan from venta_lineas where venta_id = ?',
 ).bind(ventaId).first<{ restan: number }>())!.restan;
@@ -411,11 +451,12 @@ const piezasQueQuedan = async (env: Env, ventaId: string) => (await env.DB.prepa
  * queda en `devoluciones.cupon` y `ventas.devuelto_cupon` (el corte lo vuelve a sumar) y
  * sale un cupón por `porcentajeCupon` de ese dinero. Lo pagado con Dolarones regresa al socio
  * como siempre. `id` (de la caja) es el id del cupón: un reenvio no emite dos.
+ * Fuera del plazo de devoluciones (PLAZO_DEVOLUCION_MS) pide la aprobacion del supervisor o de gerencia (#948).
  * `lineas`: [{ linea, cantidad }] o 'todo' (lo que queda del ticket).
  */
 export async function devolverEnCupon(ventaId: string, request: Request, env: Env, correo: string, tienda: string): Promise<Response> {
   if (!UUID.test(ventaId)) return json({ error: 'Identificador de venta invalido.' }, 400);
-  const cuerpo = (await request.json().catch(() => ({}))) as { id?: unknown; lineas?: unknown; motivo?: unknown; caja?: unknown };
+  const cuerpo = (await request.json().catch(() => ({}))) as { id?: unknown; lineas?: unknown; motivo?: unknown; caja?: unknown; aprobador?: unknown; pin?: unknown };
   const id = String(cuerpo.id ?? '');
   if (!UUID.test(id)) return json({ error: 'Identificador invalido.' }, 400);
   const motivo = String(cuerpo.motivo ?? '').trim().slice(0, 200);
@@ -491,8 +532,10 @@ export async function devolverEnCupon(ventaId: string, request: Request, env: En
   if (importeCupon <= 0) {
     return json({ error: 'Esas piezas se pagaron con Dolarones: no hay dinero que pasar a cupón. Cancélalas normal.' }, 409);
   }
+  const plazo = await aprobacionFueraDePlazo(env, venta, cuerpo, correo, caja, tienda);   // #948
+  if ('res' in plazo) return plazo.res;
   const { cupon, sentencia } = nuevoCupon(env, {
-    id, origen: 'devolucion', importe: importeCupon, ahora, ventaOrigen: ventaId, motivo, autor: correo,
+    id, origen: 'devolucion', importe: importeCupon, ahora, ventaOrigen: ventaId, motivo, autor: correo, aprobadoPor: plazo.por ?? undefined,
   });
 
   try {

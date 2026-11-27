@@ -340,8 +340,8 @@ test('consultas: ninguna subconsulta por pieza sobre venta_lineas, nada de compo
   assert.equal((await llamar(t, 'dias=28')).status, 200);
   assert.ok(!visto.some((sql) => /exists\s*\(\s*select 1 from venta_lineas/i.test(sql)), 'sin exists por pieza sobre venta_lineas');
   for (const sql of visto) assert.ok((sql.match(/\bunion\b/gi) ?? []).length + 1 <= 5, sql.slice(0, 80));
-  // 14 prepare: el acceso del usuario y 13 del reporte (10 de la vista y 3 del bono).
-  assert.ok(visto.length <= 14, `${visto.length} consultas`);
+  // 15 prepare: el acceso del usuario y 14 del reporte (10 de la vista y 4 del bono).
+  assert.ok(visto.length <= 15, `${visto.length} consultas`);
   t.db.close();
 });
 
@@ -364,7 +364,7 @@ test('A1: con una tienda elegida, ventas, tickets, cancelaciones y apartados son
   for (const m of ['socios', 'socios_compraron', 'capturadas', 'vendidas_14', 'dias_trab']) assert.equal(salk.totales[m], todo.totales[m], m);
   const sinFiltro = (c: any) => c.personas.filter((p: Persona) => p.correo).map((p: Persona) => [p.correo, p.socios, p.capturadas, p.dias_trabajados]);
   assert.deepEqual(sinFiltro(salk), sinFiltro(todo));
-  // El bono es del negocio completo: nunca cambia por la tienda.
+  // El bono se calcula por tienda: el filtro `tienda=` no lo cambia.
   assert.deepEqual(salk.semanas, todo.semanas); assert.deepEqual(salk.config, todo.config);
   assert.equal((await llamar(t, 'dias=10&tienda=narnia')).status, 400);
   // La pantalla lo dice: que se filtra, que no, y las tarjetas de lo que no se filtra lo marcan.

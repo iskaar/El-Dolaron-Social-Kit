@@ -58,6 +58,9 @@
   .estado { font-weight: 700; font-size: 15px; }
   .estado.ok { color: var(--verde); }
   .estado.ojo { color: var(--azul); }
+  .q { width: 44px; height: 44px; flex: none; border-radius: 50%; border: 2px solid var(--azul); background: #fff; color: var(--azul); font: 700 20px Archivo, sans-serif; cursor: pointer; }
+  .q[aria-expanded="true"] { background: var(--azul); color: #fff; }
+  ul.h li.lograda b { color: var(--verde); }
   .bono { background: var(--amarillo); color: var(--azul); font-weight: 700; font-size: 13px; padding: 3px 10px; border-radius: 8px; white-space: nowrap; }
 
   /* siguiente paso */
@@ -133,9 +136,20 @@
     <button type="button" id="premio-cerrar">Genial</button>
   </section>
 
+  <section class="premio" id="meta-aviso" aria-live="polite" hidden>
+    <div class="moneda" aria-hidden="true">★</div>
+    <div><b id="meta-aviso-titulo"></b><span id="meta-aviso-texto"></span></div>
+    <button type="button" id="meta-aviso-cerrar">Genial</button>
+  </section>
+
   <section class="card" aria-labelledby="t-tienda" id="tienda" hidden>
-    <div class="card-cab"><h2 id="t-tienda">Meta de la tienda</h2><span class="nota">Entre todas</span></div>
-    <div class="fila"><span class="gran" id="tienda-pct"></span><span class="bono" id="tienda-bono" hidden></span></div>
+    <div class="card-cab"><h2 id="t-tienda">Meta de la tienda</h2><span class="nota" id="tienda-nombre">Entre todas</span></div>
+    <div class="fila">
+      <div><span class="nota" id="meta-etq" style="display:block"></span><span class="gran" id="tienda-pct"></span></div>
+      <span class="bono" id="tienda-bono" hidden></span>
+      <button type="button" class="q" id="metas-btn" aria-expanded="false" aria-controls="metas-lista" aria-label="Ver todas las metas de la semana">?</button>
+    </div>
+    <ul class="h" id="metas-lista" hidden></ul>
     <div class="barra" id="barra" role="img">
       <div class="lleno" id="barra-lleno"></div>
       <div class="marca-t" style="left:25%"><span>25 %</span></div>
@@ -145,6 +159,15 @@
     </div>
     <div class="estado" id="tienda-estado"></div>
     <p class="nota" id="tienda-nota"></p>
+  </section>
+
+  <section class="card" aria-labelledby="t-bono" id="bono-pasado" hidden>
+    <div class="card-cab"><h2 id="t-bono">Mi bono de la semana pasada</h2><span class="nota" id="bono-semana"></span></div>
+    <div class="cartera" id="bono-cifras" hidden>
+      <div class="caja"><span class="num v" id="bono-pesos"></span><span class="nota">En efectivo</span></div>
+      <div class="caja" id="bono-d-caja" hidden><span class="num" id="bono-d"></span><span class="nota">En Dolarones</span></div>
+    </div>
+    <p class="nota" id="bono-nota"></p>
   </section>
 
   <section class="sig" id="sig" aria-labelledby="t-sig" hidden>
@@ -198,7 +221,7 @@
   </section>
 </main>
 <script type="module">
-import { anillos, ritmoPct, diasQuedan, estadoTienda, premiosNuevos, estanteria, siguientePaso, PLURAL, dd } from '/retos.js';
+import { anillos, ritmoPct, diasQuedan, estadoTienda, panelMetas, metasNuevas, premiosNuevos, estanteria, siguientePaso, PLURAL, pesos, dd } from '/retos.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, texto, clase) => { const e = Object.assign(document.createElement(tag), { textContent: texto }); if (clase) e.className = clase; return e; };
@@ -207,6 +230,10 @@ const dia = (iso, opciones) => new Date(iso.length === 10 ? `${iso}T12:00:00` : 
 const minuscula = (t) => `${t.charAt(0).toLowerCase()}${t.slice(1)}`;
 const CLAVE_VISTO = 'retos-logro-visto';
 const leerVisto = () => { try { return localStorage.getItem(CLAVE_VISTO); } catch { return null; } };
+// Metas ya celebradas esta semana: "AAAA-MM-DD|n".
+const CLAVE_METAS = 'retos-metas-vistas';
+const leerMetas = (lunes) => { try { const [l, n] = (localStorage.getItem(CLAVE_METAS) ?? '').split('|'); return l === lunes ? Number(n) || 0 : 0; } catch { return 0; } };
+const guardarMetas = (lunes, n) => { try { localStorage.setItem(CLAVE_METAS, `${lunes}|${n}`); } catch { /* sin memoria: el aviso solo se repite */ } };
 const guardarVisto = (id) => { try { localStorage.setItem(CLAVE_VISTO, id); } catch { /* sin memoria: el aviso solo se repite */ } };
 
 // Una insignia por logro; solo cambia el dibujo del centro. Cadenas fijas del código, nunca datos.
@@ -261,22 +288,62 @@ function pintar(m) {
     $('premio-cerrar').onclick = () => { guardarVisto(m.logros[0].id); $('premio').hidden = true; };
   }
 
-  // 2. Meta de la tienda (solo porcentaje)
-  const ritmo = ritmoPct(s.dia);
-  const est = estadoTienda(m);
-  $('tienda-pct').textContent = `${m.tienda_pct} %`;
-  $('barra-lleno').style.width = `${Math.min(m.tienda_pct, 100)}%`;
-  $('ritmo').style.left = `${ritmo}%`;
-  $('ritmo').classList.toggle('der', ritmo > 70);
-  $('barra').setAttribute('aria-label', `La tienda lleva ${m.tienda_pct} por ciento de la meta semanal. El ritmo esperado hoy es ${ritmo} por ciento.`);
-  $('tienda-estado').textContent = `${est.icono} ${est.texto}`;
-  $('tienda-estado').className = `estado ${m.tienda_alcanzada || m.tienda_pct >= ritmo ? 'ok' : 'ojo'}`;
-  if (m.bono_pct > 0) {
-    const b = m.bono_pct.toLocaleString('es-MX', { maximumFractionDigits: 2 });
-    $('tienda-bono').textContent = `Bono ${b} %`; $('tienda-bono').hidden = false;
-    $('tienda-nota').textContent = `Si las ventas de la semana superan la meta, hay bono en efectivo del ${b} % de esas ventas, repartido por días trabajados.`;
+  // 2. Metas de la tienda (solo porcentaje; sin metas, la sección no aparece)
+  const panel = panelMetas(m.metas);
+  if (!panel.vacio) {
+    const ritmo = ritmoPct(s.dia);
+    const est = estadoTienda(m);
+    const meta = panel.actual;
+    $('tienda-nombre').textContent = m.tienda || 'Entre todas';
+    $('meta-etq').textContent = meta ? meta.etiqueta : '¡Todas las metas logradas!';
+    $('tienda-pct').textContent = meta ? `${meta.pct} %` : '★';
+    $('barra').hidden = panel.completa;   // celebración: sin barra vacía
+    $('barra-lleno').style.width = `${Math.min(meta ? meta.pct : 100, 100)}%`;
+    $('ritmo').style.left = `${ritmo}%`;
+    $('ritmo').classList.toggle('der', ritmo > 70);
+    $('barra').setAttribute('aria-label', meta
+      ? `La tienda lleva ${meta.pct} por ciento de la ${meta.etiqueta.toLowerCase()}. El ritmo esperado hoy es ${ritmo} por ciento.`
+      : 'La tienda logró todas las metas de la semana.');
+    $('tienda-estado').textContent = `${est.icono} ${est.texto}`;
+    $('tienda-estado').className = `estado ${est.icono === '▼' ? 'ojo' : 'ok'}`;
+    $('metas-lista').replaceChildren(...panel.lista.map((x) => {
+      const li = el('li'); li.append(el('span', `${x.etiqueta}${x.lograda ? ' · lograda' : ''}`), el('b', x.lograda ? '✓' : `${x.pct} %`));
+      if (x.lograda) li.className = 'lograda';
+      return li;
+    }));
+    $('metas-btn').onclick = () => { const abre = $('metas-lista').hidden; $('metas-lista').hidden = !abre; $('metas-btn').setAttribute('aria-expanded', String(abre)); };
+    if (m.bono_pct > 0) {
+      const b = m.bono_pct.toLocaleString('es-MX', { maximumFractionDigits: 2 });
+      $('tienda-bono').textContent = `Bono ${b} %`; $('tienda-bono').hidden = false;
+      $('tienda-nota').textContent = `Con la Meta 1 hay bono en efectivo del ${b} % de lo vendido arriba de la línea, repartido por días trabajados.`;
+    }
+    $('tienda').hidden = false;
+    // Meta lograda desde la última visita: aviso breve (la barra ya pasó a la siguiente).
+    const nuevas = metasNuevas(m.metas, leerMetas(s.desde));
+    if (nuevas.length) {
+      $('meta-aviso-titulo').textContent = `¡Lograron la meta ${nuevas.at(-1).n === panel.lista.length && panel.lista.length > 1 ? 'grande' : nuevas.at(-1).n}!`;
+      $('meta-aviso-texto').textContent = panel.completa ? 'Ya están todas las metas de la semana.' : 'La barra pasa a la siguiente.';
+      $('meta-aviso').hidden = false;
+      $('meta-aviso-cerrar').onclick = () => { guardarMetas(s.desde, panel.logradas); $('meta-aviso').hidden = true; };
+    }
   }
-  $('tienda').hidden = false;
+
+  // 2b. Mi bono de la semana pasada: solo lo que gerencia ya asentó (el servidor no recalcula nada)
+  const bp = m.bono_pasado;
+  if (bp && (bp.registrado || !panel.vacio)) {
+    const lun = new Date(`${bp.semana}T12:00:00`); const dom = new Date(lun); dom.setDate(dom.getDate() + 6);
+    $('bono-semana').textContent = `${lun.toLocaleDateString('es-MX', { day: 'numeric' })} al ${dom.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`;
+    $('bono-cifras').hidden = !bp.registrado;
+    if (bp.registrado) {
+      $('bono-pesos').textContent = pesos(bp.importe, Math.floor);
+      $('bono-d').textContent = dd(bp.d * 100);
+      $('bono-d-caja').hidden = !(bp.d > 0);
+    }
+    $('bono-nota').textContent = bp.registrado
+      ? 'Esto es lo que gerencia ya te registró de esa semana.'
+      : 'Si tu tienda llegó a la meta, tu bono aparece aquí cuando gerencia lo registre.';
+    $('bono-pasado').hidden = false;
+  }
 
   // 3. Siguiente paso
   const paso = siguientePaso(m);

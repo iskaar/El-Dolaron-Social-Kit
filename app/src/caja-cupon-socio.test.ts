@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { pagoConDolarones, dolaronesGanados } from '../public/venta.js';
+import { pagoConDolarones, dolaronesGanados, codigosDeVenta } from '../public/venta.js';
 import { formularioPieza } from '../public/ticket.js';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
@@ -18,10 +18,20 @@ function montar(socio: Record<string, unknown>, vales: unknown[], codigoSocio: s
   const el = { textContent: '', style: {} };
   const enviadas: any[] = [];
   const contexto = {
-    $: () => el, AbortSignal, Date, Object, dolaronesGanados, pagoConDolarones, promoAgotada() {}, valesCargados: vales, codigoSocio, socio,
+    $: () => el, AbortSignal, Date, Object, Number, dolaronesGanados, pagoConDolarones, codigosDeVenta, promoAgotada() {}, valesCargados: vales, codigoSocio, socio,
     fetch: async (_r: string, o: any) => { enviadas.push(JSON.parse(o.body)); return { ok: true, status: 201, json: async () => ({ id: 'x', ganados: 2000, vale_emitido: null, ...respuesta }) }; },
   };
-  const rutina = runInNewContext(`let folioIncierto = null; ${entre('async function cobrarConDolarones(', '/* ---------- pedidos por WhatsApp')}; cobrarConDolarones`, contexto);
+  // Desde #943 la respuesta la aplica aplicarRespuesta() (una sola para las tres rutas), no cobrarConDolarones: aquí van las dos reales, unidas
+  // como las une cobrar(). Lo que devuelve es lo que el ticket lleva del socio, o { vale: true } si no hay socio de verdad.
+  const rutina = runInNewContext(`let folioIncierto = null; ${entre('async function cobrarConDolarones(', '/* ---------- pedidos por WhatsApp')}
+    ${entre('function aplicarRespuesta(', 'const QUE_HACER_SI_RECHAZA')}
+    (async (venta, t) => {
+      const socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: 0, saldo: socio.disponible };
+      const registrada = await cobrarConDolarones(venta, t);
+      if (!registrada) return false;
+      aplicarRespuesta(venta, registrada, socioTicket, t, pagoConDolarones({ socio, vales: valesCargados, codigoSocio, total: t.total, usados: venta.dolarones, ahora: 0 }).reparto.papel);
+      return socioTicket || { vale: true };
+    })`, contexto);
   return { cobrar: (venta: Record<string, unknown>) => rutina(venta, { total: 25000, aPagar: 22000 }), enviadas, aviso: el };
 }
 
@@ -76,6 +86,19 @@ test('el formulario de una pieza de un ticket con cupón solo ofrece el cupón; 
   assert.match(normal, /data-confirmar-linea="12"/);
   assert.match(normal, /Devolver dinero/);
   assert.match(formularioPieza(12, 1, null, 'efectivo', true), /solo se devuelve en cupón/, 'sin porcentaje de cupón (sin red) la nota igual aclara');
+});
+
+test('el manejador de «Devolver en cupón» conserva las dos cosas tras un rechazo: borra el PIN de la aprobación (#948) y ofrece «Cancelar la pieza» (#927), sin leer el ticket abierto después de esperar (#945)', () => {
+  const manejador = entre('  // Devolver en cupón (Issue #330)', '  if (d.confirmarLinea || d.confirmarTodo !== undefined) {');
+  const trasEsperar = manejador.slice(manejador.indexOf('const ticketId = ticketAbierto.id;') + 'const ticketId = ticketAbierto.id;'.length);
+  assert.doesNotMatch(trasEsperar, /ticketAbierto/, 'después de la red solo se usa la copia del id');
+  const rechazo = trasEsperar.slice(trasEsperar.indexOf('    if (!r.ok) {'));
+  const rama = rechazo.slice(0, rechazo.indexOf('return;'));
+  assert.match(rama, /pin-cupon'\)\.value = ''/);
+  assert.match(rama, /avisoTicket\(ticketId, cuerpo\.error/);
+  assert.match(rama, /r\.status === 409 && \/Cancélalas normal\/\.test\(cuerpo\.error \?\? ''\)\) form\.querySelector\('\.cancelar-normal'\)\?\.removeAttribute\('hidden'\)/);
+  // El aviso del cupón dado dice las dos partes (cuenta y cupón anterior) por la misma vía que el resto: avisoTicket con la copia del id.
+  assert.match(rechazo, /avisoTicket\(ticketId, `Cupón de [\s\S]*cuerpo\.dolarones_cuenta \?\? cuerpo\.dolarones[\s\S]*cuerpo\.cupon_papel[\s\S]*impreso \? '#1f7a4d' : '#D72B32'\);/);
 });
 
 test('pagoConDolarones con cupones y cuenta a la vez devuelve el reparto que la caja muestra', () => {

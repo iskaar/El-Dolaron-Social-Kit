@@ -46,12 +46,12 @@ import { UPC_VISIBLE, MISMO_UPC, claveTalla, PIEZA_UPC, CAPTURA_SUMADA, conflict
 import { rutaCamaraRemota } from './camara-remota.ts';
 import { rutaEspejoCaptura } from './espejo-captura.ts';
 import { rutaNomina } from './nomina.ts';
-import { reporteEquipo, registrarBonoSemana } from './equipo.ts';
+import { reporteEquipo, registrarBonoSemana, CLAVE_BONO_DESDE, fechaBono } from './equipo.ts';
 import { reporteCapturas } from './reportes-capturas.ts';
 import { reporteControl } from './reportes-control.ts';
 import { reporteDolarones } from './reportes-dolarones.ts';
 import { rutaPlano } from './plano.ts';
-import { misRetos, otorgarLogros, esCorridaDiaria } from './retos.ts';
+import { misRetos, metaCaja, otorgarLogros, esCorridaDiaria } from './retos.ts';
 import { rutaTablero } from './tablero.ts';
 import { diaTienda, hoyTienda, rangoDias, rangoDe, delDia, DIA, reportes, RangoInvalido } from './reportes.ts';
 import { reporteResumen } from './reportes-resumen.ts';
@@ -1665,7 +1665,9 @@ async function guardarConfig(request: Request, env: Env): Promise<Response> {
     const numero = Math.round(Number(valor));
     // El tope de retiros (#846) son centavos enteros; un monto con decimales o vacio no se redondea en silencio.
     const topeMalo = clave === CLAVE_TOPE_RETIRO && (valor === '' || valor === null || typeof valor === 'boolean' || !Number.isInteger(Number(valor)) || numero > 100_000_000);
-    if (!/^[a-z_0-9]{1,40}$/.test(clave) || !Number.isFinite(numero) || numero < 0 || topeMalo || configInvalida(clave, valor)) {
+    // La primera semana del bono por tienda (#930) es un lunes real como AAAAMMDD; 0 la apaga.
+    const desdeMalo = clave === CLAVE_BONO_DESDE && (valor === '' || valor === null || typeof valor === 'boolean' || !Number.isInteger(Number(valor)) || (Number(valor) !== 0 && !fechaBono(Number(valor))));
+    if (!/^[a-z_0-9]{1,40}$/.test(clave) || !Number.isFinite(numero) || numero < 0 || topeMalo || desdeMalo || configInvalida(clave, valor)) {
       return json({ error: `Valor invalido para ${clave}.` }, 400);
     }
     await env.DB.prepare(
@@ -1997,8 +1999,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const pedidoHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pedido)))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
   const reintento = async (): Promise<Response | null> => {
-    const previo = await env.DB.prepare('select pedido_hash, imprimir_en, anticipo, pedido_id from ventas where id = ?').bind(id)
-      .first<{ pedido_hash:string | null; imprimir_en:string | null; anticipo:number; pedido_id:string | null }>();
+    const previo = await env.DB.prepare('select pedido_hash, imprimir_en, anticipo, pedido_id, total, descuento, cambio from ventas where id = ?').bind(id)
+      .first<{ pedido_hash:string | null; imprimir_en:string | null; anticipo:number; pedido_id:string | null; total:number; descuento:number; cambio:number }>();
     if (!previo) return null;
     // null: venta registrada antes de la migracion 021, se acepta como antes.
     if (previo.pedido_hash !== null && previo.pedido_hash !== pedidoHash)
@@ -2009,7 +2011,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
       where venta_id = ? and tipo = 'referido_nuevo'`).bind(id).first<{ importe:number }>();
     const bono = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
       where venta_id = ? and tipo = 'promo'`).bind(id).first<{ importe:number }>();
-    const respuesta = json({ id, duplicada:true, imprimir_en:previo.imprimir_en, ganados:ganado?.importe ?? 0,
+    // #943: el total, el descuento y el cambio registrados, como en el 201: la caja los compara con los suyos también en un reintento.
+    const respuesta = json({ id, duplicada:true, total:previo.total, descuento:previo.descuento, cambio:previo.cambio, imprimir_en:previo.imprimir_en, ganados:ganado?.importe ?? 0,
       referido_liberado:referido?.importe ?? 0, bono_promo:bono?.importe ?? 0,
       anticipo:previo.anticipo, saldo_pedido:previo.pedido_id ? await saldoDe(env, previo.pedido_id) : null,
       excedente_transferencia:await excedenteDe(env, 'venta', id), dolarones_papel:await papelDeVenta(env, id),
@@ -2842,6 +2845,8 @@ export default {
 
       // Mis retos (Issue #752): solo lo de quien pregunta; el correo es el del servidor (PIN del cajero o su cuenta).
       if (pathname === '/api/retos/mios' && request.method === 'GET') return await misRetos(env, correo);
+      // Franja de metas de la caja (#935): solo porcentajes de la tienda de la cuenta de Access (nunca la que mande el navegador).
+      if (pathname === '/api/caja/meta' && request.method === 'GET') return await metaCaja(env, tienda);
       // Plano del local (Issue #756): áreas por letrero; leer es de piso, escribir solo del dueño.
       if (pathname === '/api/plano') return await rutaPlano(request, env, usuario, correo);
       // Centro de avisos (Issue #429): ventas de ML por atender, a nombre del cajero que la marca.
@@ -2893,7 +2898,11 @@ export default {
         }
         const config = await leerConfig(env);
         // El tope de retiros sin aprobacion (#846) es politica de efectivo: lo ve el dueno, no quien captura ni FEP.
-        if (!usuario?.roles.includes('dueno')) delete config[CLAVE_TOPE_RETIRO];
+        // Lo mismo la linea de ventas de cada tienda y los valores del bono (#930): con ellas y el porcentaje de /retos se despejaria la venta de la tienda.
+        if (!usuario?.roles.includes('dueno')) {
+          delete config[CLAVE_TOPE_RETIRO];
+          for (const clave of Object.keys(config)) if (/^bono_(tienda|d)_/.test(clave)) delete config[clave];
+        }
         return json(config);
       }
 

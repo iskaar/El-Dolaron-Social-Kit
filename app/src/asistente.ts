@@ -33,6 +33,7 @@ const disponibilidad = (stock: number, sinInventario: number) =>
 
 /**
  * Piezas que el cliente puede comprar hoy: nuevas, revisadas y con existencia (o bins sin inventario).
+ * Sin bandas de precio (#934): «Ropa $300» es un código de cobro, no algo que ofrecer, y tapaba las piezas.
  * `min`/`max` en centavos. `foto` usa la ruta pública del catálogo, que solo sirve piezas VENDIBLE.
  */
 export async function buscarProductos(db: D1Database, filtros: Filtros, hostFoto?: string) {
@@ -47,6 +48,7 @@ export async function buscarProductos(db: D1Database, filtros: Filtros, hostFoto
   const { results } = await db.prepare(`select p.nombre, p.precio, p.codigo, p.talla, ${A_LA_VENTA} as stock, p.sin_inventario, (${VENDIBLE}) as vendible
     from productos p
     where p.estado_fisico = 'nuevo' and p.estado_analisis = 'listo' and p.nombre <> ''
+      and substr(p.destino, 1, 6) <> 'banda_'
       and (${A_LA_VENTA} > 0 or p.sin_inventario = 1)${condiciones.map((c) => ` and ${c}`).join('')}
     order by p.actualizado_en desc limit 5`).bind(...args)
     .all<{ nombre: string; precio: number; codigo: string; talla: string | null; stock: number; sin_inventario: number; vendible: number }>();

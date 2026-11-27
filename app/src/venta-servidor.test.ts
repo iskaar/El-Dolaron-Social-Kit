@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { totales, efectivoAlcanza, saldoCanjeable, pagoConDolarones, debePreguntarSocio } from '../public/venta.js';
+import { PUERTA } from './prueba-caja.ts';
 import { prepararLineas } from './worker.ts';
 import { tienda, PRODUCTO } from './prueba-d1.ts';
 
@@ -149,10 +150,10 @@ test('caja reintenta un canje tras perder la respuesta con el mismo folio, fecha
     // Ejecutar el cobro real con una primera respuesta perdida. Devolver false mantiene el ticket abierto.
     const repetir = runInNewContext(`let idVenta = null, creadoEnVenta = null, cobrando = false, folioIncierto = null, cobroIncierto = null;
       ${cobrar}; cobrar`, {
-      crypto, debePreguntarSocio, navigator: { onLine: true }, preguntarSocio: async () => 'cobrar',   // #730: «cobrar así»
+      crypto, debePreguntarSocio, ...PUERTA, navigator: { onLine: true }, preguntarSocio: async () => 'cobrar',   // #730: «cobrar así»
       Date: class extends Date { constructor() { super(1760000000000 + reloj++ * 1000); } },
       lineas: [{ producto_id: PRODUCTO, codigo: 'ED-000001', nombre: 'Ventilador', precio: 25000, cantidad: 1 }],
-      socio: { vale: true, disponible: 1000 }, valesCargados: [{ codigo: vale.codigo, disponible: 1000, expira_en: '2099-01-01T00:00:00Z', origen: 'compra' }], pedidoCargado: null,
+      socio: { vale: true, disponible: 1000 }, valesCargados: [{ codigo: vale.codigo, disponible: 1000, expira_en: '2099-01-01T00:00:00Z', origen: 'compra' }], codigoSocio: 'DC-x', pedidoCargado: null,
       $: (id: string) => ({ value: id === 'efectivo' ? '245' : id === 'vendedora' ? '' : 'efectivo', style: {}, focus() {} }),   // #817: el foco vuelve a #codigo al terminar
       exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 500,
       impresionRemota: () => false,

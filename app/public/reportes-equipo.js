@@ -274,7 +274,7 @@ function panel(id, titulo, sub, grafica, tablaHtml, nota = '') {
 }
 
 /** Con una tienda elegida: lo que se filtra y lo que no (socios, capturas y asistencias no se registran por tienda; el bono tampoco se filtra). */
-export const avisoTienda = 'Con una tienda elegida, las ventas, los tickets, los tickets cancelados y los apartados son de esa tienda. Los socios dados de alta, las piezas capturadas y los días trabajados no se registran por tienda: siguen siendo del negocio completo, igual que el bono semanal de abajo.';
+export const avisoTienda = 'Con una tienda elegida, las ventas, los tickets, los tickets cancelados y los apartados son de esa tienda. Los socios dados de alta, las piezas capturadas y los días trabajados no se registran por tienda: siguen siendo del negocio completo. El bono semanal de abajo siempre se calcula por tienda.';
 
 /** El texto de la atribucion: desde que dia hay datos y cuanto de las ventas esta atribuido (siempre dicho, nunca solo en el color). */
 export function notaAtribucion(d) {

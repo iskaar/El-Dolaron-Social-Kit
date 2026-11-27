@@ -9,8 +9,8 @@ export type EstadoFisico = 'nuevo' | 'danado';
 /** Prefijo de una familia de banda: una o dos letras minusculas ('r', 'ju'). Vive en la tabla `familias`. */
 export type Familia = string;
 
-/** Once precios en multiplos de $10 (#869, 18/11/2026; antes 19...199), compartidos por todas las familias. Ver PLAN-ETIQUETAS-POR-BANDA.md. */
-export const MONTOS_BANDA = [20, 30, 40, 50, 70, 80, 100, 120, 130, 150, 200] as const;
+/** Trece precios en multiplos de $10 (#869, 18/11/2026; antes 19...199; $250 y $300 por #934), compartidos por todas las familias. Ver PLAN-ETIQUETAS-POR-BANDA.md. */
+export const MONTOS_BANDA = [20, 30, 40, 50, 70, 80, 100, 120, 130, 150, 200, 250, 300] as const;
 
 /**
  * #869: los montos de antes del cambio. Ya no se imprimen ni se ofrecen para piezas nuevas, pero hay etiquetas

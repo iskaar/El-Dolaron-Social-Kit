@@ -12,8 +12,9 @@ import {
 } from '../public/venta.js';
 import { LIMITE_GASTO_CAJERO } from './corte.ts';
 import { codigoDeDigitos, codigoEnDigitos } from '../public/code128.js';
-import { agregar, guiaVale, descuentoDe, TOPE_DESCUENTO } from '../public/venta.js';
+import { agregarYMarcar, guiaVale, descuentoDe, TOPE_DESCUENTO } from '../public/venta.js';
 import { puedeVenderEnMano } from '../public/venta.js';
+import { PUERTA } from './prueba-caja.ts';
 import { tienda, codigoPrueba, PRODUCTO } from './prueba-d1.ts';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
@@ -134,7 +135,7 @@ function montarCobro(op: Opciones = {}) {
   };
   const contexto: Record<string, unknown> = {
     crypto, Date, $, AbortSignal, Object, Math, vistos, totales, efectivoAlcanza, saldoCanjeable, pagoConDolarones, dolaronesGanados, anticipoDePedido,
-    transferenciaDe, CLAVE_DESDE, debePreguntarSocio, navigator: { onLine: true }, window: { open() {} },
+    transferenciaDe, CLAVE_DESDE, debePreguntarSocio, ...PUERTA, navigator: { onLine: true }, window: { open() {} },
     document: { createElement: () => ({ style: {}, textContent: '' }) },
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
     errorImpresora: () => op.errorImpresora ?? 'USB falló',
@@ -142,7 +143,7 @@ function montarCobro(op: Opciones = {}) {
     preguntarSocio: async () => 'cobrar',
     impresionRemota: () => !!op.remota, exigirCaja: () => true, cajaActual: () => 'Caja 1', dolaronesPedidos: () => 0,
     descuento: op.descuento ?? null, descuentoAplicado: () => ((op.descuento as any)?.estado === 'aprobada' ? (op.descuento as any).monto : 0), descuentoDe, TOPE_DESCUENTO, revisarVencimientoDescuento: () => false, promoActual: () => 0, totalNeto: () => 30000, pintarDescuento() {},
-    pesos: String, dolares: String, quitarSocio() {}, sincronizar() {}, cargarCatalogo() {}, pintarImpresora() {}, promoConfig: null,
+    pesos: String, dolares: String, quitarSocio() {}, sincronizar() {}, refrescarMeta() {}, cargarCatalogo() {}, pintarImpresora() {}, promoConfig: null,
     abrirCajon: op.abrirCajon ?? (async () => true), imprimirTicket: op.imprimirTicket ?? (async () => true),
     store: async (almacen: string, _m: string, fn: any) => fn({ put(v: unknown) { if (almacen === 'ventas') guardadas.push(v); } }),
     fetch: op.fetch ?? (async () => ({ ok: true, status: 201, json: async () => ({ id: 'x', ganados: 0, vale_emitido: null, saldo_pedido: 0 }) })),
@@ -258,7 +259,7 @@ function montarDolarones(respuestas: any[], socio: Record<string, unknown> = {})
   const llamadas: any[] = [];
   const el = { textContent: '', style: {} };
   const contexto = {
-    $: () => el, AbortSignal, Date, Object, dolaronesGanados, pagoConDolarones, promoAgotada() {}, valesCargados: [],
+    $: () => el, AbortSignal, Date, Object, ...PUERTA, dolaronesGanados, pagoConDolarones, promoAgotada() {}, valesCargados: [],
     codigoSocio: 'DC-x', socio: { maximo: 99999, expira_en: '2099-01-01T00:00:00Z', vale: false, numero: 7, disponible: 5000, ...socio },
     fetch: async (_r: string, o: any) => {
       llamadas.push(JSON.parse(o.body));
@@ -281,7 +282,10 @@ test('#817 Dolarones: la petición tiene el mismo límite de 15 s y, si vence, d
   assert.match(vencida.aviso.textContent, /No se supo si se cobró\. Toca otra vez el mismo botón de cobro.*mismo folio no se cobra dos veces.*Ventas de hoy/);
   const sinRed = montarDolarones([new TypeError('Failed to fetch')]);
   await sinRed.cobrarConDolarones({ ...VENTA }, { aPagar: 5000 });
-  assert.match(sinRed.aviso.textContent, /^Sin red: no se pudo cobrar con Dolarones/);
+  // #933: un corte de red tampoco dice si se cobró, así que tampoco invita a cobrar de otra forma (antes: «o cobra sin Dolarones»).
+  assert.match(sinRed.aviso.textContent, /^No se supo si se cobró\. Toca otra vez el mismo botón de cobro/);
+  assert.doesNotMatch(sinRed.aviso.textContent, /sin Dolarones|cobrar de nuevo/);
+  assert.equal(sinRed.incierto(), 'folio-1');
   assert.match(fuente, /signal: AbortSignal\.timeout\(15000\)/, 'la fetch de Dolarones lleva la señal (la prueba solo ve que hay una)');
 });
 
@@ -352,7 +356,7 @@ function montarEscaneo() {
   const $ = (id: string) => (id === 'sugerencias' ? sugerencias : codigo);
   const catalogo = [{ codigo: 'ED-000001', nombre: 'Bufanda roja', precio: 5000 }, { codigo: 'ED-000002', nombre: 'Bufanda azul', precio: 6000 }];
   const contexto = {
-    $, leerMultiplicador, escapar: String, pesos: String, precioHoy: (p: any) => p.precio, TONO_PIEZA: {}, TONO_RECHAZO: {}, sonar() {},
+    $, cerrarPaneles() {}, leerMultiplicador, escapar: String, pesos: String, precioHoy: (p: any) => p.precio, TONO_PIEZA: {}, TONO_RECHAZO: {}, sonar() {},
     moverSugerencia, esBusquedaPorTexto, codigoDeDigitos,
     buscarPieza: (t: string) => catalogo.find((p) => p.codigo === t.trim().toUpperCase()),
     buscarPorTexto: (t: string) => catalogo.filter((p) => p.nombre.toLowerCase().includes(t.trim().toLowerCase())),
@@ -447,11 +451,15 @@ test('#817 teclado: lo que puede ser un código (banda JU49, QR de vale, ED-, d�
 
 /* ---------- ticket, cancelar, rueda ---------- */
 
+// La puerta REAL de caja.html (#933): todo cambio al ticket pasa por ella.
+const puerta = () => entre('function cambiarTicket(', '// Pedido por WhatsApp cargado');
+
 test('#817 renglón: Mayús + clic quita el renglón entero; el clic solo quita una pieza', () => {
   const montar = () => {
     const estado: any = { lineas: [{ codigo: 'A', cantidad: 3 }, { codigo: 'B', cantidad: 1 }], idVenta: 'x', pintada: 0 };
     let oyente: (e: any) => void = () => {};
-    runInNewContext(`${entre("$('ticket').addEventListener('click'", "$('efectivo').addEventListener('input'")}`, {
+    runInNewContext(`let cobrando = false; ${puerta()}
+${entre("$('ticket').addEventListener('click'", "$('efectivo').addEventListener('input'")}`, {
       $: () => ({ addEventListener: (_t: string, f: any) => { oyente = f; } }),
       get lineas() { return estado.lineas; }, set lineas(v) { estado.lineas = v; },
       get idVenta() { return estado.idVenta; }, set idVenta(v) { estado.idVenta = v; },
@@ -480,9 +488,10 @@ function montarCancelar(lineas: any[], extra: Record<string, unknown> = {}) {
       focus() { estado.activo = id; }, addEventListener(_t: string, f: any) { this.clic = f; } });
     return elementos.get(id);
   };
-  const rutinas = runInNewContext(`let cancelarArmado = null; ${entre('// Con descuento aprobado, pedido cargado', 'function pintarRed()')}
+  const rutinas = runInNewContext(`let cancelarArmado = null, cobrando = false; ${puerta()}
+${entre('// Con descuento aprobado, pedido cargado', 'function pintarRed()')}
     ({ revisarCancelarArmado })`, {
-    $, totales, cancelarPideConfirmar, descuento: null, pedidoCargado: null, sinPromo: false, limpiarDatosTransferencia() {}, quitarDescuentoEnServidor() {}, ...extra,
+    $, ticketEnDuda: () => false, ...PUERTA, cobroIncierto: null, totales, cancelarPideConfirmar, descuento: null, pedidoCargado: null, sinPromo: false, limpiarDatosTransferencia() {}, quitarDescuentoEnServidor() {}, ...extra,
     get lineas() { return estado.lineas; }, set lineas(v) { estado.lineas = v; },
     idVenta: 'x', pintarDescuento() {}, quitarSocio() { estado.limpiadas++; }, pintar() {}, clearTimeout() {},
     setTimeout: (f: () => void) => { temporizadores.push(f); return temporizadores.length; },
@@ -794,13 +803,14 @@ function montarAgregar(piezas: any[], { enLinea = true, recarga = [] as any[], r
   const recargas: number[] = [];
   const catalogo = new Map(piezas.map((p) => [p.codigo, p]));
   const contexto: Record<string, unknown> = {
-    $, catalogo, agregar, leerMultiplicador, codigoDeDigitos, avisoExistencia, avisoDondeHay, fetch: (url: string) => { consultas.push(url); return respuesta; }, precioHoy: (p: any) => p.precio, Map, Date, puedeVenderEnMano, ocultarEnMano() {}, ofrecerEnMano() {}, ticketEnDuda: () => false,
+    $, catalogo, agregarYMarcar, leerMultiplicador, codigoDeDigitos, avisoExistencia, avisoDondeHay, fetch: (url: string) => { consultas.push(url); return respuesta; }, precioHoy: (p: any) => p.precio, Map, Date, puedeVenderEnMano, ocultarEnMano() {}, ofrecerEnMano() {}, ticketEnDuda: () => false,
     navigator: { onLine: enLinea }, pintar() {}, cargarPedido() {}, buscarSocio() {},
     // El catálogo que baja la recarga: reemplaza lo que había (como cargarCatalogo).
     cargarCatalogo: async () => { recargas.push(1); for (const p of recarga) catalogo.set(p.codigo, p); },
     escanear: (leido: string, reintento: boolean) => { escaneos.push([leido, reintento]); return true; },
   };
   const rutina = runInNewContext(`let cobrando = false, idVenta = null, lineas = [];
+    ${puerta()}
     ${entre('function buscarPieza(', '/* ---------- busqueda a mano')}
     ({ agregarCodigo, lineas: () => lineas })`, contexto);
   return { ...rutina, aviso: $(), escaneos, recargas, consultas };
@@ -913,7 +923,7 @@ test('#817 pie del catálogo: sin red el texto se asigna completo, no se acumula
   const pie = { textContent: '' };
   const cargar = runInNewContext(`let catalogo = new Map();
     ${entre('const CATALOGO_COMPLETO_MS', '/* ---------- ticket')}; cargarCatalogo`, {
-    $: () => pie, Map, Date, Number, store: async () => undefined, fetch: async () => { throw new TypeError('sin red'); },
+    $: () => pie, pintarAvisos() {}, Map, Date, Number, store: async () => undefined, fetch: async () => { throw new TypeError('sin red'); },
   });
   await cargar(); await cargar(); await cargar();
   assert.equal(pie.textContent, '0 códigos · sin actualizar');
@@ -924,7 +934,7 @@ test('#817 pie de ventas por sincronizar: singular y plural', async () => {
   const pie: any = { textContent: '', style: {} };
   const cola = (n: number) => Array.from({ length: n }, (_, i) => ({ id: String(i), creado_en: new Date().toISOString() }));
   const correr = async (n: number) => {
-    await runInNewContext(`${bloque}; pendientes()`, { $: () => pie, store: async () => cola(n), nVentas, Date, Math });
+    await runInNewContext(`${bloque}; pendientes()`, { $: () => pie, pintarAvisos() {}, store: async () => cola(n), nVentas, Date, Math });
     return pie.textContent;
   };
   assert.equal(await correr(1), '1 venta por sincronizar');
@@ -969,8 +979,9 @@ function montarBuscarSocio(respuesta: { ok: boolean; cuerpo: Record<string, unkn
   };
   $('socio').value = '#7';
   const rutinas = runInNewContext(`let socio = null, valesCargados = [], busquedaSocio = 0, cobrando = false, valesPrueba = false, codigoSocio = '', usarTodos = false;
+    ${puerta()}
     ${entre('function pintarSocio()', "$('buscar-socio').addEventListener")}; ({ buscarSocio })`, {
-    $, guiaVale, conflictoSocioVale, dolares: String, escapar: String, idVenta: 'x', pintar() {}, avisoRojo() {}, setTimeout, Promise, Date, Math, codigoDeDigitos,
+    $, guiaVale, conflictoSocioVale, dolares: String, escapar: String, idVenta: 'x', pintar() {}, avisoRojo() {}, ticketEnDuda: () => false, setTimeout, Promise, Date, Math, codigoDeDigitos,
     preguntarDolarones() { orden.push('ventana-dolarones'); },
     fetch: async () => ({ ok: respuesta.ok, json: async () => respuesta.cuerpo }),
   });
@@ -990,8 +1001,9 @@ test('#817 foco: «Usar todos» y «No usar» devuelven el foco a #codigo; «Otr
   const montar = () => {
     const orden: string[] = [];
     const $ = (id: string) => ({ close() { orden.push(`cerrar:${id}`); }, focus() { orden.push(`foco:${id}`); } });
-    const rutinas = runInNewContext(`let usarTodos = false, idVenta = 'x'; ${entre('function cerrarDialogo(', "$('dlg-todos').addEventListener")}
-      ({ cerrarDialogo, usarTodos: () => usarTodos })`, { $, pintar() { orden.push('pintar'); } });
+    const rutinas = runInNewContext(`let usarTodos = false, idVenta = 'x', cobrando = false; ${puerta()}
+${entre('function cerrarDialogo(', "$('dlg-todos').addEventListener")}
+      ({ cerrarDialogo, usarTodos: () => usarTodos })`, { $, ticketEnDuda: () => false, pintar() { orden.push('pintar'); } });
     return { ...rutinas, orden };
   };
   const todos = montar(); todos.cerrarDialogo('todos');
