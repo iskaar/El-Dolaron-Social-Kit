@@ -338,3 +338,29 @@ test('QR del vale (Issue #258): URL al portal con el código tras #; la caja lo 
   const texto = new TextDecoder().decode(Uint8Array.from(pedazos.flatMap((p) => [...p])));
   assert.equal(texto.split('registrate y recibe el doble').length - 1, 1);
 });
+
+test('ticket con cupón y cuenta de socio juntos (#927) dice cuánto fue de cada uno, el saldo del cupón y el del socio; con uno solo, el renglón de siempre', async () => {
+  const { pedazos } = impresoraFalsa();
+  const { reconectarImpresora, imprimirTicket } = await import('../public/impresora.js');
+  await reconectarImpresora();
+  const cupon = { codigo: 'DP-abcdefghijklmnop', restante: 500, creado_en: '2026-10-02T18:00:00.000Z', origen: 'manual',
+    disponible_desde: '2026-10-02T18:00:00Z', vence_en: '2026-11-01T18:00:00Z' };
+  const { venta, lineas } = ticketLargo();
+  const imprimir = async (extra: Record<string, unknown>) => {
+    pedazos.length = 0;
+    await imprimirTicket({ ...venta, ...extra }, lineas);
+    return new TextDecoder().decode(Uint8Array.from(pedazos.flatMap((p) => [...p])));
+  };
+  const junto = await imprimir({ dolarones: 3000, dolarones_papel: 1000, vales_usados: [cupon], socio: { numero: 1, ganados: 2000, saldo: 3000 } });
+  assert.match(junto, /Vale impreso\s+-\$10\.00/);
+  assert.match(junto, /Dolarones de cuenta\s+-\$20\.00/);
+  assert.match(junto, /A pagar\s+\$969\.00/);
+  assert.match(junto, /SALDO DEL VALE ANTERIOR/);
+  assert.match(junto, /Socio #1[\s\S]*Saldo disponible/);
+  const soloCuenta = await imprimir({ dolarones: 3000, dolarones_papel: 0, socio: { numero: 1, ganados: 0, saldo: 3000 } });
+  assert.match(soloCuenta, /Dolarones\s+-\$30\.00/);
+  assert.doesNotMatch(soloCuenta, /Vale impreso|Dolarones de cuenta/);
+  const soloPapel = await imprimir({ dolarones: 1000, dolarones_papel: 1000, vales_usados: [cupon] });
+  assert.match(soloPapel, /Dolarones\s+-\$10\.00/);
+  assert.doesNotMatch(soloPapel, /Dolarones de cuenta/);
+});

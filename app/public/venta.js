@@ -248,6 +248,69 @@ export function maximoCanje(socio, total, ahora = Date.now()) {
   return Math.max(0, Math.min(total, saldoCanjeable(socio, total), socio.maximo));
 }
 
+/* ---------- Vales o cupones impresos junto con la cuenta de un socio (#927) ---------- */
+
+/**
+ * El `socio` de la caja es una cuenta de socio o, mientras no hay socio, la suma de los vales (`vale: true`).
+ * Solo la primera tiene Dolarones de cuenta; el papel se lee de la lista de vales (`valesCargados`).
+ */
+export const cuentaDe = (socio) => (socio && !socio.vale ? socio : null);
+
+/** Saldo de los vales o cupones impresos vigentes del ticket (`{ disponible, expira_en }` cada uno), en centavos. */
+export const saldoPapel = (vales, ahora = Date.now()) =>
+  (vales ?? []).reduce((suma, v) => suma + (Date.parse(v.expira_en) > ahora ? v.disponible : 0), 0);
+
+/**
+ * Cómo se reparte lo que se paga con Dolarones: primero el papel y la cuenta paga el resto, igual que el servidor
+ * (sentenciasVale). Solo sirve para mostrar y revisar: el servidor es quien reparte y no confía en esta cuenta.
+ */
+export function repartoDeCanje(usados, papel) {
+  const delPapel = Math.max(0, Math.min(usados, papel));
+  return { papel: delPapel, cuenta: Math.max(0, usados - delPapel) };
+}
+
+/** Cupón = vale sin compra (`origen` devolucion o manual). Sin `origen` (un servidor viejo) se trata como vale de compra: lo prudente. */
+export const esCupon = (vale) => !!vale?.origen && vale.origen !== 'compra';
+
+/**
+ * ¿Hay que preguntar antes de juntar un socio y vales? Solo los cupones se juntan con un socio (#927); un vale de compra no.
+ * - Se escanea un vale (`esVale`, de `origen`) con un socio de verdad en el ticket: 'quitar-socio' si es de compra; '' si es cupón (se suma).
+ * - Se busca un socio (`!esVale`) con vales cargados: 'quitar-vales' si alguno es de compra; solo cupones, ''.
+ * `quitar` son los vales que salen del ticket y `quedan` los que se quedan (los cupones, al buscar al socio).
+ */
+export function conflictoSocioVale({ socio, vales, esVale, origen }) {
+  const cargados = vales ?? [];
+  if (esVale) return { pregunta: cuentaDe(socio) && !esCupon({ origen }) ? 'quitar-socio' : '', quitar: [], quedan: cargados };
+  const quitar = cargados.filter((v) => !esCupon(v));
+  return { pregunta: quitar.length ? 'quitar-vales' : '', quitar, quedan: cargados.filter(esCupon) };
+}
+
+/**
+ * Lo que el ticket puede pagar con Dolarones entre papel y cuenta, y si lo pedido (`usados`) está autorizado. Una sola cuenta para la
+ * pantalla y el cobro; el servidor repite su propio reparto y no confía en esta.
+ * - `maximo`: «Usar máximo». El papel más lo que la cuenta puede gastar con su código (`maximoCanje`), sin pasar del ticket.
+ * - `canjeable`: lo más que puede pedirse, sin mirar la autorización: el papel más el saldo elegible de la cuenta (`saldoCanjeable`).
+ * - `reparto`: de `usados`, cuánto sale del papel y cuánto de la cuenta.
+ * - `autorizado`: el papel no pide código, pero todo vale del ticket debe seguir vigente (si uno ya no sirve el servidor rechaza el ticket
+ *   completo); la parte de la cuenta exige el código del portal, dentro de su máximo y de su vigencia.
+ * - `enTicket` y `vence`: saldo de todos los vales cargados y el vencimiento más próximo (ISO), para decírselo a quien cobra.
+ * `ahora` en 0 ignora los vencimientos: así se reintenta un cobro cuya respuesta se perdió (el servidor contesta `duplicada`).
+ */
+export function pagoConDolarones({ socio, vales, codigoSocio, total, usados = 0, ahora = Date.now() }) {
+  const cuenta = cuentaDe(socio);
+  const papel = saldoPapel(vales, ahora);
+  const reparto = repartoDeCanje(usados, papel);
+  const vencidos = (vales ?? []).some((v) => !(Date.parse(v.expira_en) > ahora));
+  const autorizado = !usados || (!vencidos && (!reparto.cuenta
+    || (!!cuenta && !!codigoSocio && reparto.cuenta <= cuenta.maximo && Date.parse(cuenta.expira_en) > ahora)));
+  const vence = (vales ?? []).map((v) => v.expira_en).sort((a, b) => Date.parse(a) - Date.parse(b))[0] ?? '';
+  return {
+    papel, reparto, autorizado, enTicket: saldoPapel(vales, 0), vence,
+    maximo: Math.max(0, Math.min(total, papel + maximoCanje(cuenta, total, ahora))),
+    canjeable: papel + saldoCanjeable(cuenta, total),
+  };
+}
+
 /**
  * ¿Preguntar por el socio antes de cobrar? (#730) Sí si la venta no tiene socio real (ninguno, o solo vale de papel)
  * y hay red: sin red no se pueden buscar socios.
@@ -266,8 +329,8 @@ export function leerMensajeAlta(datos) {
 }
 
 /**
- * Guía para la cajera cuando hay vale(s) en el ticket y el cliente quiere ser socio (#758). Los vales no se
- * juntan con una membresía; solo uno de compra, completo, sin usar y vigente (`completo`, lo dice el servidor)
+ * Guía para la cajera cuando hay vale(s) en el ticket y el cliente quiere ser socio (#758). Los vales de compra no se
+ * juntan con una membresía (los cupones sí, #927); solo uno de compra, completo, sin usar y vigente (`completo`, lo dice el servidor)
  * puede pasar a una cuenta (bases, punto 6 ter). '' si no hay vales.
  */
 export function guiaVale(vales, ahora = Date.now()) {
@@ -463,9 +526,15 @@ export const cobroSinCuerpo = ({ idVenta, cobroIncierto }) => cobroEnDuda({ idVe
 export const botonDeCobro = (cobroIncierto) =>
   ({ efectivo: 'el botón «Efectivo»', tarjeta: 'el botón «Tarjeta»', transferencia: 'el botón «Transferencia»', 'sin-dinero': 'el botón «Cobrar: ya está pagado»' })[cobroIncierto?.boton] ?? 'el mismo botón';
 
-/** Los códigos con que se cobra con Dolarones: del vale (o de los vales juntos) o del socio. Van aparte: nunca a la cola ni al ticket impreso. */
-export const codigosDeVenta = (socio, valesCargados, codigoSocio) =>
-  socio.vale ? { codigo_vale: valesCargados.length > 1 ? valesCargados.map((v) => v.codigo) : codigoSocio } : { codigo_socio: codigoSocio };
+/**
+ * Los códigos con que se cobra con Dolarones: los de los vales o cupones cargados y, con un socio de verdad, el suyo (#927: un socio puede
+ * llevar cupones, y entonces viajan los dos). Van aparte: nunca a la cola ni al ticket impreso. En el orden de `codigosDeCuerpo`: así el
+ * reintento de un cobro en duda sale byte a byte como el primer intento (#933).
+ */
+export const codigosDeVenta = (socio, valesCargados, codigoSocio) => ({
+  ...(!socio.vale ? { codigo_socio: codigoSocio } : {}),
+  ...(valesCargados.length ? { codigo_vale: valesCargados.length > 1 ? valesCargados.map((v) => v.codigo) : valesCargados[0].codigo } : {}),
+});
 
 /** Los códigos de socio o de vale de un cuerpo ya enviado (van aparte del resto: no se encolan ni se imprimen). */
 export const codigosDeCuerpo = (cuerpo) =>

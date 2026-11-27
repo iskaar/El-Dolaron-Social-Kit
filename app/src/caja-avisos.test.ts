@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import {
-  totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio,
+  totales, efectivoAlcanza, saldoCanjeable, pagoConDolarones, conflictoSocioVale, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio,
   leerMultiplicador, contadoDe, esBusquedaPorTexto, avisoExistencia, avisoDondeHay, moverSugerencia, cancelarPideConfirmar, nVentas,
   avisoCorteSinEnviar, GASTO_MAXIMO_CAJERO, gastoRequiereDueno, centavosDeTexto, alertaConteo, pesosExactos, PIEZAS_IMPROBABLES,
 } from '../public/venta.js';
@@ -134,7 +134,7 @@ function montarCobro(op: Opciones = {}) {
     return elementos.get(id);
   };
   const contexto: Record<string, unknown> = {
-    crypto, Date, $, AbortSignal, Object, Math, vistos, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido,
+    crypto, Date, $, AbortSignal, Object, Math, vistos, totales, efectivoAlcanza, saldoCanjeable, pagoConDolarones, dolaronesGanados, anticipoDePedido,
     transferenciaDe, CLAVE_DESDE, debePreguntarSocio, ...PUERTA, navigator: { onLine: true }, window: { open() {} },
     document: { createElement: () => ({ style: {}, textContent: '' }) },
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
@@ -259,7 +259,7 @@ function montarDolarones(respuestas: any[], socio: Record<string, unknown> = {})
   const llamadas: any[] = [];
   const el = { textContent: '', style: {} };
   const contexto = {
-    $: () => el, AbortSignal, Date, Object, ...PUERTA, dolaronesGanados, promoAgotada() {}, valesCargados: [],
+    $: () => el, AbortSignal, Date, Object, ...PUERTA, dolaronesGanados, pagoConDolarones, promoAgotada() {}, valesCargados: [],
     codigoSocio: 'DC-x', socio: { maximo: 99999, expira_en: '2099-01-01T00:00:00Z', vale: false, numero: 7, disponible: 5000, ...socio },
     fetch: async (_r: string, o: any) => {
       llamadas.push(JSON.parse(o.body));
@@ -981,7 +981,7 @@ function montarBuscarSocio(respuesta: { ok: boolean; cuerpo: Record<string, unkn
   const rutinas = runInNewContext(`let socio = null, valesCargados = [], busquedaSocio = 0, cobrando = false, valesPrueba = false, codigoSocio = '', usarTodos = false;
     ${puerta()}
     ${entre('function pintarSocio()', "$('buscar-socio').addEventListener")}; ({ buscarSocio })`, {
-    $, guiaVale, dolares: String, escapar: String, idVenta: 'x', pintar() {}, avisoRojo() {}, ticketEnDuda: () => false, setTimeout, Promise, Date, Math, codigoDeDigitos,
+    $, guiaVale, conflictoSocioVale, dolares: String, escapar: String, idVenta: 'x', pintar() {}, avisoRojo() {}, ticketEnDuda: () => false, setTimeout, Promise, Date, Math, codigoDeDigitos,
     preguntarDolarones() { orden.push('ventana-dolarones'); },
     fetch: async () => ({ ok: respuesta.ok, json: async () => respuesta.cuerpo }),
   });

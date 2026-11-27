@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { PUERTA } from './prueba-caja.ts';
-import { cobroEnDuda, fotoDeVenta, ventaRecuperada, totales, cancelarPideConfirmar, guiaVale, maximoCanje, leerMensajeAlta, agregar, descuentoDe, huellaTicket } from '../public/venta.js';
+import { cobroEnDuda, fotoDeVenta, ventaRecuperada, totales, cancelarPideConfirmar, guiaVale, maximoCanje, pagoConDolarones, conflictoSocioVale, leerMensajeAlta, agregar, descuentoDe, huellaTicket } from '../public/venta.js';
 import { codigoDeDigitos } from '../public/code128.js';
 
 const fuente = readFileSync('public/caja.html', 'utf8').replace(/\r\n/g, '\n');
@@ -178,7 +178,7 @@ function montar(op: { enDuda?: boolean; lineas?: number; cobrando?: boolean; sin
   let pintadas = 0;
   $('dolarones').value = '50';
   const contexto: Record<string, unknown> = {
-    $, totales, cancelarPideConfirmar, codigoDeDigitos, guiaVale, maximoCanje, leerMensajeAlta, ...PUERTA, agregar, descuentoDe, huellaTicket,
+    $, totales, cancelarPideConfirmar, codigoDeDigitos, guiaVale, maximoCanje, pagoConDolarones, conflictoSocioVale, leerMensajeAlta, ...PUERTA, agregar, descuentoDe, huellaTicket,
     dolares: String, escapar: String, pesos: String, Promise, Date, Math, Number, JSON, setTimeout, clearTimeout, Object,
     navigator: { onLine: true }, location: { origin: 'https://caja' },
     document: { addEventListener: (t: string, f: (e: any) => void) => { if (t === 'keydown') teclado = f; }, querySelector: () => null },

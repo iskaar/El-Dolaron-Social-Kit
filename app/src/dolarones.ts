@@ -272,14 +272,19 @@ type Resultado = { ok: true; sentencias: D1PreparedStatement[]; ganados: number;
 /**
  * Lo que una venta le hace al saldo, como sentencias para el MISMO batch que
  * inserta la venta: o todo o nada. La autorización se consume en ese batch.
+ *
+ * `dolarones` es lo que paga la CUENTA del socio. `papel` (#927) es lo que ya pagaron vales y cupones impresos
+ * (los resuelve sentenciasVale en el mismo batch): no sale de la cuenta ni necesita su código, pero tampoco cuenta
+ * como dinero para lo ganado, la promo ni los referidos.
  */
 export async function sentenciasDeVenta(env: Env, p: {
   ventaId: string; clienteId: string | null; dolarones: number; codigo: string;
-  total: number; autor: string; ahora: Date;
+  total: number; autor: string; ahora: Date; papel?: number;
   /** Hora de la venta en la caja (`creado_en`); decide si cae en el periodo de la promo. Omitida: `ahora`. */
   hora?: Date;
 }): Promise<Resultado> {
-  if (!Number.isSafeInteger(p.dolarones) || p.dolarones < 0 || p.dolarones > p.total) {
+  const papel = p.papel ?? 0;
+  if (!Number.isSafeInteger(p.dolarones) || p.dolarones < 0 || !Number.isSafeInteger(papel) || papel < 0 || p.dolarones + papel > p.total) {
     return { ok: false, status: 400, error: 'Importe de Dolarones invalido.' };
   }
   if (!p.clienteId) {
@@ -338,7 +343,8 @@ export async function sentenciasDeVenta(env: Env, p: {
     }
   }
 
-  const ganados = promocionIniciada(env, p.ahora) ? dolaronesGanados(p.total - p.dolarones) : 0;
+  const dinero = p.total - p.dolarones - papel;   // lo pagado en efectivo, tarjeta o transferencia
+  const ganados = promocionIniciada(env, p.ahora) ? dolaronesGanados(dinero) : 0;
   if (ganados > 0) {
     const lote = crypto.randomUUID();
     sentencias.push(
@@ -352,10 +358,10 @@ export async function sentenciasDeVenta(env: Env, p: {
       ).bind(cliente.id, lote, p.ventaId, ganados, p.autor, ahoraIso),
     );
   }
-  const bono = await sentenciasDePromo(env, p, cliente.id);
+  const bono = await sentenciasDePromo(env, { ...p, dinero }, cliente.id);
   sentencias.push(...bono.sentencias);
   // Referidos (#489): la primera compra con $150 en dinero libera 25 D al nuevo y 25 D a quien lo invitó.
-  const referente = p.total - p.dolarones >= MINIMO_COMPRA ? await pendienteDe(env, cliente.id) : null;
+  const referente = dinero >= MINIMO_COMPRA ? await pendienteDe(env, cliente.id) : null;
   if (referente) sentencias.push(...sentenciasDeLiberacion(env, {
     ventaId: p.ventaId, nuevoId: cliente.id, referenteId: referente, autor: p.autor, ahora: p.ahora }));
   return { ok: true, sentencias, ganados, referido: referente ? D_PREMIO : 0, bono_promo: bono.bonos * PROMO_BONO };
@@ -388,10 +394,10 @@ export async function progresoDePromo(env: Env, clienteId: string, ahora: Date) 
   return { acumulado: fila?.acumulado ?? 0, meta: PROMO_META, bono: PROMO_BONO, fin: meta.fin, bonos: fila?.bonos ?? 0 };
 }
 
-async function sentenciasDePromo(env: Env, p: { ventaId: string; total: number; dolarones: number; autor: string; ahora: Date; hora?: Date },
+async function sentenciasDePromo(env: Env, p: { ventaId: string; dinero: number; autor: string; ahora: Date; hora?: Date },
   clienteId: string): Promise<{ sentencias: D1PreparedStatement[]; bonos: number }> {
   const meta = promoMeta(env);
-  const dinero = p.total - p.dolarones;
+  const dinero = p.dinero;   // total menos Dolarones de la cuenta y menos papel
   if (!meta || dinero <= 0 || !enPeriodoDePromo(meta, p.hora ?? p.ahora)) return { sentencias: [], bonos: 0 };
   const previo = await env.DB.prepare(
     `select ${DINERO_DEL_PERIODO} as acumulado, ${BONOS_VIGENTES} as otorgados`,
@@ -509,6 +515,11 @@ export async function sentenciasDeDevolucion(env: Env, p: {
     }
   }
   return sentencias;
+}
+
+/** Lo que la CUENTA del socio todavia tiene canjeado en esta venta (lo que aun puede regresar a sus lotes); el resto de `ventas.dolarones` fue papel (#927). */
+export async function canjeDeCuentaPendiente(env: Env, ventaId: string): Promise<number> {
+  return (await canjesPendientes(env, ventaId)).reduce((suma, c) => suma + c.importe, 0);
 }
 
 /** Lo canjeado en una venta que todavia no regresa a su lote, por lote; el que vence al ultimo primero. */

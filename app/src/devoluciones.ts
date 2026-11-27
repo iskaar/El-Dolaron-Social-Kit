@@ -14,8 +14,8 @@
 
 import { cajaDe, nombreCaja } from './corte.ts';
 import { sentenciasMover } from './existencias.ts';
-import { leerCupon, nuevoCupon, porcentajeCupon, usadosEnVenta, valeDeVenta } from './vales.ts';
-import { saldo } from './dolarones.ts';
+import { leerCupon, nuevoCupon, porcentajeCupon, usadosEnVenta, valeDeVenta, papelDeVenta, pagoConPapel, papelPorReemitir } from './vales.ts';
+import { saldo, canjeDeCuentaPendiente } from './dolarones.ts';
 import { sentenciasDeReverso } from './reversos.ts';
 import { TICKET_CON_ANTICIPO } from './pedidos.ts';
 import { datosCorreccion } from './correcciones-pago.ts';
@@ -73,6 +73,13 @@ const leerVenta = (env: Env, id: string) =>
      from ventas where id = ?`,
   ).bind(id).first<VentaFila>();
 
+/**
+ * ¿El ticket pagó algo con vale o cupón? Lo dice la bitácora de vales; `dolarones > 0` sin socio cubre también un ticket de vale
+ * que no tenga renglón (datos anteriores a que el canje se registrara así). Antes bastaba mirar `cliente_id`: con socio y papel juntos (#927) ya no.
+ */
+const ticketConPapel = async (env: Env, venta: Pick<VentaFila, 'id' | 'dolarones' | 'cliente_id'>) =>
+  venta.dolarones > 0 && (!venta.cliente_id || await pagoConPapel(env, venta.id));
+
 /** El ticket con sus piezas y lo que ya se devolvio: para la ventana de la caja y de reportes. `sesion`: tienda, rol y caja de quien mira, para saber si aqui se puede corregir su forma de pago (#831). */
 export async function detalleVenta(id: string, env: Env, paraImprimir = false, sesion?: { tienda: string; dueno: boolean; caja: string }): Promise<Response> {
   if (!UUID.test(id)) return json({ error: 'Identificador de venta invalido.' }, 400);
@@ -95,8 +102,10 @@ export async function detalleVenta(id: string, env: Env, paraImprimir = false, s
   const folio = venta.pedido_id
     ? (await env.DB.prepare('select folio from pedidos where id = ?').bind(venta.pedido_id).first<{ folio:number }>())?.folio ?? null
     : null;
+  // Lo que de `dolarones` salió de vales o cupones (el resto, de la cuenta del socio): #927.
+  const dolaronesPapel = venta.dolarones > 0 ? (venta.cliente_id ? await papelDeVenta(env, id) : venta.dolarones) : 0;
   if (!paraImprimir) return json({ ...venta, cliente_id:undefined, pedido_id:undefined, pedido_folio:folio, socio, lineas, devoluciones,
-    devolucion_pendiente: await devolucionPendiente(env, id), ...(await datosCorreccion(env, id, sesion)) });
+    dolarones_papel:dolaronesPapel, devolucion_pendiente: await devolucionPendiente(env, id), ...(await datosCorreccion(env, id, sesion)) });
   const ganados = socio ? await env.DB.prepare(`select coalesce(sum(importe), 0) as importe
     from dolarones_movimientos where venta_id = ? and tipo = 'compra'`).bind(id).first<{ importe:number }>() : null;
   const bono = socio ? await env.DB.prepare(`select coalesce(sum(importe), 0) as importe
@@ -104,7 +113,7 @@ export async function detalleVenta(id: string, env: Env, paraImprimir = false, s
   const saldoActual = venta.cliente_id ? await saldo(env, venta.cliente_id, new Date().toISOString()) : null;
   const respuesta = json({ ...venta, cliente_id: undefined, pedido_id: undefined, pedido_folio: folio,
     socio:socio && { ...socio, ganados:ganados?.importe ?? 0, bono_promo:bono?.importe ?? 0, saldo:saldoActual?.disponible ?? 0 }, lineas, devoluciones,
-    vale_emitido:await valeDeVenta(env, id), ...(await usadosEnVenta(env, id)) });
+    dolarones_papel:dolaronesPapel, vale_emitido:await valeDeVenta(env, id), ...(await usadosEnVenta(env, id)) });
   respuesta.headers.set('cache-control', 'no-store');
   return respuesta;
 }
@@ -126,9 +135,11 @@ async function prepararPieza(env: Env, ventaId: string, lineaId: number, p: Pedi
   if (venta.cancelada) return falla(409, 'El ticket ya estaba cancelado completo.');
   // Devolver dinero de un ticket que uso saldo de pedido descuadra el corte de dos cajas (pedidos.ts).
   if (venta.anticipo > 0) return falla(409, TICKET_CON_ANTICIPO);
-  // Dolarones sin socio son de un vale (PR #134): aqui solo se sabe regresarlos
-  // a los lotes de un socio. Ese ticket se cancela completo, sin restitución parcial al vale.
-  if (venta.dolarones > 0 && !venta.cliente_id) return falla(409, 'Este ticket se pagó con un vale: cancélalo completo.');
+  // Un ticket que pagó algo con vale o cupón (PR #134) se cancela completo. Con socio (#927) la pieza se devuelve en cupón (devolverEnCupon), y solo
+  // por esta ruta se acepta una pieza sin dinero y pagada toda con lo que la CUENTA aún tiene canjeado en el ticket (más abajo): el dinero de una pieza
+  // no se reparte entre papel y cuenta.
+  const conPapel = await ticketConPapel(env, venta);
+  if (conPapel && !venta.cliente_id) return falla(409, 'Este ticket se pagó con un vale: cancélalo completo.');
 
   const linea = await env.DB.prepare(
     `select l.id, l.producto_id, l.nombre, l.precio, l.cantidad, l.cancelada_cantidad
@@ -152,6 +163,10 @@ async function prepararPieza(env: Env, ventaId: string, lineaId: number, p: Pedi
     importe, pagado, devuelto: venta.devuelto,
     dolarones: venta.dolarones, dolaronesDevueltos: venta.dolarones_devueltos,
   });
+  // Ticket con papel: solo pasa una pieza que no mueve dinero y cuyos Dolarones regresan todos a la cuenta (sin tocar un cupón). Es la pieza que
+  // devolverEnCupon no puede dar en cupón («Cancélalas normal») y que de otro modo no tendría salida: cancelar completo ya no se puede tras un cupón.
+  if (conPapel && !(importe > 0 && reparto.dinero === 0 && reparto.dolarones === importe && importe <= await canjeDeCuentaPendiente(env, ventaId)))
+    return falla(409, 'Este ticket se pagó con un vale o cupón: devuelve la pieza en cupón o cancélalo completo.');
   return { venta, linea, devolverEn, pagado, reparto };
 }
 
@@ -454,6 +469,7 @@ export async function devolverEnCupon(ventaId: string, request: Request, env: En
   if (!venta) return json({ error: 'La venta no existe.' }, 404);
   if (venta.cancelada) return json({ error: 'El ticket ya estaba cancelado completo.' }, 409);
   if (venta.anticipo > 0) return json({ error: TICKET_CON_ANTICIPO }, 409);
+  // Sin socio, un ticket pagado con vale solo se cancela completo. Con socio y cupón (#927) la pieza sí se devuelve en cupón.
   if (venta.dolarones > 0 && !venta.cliente_id) {
     return json({ error: 'Este ticket se pagó con un vale: cancélalo completo, en dinero.' }, 409);
   }
@@ -506,7 +522,13 @@ export async function devolverEnCupon(ventaId: string, request: Request, env: En
     );
   }
   const porcentaje = await porcentajeCupon(env);
-  const importeCupon = Math.round((base * porcentaje) / 100);
+  // Lo que se pagó con Dolarones (la parte de la pieza que pasa del dinero) regresa primero a la CUENTA, hasta lo que ella aún tiene canjeado en
+  // este ticket; lo demás lo pagó un cupón viejo, que no se restaura: se suma 1:1 (sin el porcentaje) al cupón nuevo (#927). Todo sale de las bitácoras.
+  const dolaronesDelta = dolaronesDevueltos - venta.dolarones_devueltos;
+  const papelPendiente = dolaronesDelta > 0 && venta.cliente_id ? await papelPorReemitir(env, ventaId) : 0;
+  const cuentaPendiente = papelPendiente > 0 ? await canjeDeCuentaPendiente(env, ventaId) : dolaronesDelta;
+  const papel = Math.min(Math.max(0, dolaronesDelta - cuentaPendiente), papelPendiente);
+  const importeCupon = Math.round((base * porcentaje) / 100) + papel;
   if (importeCupon <= 0) {
     return json({ error: 'Esas piezas se pagaron con Dolarones: no hay dinero que pasar a cupón. Cancélalas normal.' }, 409);
   }
@@ -526,7 +548,7 @@ export async function devolverEnCupon(ventaId: string, request: Request, env: En
       ...sentencias,
       ...(await sentenciasDeReverso(env, {
         ventaId, clienteId: venta.cliente_id, autor: correo, ahora: iso, completa: false,
-        dolarones: dolaronesDevueltos - venta.dolarones_devueltos, pagadoRestante: pagado - devuelto,
+        dolarones: dolaronesDelta - papel, papel, pagadoRestante: pagado - devuelto,
       })),
       sentencia,
     ]);
@@ -547,7 +569,7 @@ export async function devolverEnCupon(ventaId: string, request: Request, env: En
     }
     throw error;
   }
-  return json({ id, venta_id: ventaId, cupon, base, porcentaje, dolarones: dolaronesDevueltos - venta.dolarones_devueltos }, 201);
+  return json({ id, venta_id: ventaId, cupon, base, porcentaje, dolarones: dolaronesDelta, dolarones_cuenta: dolaronesDelta - papel, cupon_papel: papel }, 201);
 }
 
 /** Reimprimir el cupón de una devolucion de este ticket: mismo codigo, saldo y vencimiento. */

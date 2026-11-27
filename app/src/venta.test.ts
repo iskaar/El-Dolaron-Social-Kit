@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { PUERTA } from './prueba-caja.ts';
-import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, BILLETES, montoTransferidoRazonable, EXCEDENTE_MAXIMO, saldoCanjeable, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin } from '../public/venta.js';
+import { totales, agregar, leerMultiplicador, efectivoAlcanza, montosRapidos, BILLETES, montoTransferidoRazonable, EXCEDENTE_MAXIMO, saldoCanjeable, pagoConDolarones, conflictoSocioVale, esCupon, saldoPapel, repartoDeCanje, cuentaDe, dolaronesGanados, maximoCanje, desfaseReloj, anticipoDePedido, envioDe, anticipoMinimoDe, ANTICIPO, ANTICIPO_ENVIO, viernesDeEnvio, promoInauguracion, letreroPromo, PROMO_DESCUENTO, PROMO_MINIMO, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, guiaVale, precioBuenFin, letreroBuenFin } from '../public/venta.js';
 
 interface Linea { codigo: string; nombre: string; precio: number; cantidad: number }
 const pieza = (codigo: string, precio: number) => ({ codigo, nombre: codigo, precio });
@@ -215,7 +215,7 @@ const cobroPedido = (fetchSimulado: () => Promise<unknown>, forma = 'efectivo', 
     return elementos.get(id);
   };
   const contexto: Record<string, unknown> = {
-    crypto, Date, $, AbortSignal, Object, Math, totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, montoTransferidoRazonable, ...PUERTA,
+    crypto, Date, $, AbortSignal, Object, Math, totales, efectivoAlcanza, saldoCanjeable, pagoConDolarones, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, montoTransferidoRazonable, ...PUERTA,
     lineas: [{ producto_id: 'p1', codigo: 'ED-000001', nombre: 'Ventilador', precio: 30000, cantidad: 1 }],
     socio: opciones.socio ?? null, valesCargados: [], catalogo: new Map(), debePreguntarSocio, navigator: { onLine: !opciones.sinRed },
     preguntarSocio: async () => { preguntasSocio.push(1); return opciones.respuestaSocio ?? 'cobrar'; }, abrirAlta: () => abiertas.push('/socios'), pedidoCargado: opciones.sinPedido ? null : { id: 'ped-1', folio: 17, saldo: 10000 },
@@ -441,7 +441,7 @@ test('guía de vale para quien quiere ser socio (#758): QR solo si todos son de 
 });
 
 // Socio y vale no se juntan (#758): se pregunta antes de quitar uno por otro, y cancelar deja el ticket intacto.
-const buscarConAviso = (inicial: { socio?: any; vales?: any[] }, texto: string, respuesta: string, vale = false) => {
+const buscarConAviso = (inicial: { socio?: any; vales?: any[] }, texto: string, respuesta: string, vale = false, origen?: string) => {
   const elementos = new Map<string, any>();
   const $ = (id: string) => {
     if (!elementos.has(id)) elementos.set(id, { value: '', textContent: '', innerHTML: '', hidden: false, style: {}, focus() { this.enfocado = true; },
@@ -451,14 +451,14 @@ const buscarConAviso = (inicial: { socio?: any; vales?: any[] }, texto: string, 
   };
   $('socio').value = texto;
   const pedidos: string[] = [];
-  const cuerpo = vale ? { vale: true, disponible: 1000, maximo: 1000, expira_en: '2099-01-01T00:00:00Z', completo: true }
+  const cuerpo = vale ? { vale: true, disponible: 1000, maximo: 1000, expira_en: '2099-01-01T00:00:00Z', completo: origen !== 'manual', ...(origen ? { origen } : {}) }
     : { numero: 7, nombre: 'Ana', disponible: 500, maximo: 500, expira_en: '2099-01-01T00:00:00Z' };
-  const contexto = { $, guiaVale, dolares: String, escapar: String, idVenta: 'x', pintar() {}, ticketEnDuda: () => false, preguntarDolarones() {}, avisoRojo() {}, setTimeout, Promise, Date, Math,
+  const contexto = { $, guiaVale, conflictoSocioVale, dolares: String, escapar: String, idVenta: 'x', pintar() {}, ticketEnDuda: () => false, preguntarDolarones() {}, avisoRojo() {}, setTimeout, Promise, Date, Math,
     fetch: async (ruta: string) => { pedidos.push(ruta); return { ok: true, json: async () => cuerpo }; },
     codigoDeDigitos: () => null };
   const bloque = cajaFuente.slice(cajaFuente.indexOf('function pintarSocio()'), cajaFuente.indexOf("$('buscar-socio').addEventListener"));
   const buscar = runInNewContext(`let socio = ${JSON.stringify(inicial.socio ?? null)}, valesCargados = ${JSON.stringify(inicial.vales ?? [])}, busquedaSocio = 0,
-    cobrando = false, valesPrueba = false, codigoSocio = '', usarTodos = false;
+    cobrando = false, valesPrueba = false, codigoSocio = '', codigoLlegada = '', usarTodos = false;
     ${cajaFuente.slice(cajaFuente.indexOf('function cambiarTicket('), cajaFuente.indexOf('// Pedido por WhatsApp cargado'))}
     ${bloque}; ({ buscarSocio, estado: () => ({ socio, valesCargados }) })`, contexto);
   return { ...buscar, $, pedidos };
@@ -466,7 +466,7 @@ const buscarConAviso = (inicial: { socio?: any; vales?: any[] }, texto: string, 
 const valeEnTicket = { socio: { vale: true, disponible: 1000, maximo: 1000, expira_en: '2099-01-01T00:00:00Z' }, vales: [{ codigo: 'DP-AAAAAAAAAAAAAAAA', completo: true, expira_en: '2099-01-01T00:00:00Z' }] };
 const socioEnTicket = { socio: { numero: 7, nombre: 'Ana', disponible: 500, maximo: 500, expira_en: '2099-01-01T00:00:00Z' } };
 
-test('buscar socio con vale en el ticket pregunta; cancelar deja el vale y no consulta nada', async () => {
+test('buscar socio con un vale de compra en el ticket pregunta; cancelar deja el vale y no consulta nada', async () => {
   const c = buscarConAviso(valeEnTicket, '#7', '');
   await c.buscarSocio();
   assert.match(c.$('dlg-reemplazo-texto').textContent, /no se combinan.*el vale sale del ticket.*QR/);
@@ -485,11 +485,11 @@ test('buscar socio con vale en el ticket y aceptar: sale el vale y entra el soci
   assert.equal(c.estado().valesCargados.length, 0);
 });
 
-test('escanear un vale con socio en el ticket pregunta; cancelar deja al socio, aceptar lo cambia por el vale', async () => {
+test('escanear un vale de compra con socio en el ticket pregunta; cancelar deja al socio, aceptar lo cambia por el vale', async () => {
   const cancela = buscarConAviso(socioEnTicket, 'DP-BBBBBBBBBBBBBBBB', '', true);
   await cancela.buscarSocio();
   assert.match(cancela.$('dlg-reemplazo-texto').textContent, /socio en el ticket \(#7 · Ana\).*no se combinan/);
-  assert.equal(cancela.pedidos.length, 0);
+  assert.deepEqual(cancela.pedidos, ['/api/vales/buscar'], 'el vale se consulta primero: de su origen depende si se pregunta (#927)');
   assert.equal(cancela.estado().socio.numero, 7);
   assert.equal(cancela.$('socio').value, '#7');
 
@@ -498,6 +498,110 @@ test('escanear un vale con socio en el ticket pregunta; cancelar deja al socio, 
   assert.deepEqual(acepta.pedidos, ['/api/vales/buscar']);
   assert.equal(acepta.estado().socio.vale, true);
   assert.equal(acepta.estado().valesCargados[0].completo, true);
+});
+
+const cuponEnTicket = { socio: { vale: true, disponible: 1000, maximo: 1000, expira_en: '2099-01-01T00:00:00Z' },
+  vales: [{ codigo: 'DP-CCCCCCCCCCCCCCCC', disponible: 1000, completo: false, expira_en: '2099-01-01T00:00:00Z', origen: 'manual' }] };
+const mixtoEnTicket = { socio: { vale: true, disponible: 2000, maximo: 2000, expira_en: '2099-01-01T00:00:00Z' },
+  vales: [cuponEnTicket.vales[0], { codigo: 'DP-AAAAAAAAAAAAAAAA', disponible: 1000, completo: true, expira_en: '2099-01-01T00:00:00Z', origen: 'compra' }] };
+
+test('un cupón se suma al socio del ticket sin preguntar y el socio no cambia (#927)', async () => {
+  for (const origen of ['manual', 'devolucion']) {
+    const c = buscarConAviso({ ...socioEnTicket, vales: [] }, 'DP-BBBBBBBBBBBBBBBB', '', true, origen);
+    await c.buscarSocio();
+    assert.deepEqual(c.pedidos, ['/api/vales/buscar']);
+    assert.equal(c.$('dlg-reemplazo-texto').textContent, '', 'no se preguntó');
+    assert.equal(c.estado().socio.numero, 7);
+    assert.equal(c.estado().socio.vale, undefined);
+    assert.deepEqual([...c.estado().valesCargados].map((v: any) => [v.codigo, v.origen]), [['DP-BBBBBBBBBBBBBBBB', origen]]);
+    assert.equal(c.$('socio').value, '', 'el siguiente cupón se escanea aquí mismo');
+    assert.match(c.$('socio-info').innerHTML, /#7 · Ana[\s\S]*Cupón/);
+    assert.doesNotMatch(c.$('socio-info').innerHTML, /Vale impreso/);
+  }
+});
+
+test('buscar al socio con solo cupones en el ticket no pregunta y los conserva; con un vale de compra pregunta y solo salen los vales de compra (#927)', async () => {
+  const solo = buscarConAviso(cuponEnTicket, '#7', '');
+  await solo.buscarSocio();
+  assert.equal(solo.$('dlg-reemplazo-texto').textContent, '');
+  assert.equal(solo.estado().socio.numero, 7);
+  assert.equal(solo.estado().valesCargados.length, 1);
+
+  const cancela = buscarConAviso(mixtoEnTicket, '#7', '');
+  await cancela.buscarSocio();
+  assert.match(cancela.$('dlg-reemplazo-texto').textContent, /Hay un vale de compra.*no se combinan.*los cupones sí.*el vale sale del ticket/);
+  assert.equal(cancela.pedidos.length, 0);
+  assert.equal(cancela.estado().valesCargados.length, 2);
+  assert.equal(cancela.estado().socio.vale, true);
+
+  const acepta = buscarConAviso(mixtoEnTicket, '#7', 'quitar');
+  await acepta.buscarSocio();
+  assert.equal(acepta.estado().socio.numero, 7);
+  assert.deepEqual([...acepta.estado().valesCargados].map((v: any) => v.origen), ['manual'], 'el cupón se queda');
+});
+
+test('un vale de compra escaneado con cupones y sin socio se suma; con socio reemplaza al socio y los cupones se quedan (#927)', async () => {
+  const sinSocio = buscarConAviso(cuponEnTicket, 'DP-BBBBBBBBBBBBBBBB', '', true, 'compra');
+  await sinSocio.buscarSocio();
+  assert.equal(sinSocio.$('dlg-reemplazo-texto').textContent, '');
+  assert.equal(sinSocio.estado().valesCargados.length, 2);
+
+  const conSocio = { socio: socioEnTicket.socio, vales: cuponEnTicket.vales };
+  const acepta = buscarConAviso(conSocio, 'DP-BBBBBBBBBBBBBBBB', 'quitar', true, 'compra');
+  await acepta.buscarSocio();
+  assert.equal(acepta.estado().socio.vale, true);
+  assert.deepEqual([...acepta.estado().valesCargados].map((v: any) => v.origen), ['manual', 'compra']);
+  assert.equal(acepta.estado().socio.disponible, 2000);
+});
+
+test('conflictoSocioVale: solo un vale de compra choca con el socio; un vale sin origen cuenta como de compra', () => {
+  const socio = { numero: 7, disponible: 500 }, agregado = { vale: true };
+  const cupon = { codigo: 'DP-1', origen: 'devolucion' }, compra = { codigo: 'DP-2', origen: 'compra' }, viejo = { codigo: 'DP-3' };
+  assert.deepEqual([esCupon(cupon), esCupon(compra), esCupon(viejo), esCupon(undefined)], [true, false, false, false]);
+  // Escanear un vale
+  assert.equal(conflictoSocioVale({ socio, vales: [], esVale: true, origen: 'manual' }).pregunta, '');
+  assert.equal(conflictoSocioVale({ socio, vales: [], esVale: true, origen: 'compra' }).pregunta, 'quitar-socio');
+  assert.equal(conflictoSocioVale({ socio, vales: [], esVale: true }).pregunta, 'quitar-socio', 'sin origen, lo prudente');
+  assert.equal(conflictoSocioVale({ socio: agregado, vales: [compra], esVale: true, origen: 'compra' }).pregunta, '', 'con vales solos se suma');
+  assert.equal(conflictoSocioVale({ socio: null, vales: [], esVale: true, origen: 'compra' }).pregunta, '');
+  // Buscar al socio
+  const c = conflictoSocioVale({ socio: agregado, vales: [cupon, compra, viejo], esVale: false });
+  assert.deepEqual([c.pregunta, c.quitar, c.quedan], ['quitar-vales', [compra, viejo], [cupon]]);
+  assert.equal(conflictoSocioVale({ socio: agregado, vales: [cupon], esVale: false }).pregunta, '');
+  assert.equal(conflictoSocioVale({ socio, vales: [], esVale: false }).pregunta, '');
+});
+
+test('pagoConDolarones (#927): cupones primero y la cuenta pone el resto; la cuenta pide su código, su máximo y su vigencia', () => {
+  const ahora = Date.parse('2026-11-25T12:00:00Z');
+  const cuenta = { numero: 7, disponible: 5000, regalo_disponible: 0, maximo: 2000, expira_en: '2026-11-25T12:05:00Z' };
+  const cupones = [{ codigo: 'DP-1', disponible: 1500, expira_en: '2026-12-25T00:00:00Z' }];
+  const p = (extra: Record<string, unknown>) => pagoConDolarones({ socio: cuenta, vales: cupones, codigoSocio: 'DC-x', total: 25000, ahora, ...extra });
+  assert.deepEqual(repartoDeCanje(1000, 1500), { papel: 1000, cuenta: 0 });
+  assert.deepEqual(repartoDeCanje(3000, 1500), { papel: 1500, cuenta: 1500 });
+  assert.deepEqual(repartoDeCanje(-5, 1500), { papel: 0, cuenta: 0 });
+  assert.equal(cuentaDe({ vale: true }), null);
+  assert.equal(saldoPapel(cupones, ahora), 1500);
+  assert.equal(saldoPapel([{ disponible: 100, expira_en: '2026-01-01T00:00:00Z' }], ahora), 0);
+  // «Usar máximo»: 15 D de cupones + 20 D que autorizó el código; no más que el ticket.
+  assert.equal(p({}).maximo, 3500);
+  assert.equal(p({ total: 2000 }).maximo, 2000);
+  assert.equal(p({ codigoSocio: '', socio: { ...cuenta, maximo: undefined, expira_en: undefined } }).maximo, 1500, 'por teléfono solo el papel');
+  assert.equal(p({}).canjeable, 1500 + 5000);
+  // Autorización: el papel solo no pide código; la cuenta, sí, y dentro de su máximo.
+  assert.equal(p({ usados: 1500, codigoSocio: '' }).autorizado, true);
+  assert.equal(p({ usados: 1600, codigoSocio: '' }).autorizado, false);
+  assert.equal(p({ usados: 3500 }).autorizado, true);
+  assert.equal(p({ usados: 3501 }).autorizado, false, 'la cuenta pasa de lo que autorizó el código');
+  assert.equal(p({ usados: 1600, ahora: Date.parse('2026-11-25T12:10:00Z') }).autorizado, false, 'el código venció');
+  assert.equal(p({ usados: 1600, ahora: 0 }).autorizado, true, 'folio en duda: se reintenta con lo mismo');
+  assert.deepEqual(p({ usados: 3000 }).reparto, { papel: 1500, cuenta: 1500 });
+  // Un cupón que ya venció en el ticket frena el cobro aunque la cuenta alcance (el servidor rechazaría el ticket).
+  const vencido = [...cupones, { codigo: 'DP-2', disponible: 100, expira_en: '2026-11-25T11:00:00Z' }];
+  assert.equal(p({ vales: vencido, usados: 500 }).autorizado, false);
+  // Solo vales (sin socio de verdad): como antes, el máximo es su saldo.
+  const soloVales = pagoConDolarones({ socio: { vale: true, disponible: 1500 }, vales: cupones, codigoSocio: 'DP-1', total: 25000, usados: 1500, ahora });
+  assert.deepEqual([soloVales.maximo, soloVales.autorizado, soloVales.canjeable], [1500, true, 1500]);
+  assert.equal(pagoConDolarones({ socio: null, vales: [], total: 25000, ahora }).maximo, 0);
 });
 
 test('sumar otro vale a un vale, o un socio a otro socio, no pregunta (no hay mezcla)', async () => {
@@ -516,7 +620,7 @@ test('ventana «¿El cliente es socio?» con vale: guía y «Usar el vale sin so
     const boton = { textContent: '' }; const texto = { textContent: '' };
     const d: any = { returnValue: 'x', showModal() {}, addEventListener() {}, querySelector: () => boton };
     const $ = (id: string) => (id === 'dlg-socio' ? d : texto);
-    runInNewContext(`${preguntarSocio}; preguntarSocio()`, { $, socio, valesCargados, guiaVale, Promise });
+    runInNewContext(`${preguntarSocio}; preguntarSocio()`, { $, socio, valesCargados, guiaVale, conflictoSocioVale, Promise });
     return { boton: boton.textContent, texto: texto.textContent };
   };
   const cupon = armar({ vale: true }, [{ codigo: 'DP-1', completo: false, expira_en: '2099-01-01T00:00:00Z' }]);

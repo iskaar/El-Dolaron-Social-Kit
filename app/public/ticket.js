@@ -66,7 +66,10 @@ export function pintarDetalle(t, { editable = false, resaltar = [], fechas = { f
     t.descuento ? ['Subtotal', pesos(t.total + t.descuento)] : null,
     t.descuento ? ['Descuento', `− ${pesos(t.descuento)}`] : null,
     ['Total cobrado', pesos(t.total)],
-    t.dolarones ? ['Pagado con Dolarones', dolares(t.dolarones)] : null,
+    // Con vale impreso y cuenta de socio juntos (#927) se dice cuánto fue de cada uno; con uno solo, el renglón de siempre.
+    ...(t.dolarones_papel > 0 && t.dolarones > t.dolarones_papel
+      ? [['Pagado con vale impreso', dolares(t.dolarones_papel)], ['Pagado con Dolarones de la cuenta', dolares(t.dolarones - t.dolarones_papel)]]
+      : [t.dolarones ? ['Pagado con Dolarones', dolares(t.dolarones)] : null]),
     t.anticipo ? [`Anticipo${t.pedido_folio ? ` P-${t.pedido_folio}` : ' de pedido'}`, `− ${pesos(t.anticipo)}`] : null,
     t.efectivo ? ['Efectivo recibido / cambio', `${pesos(t.efectivo)} / ${pesos(t.cambio)}`] : null,
     t.devuelto - (t.devuelto_cupon ?? 0) ? ['Devuelto en dinero', `− ${pesos(t.devuelto - (t.devuelto_cupon ?? 0))}`] : null,
@@ -150,8 +153,23 @@ const botonCupon = (cupon, dato) => cupon
   ? `<button type="button" class="cupon" ${dato}>Devolver en cupón (${cupon}% en Dolarones)</button>
      <small>Solo si el cliente lo acepta: dile el importe y que puede pedir su dinero.</small>` : '';
 
-/** El formulario de una pieza: cuantas (si hay mas de una) y el motivo. */
-export function formularioPieza(lineaId, quedan, cupon = null, forma = 'efectivo') {
+/**
+ * El formulario de una pieza: cuantas (si hay mas de una) y el motivo. Con `soloCupon` (#927: socio que pagó con cupón) solo se ofrece
+ * el cupón: el dinero de una pieza no se reparte entre cupón y cuenta, y devolver dinero es cancelar el ticket completo.
+ */
+export function formularioPieza(lineaId, quedan, cupon = null, forma = 'efectivo', soloCupon = false) {
+  if (soloCupon) return `
+    <div class="form-cancelar">
+      ${quedan > 1 ? `<label>Cuántas <input type="number" class="cantidad-cancelar" min="1" max="${quedan}" value="1" inputmode="numeric"></label>` : ''}
+      <input type="text" class="motivo-cancelar" maxlength="200" placeholder="Motivo de la cancelación">
+      ${botonCupon(cupon, `data-cupon-linea="${lineaId}"`)}
+      <small>Este ticket se pagó con vale o cupón: la pieza solo se devuelve en cupón (lo que pagó la cuenta regresa a su saldo). Para devolver dinero hay que cancelar el ticket completo.</small>
+      <div class="cancelar-normal" hidden>
+        <small>Esta pieza se pagó con Dolarones de la cuenta: no hay dinero ni cupón que dar. Se cancela normal y los Dolarones regresan a su saldo.</small>
+        <button type="button" class="secundario" data-confirmar-linea="${lineaId}">Cancelar la pieza</button>
+      </div>
+      <div class="botones"><button type="button" class="secundario" data-volver>Volver</button></div>
+    </div>`;
   // Con tarjeta o transferencia, el cajero dice por donde regresa el dinero: el corte lo cuenta asi.
   return `
     <div class="form-cancelar">

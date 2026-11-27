@@ -61,7 +61,9 @@ export async function cancelarCore(
   if (venta.anticipo > 0) return { status: 409, cuerpo: { error: TICKET_CON_ANTICIPO } };
   // El dinero de un cupón se quedó en el cajón (Issue #330): cancelado completo, el corte del mismo turno
   // ya no contaría la venta y faltaría ese dinero. Lo que queda se devuelve pieza por pieza.
-  if (venta.devuelto_cupon > 0) {
+  // Con papel usado (#927) una pieza devuelta en cupón puede no mover dinero (`devuelto_cupon` en 0) y aun así ya re-emitió lo que pagó un cupón viejo:
+  // cualquier devolución en cupón impide cancelar completo.
+  if (venta.devuelto_cupon > 0 || await env.DB.prepare('select 1 from devoluciones where venta_id = ? and vale_id is not null limit 1').bind(id).first()) {
     return { status: 409, cuerpo: { error: 'Este ticket ya tiene piezas devueltas en cupón: devuelve lo que queda pieza por pieza.' } };
   }
   if (await devolucionPendiente(env, id)) return { status: 409, cuerpo: { error: HAY_DEVOLUCION } };

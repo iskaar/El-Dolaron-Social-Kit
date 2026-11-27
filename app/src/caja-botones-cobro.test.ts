@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { PUERTA } from './prueba-caja.ts';
 import {
-  totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio,
+  totales, efectivoAlcanza, saldoCanjeable, pagoConDolarones, dolaronesGanados, anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio,
   descuentoDe, TOPE_DESCUENTO, huellaTicket, promoInauguracion, TICKET_VIGENTE_MS, maximoCanje, montosRapidos, montoTransferidoRazonable, MINIMO_REGALO, SIN_RED_EN_MANO, ordenEnPantalla, 
 } from '../public/venta.js';
 
@@ -114,7 +114,7 @@ function armar(op: Opciones = {}) {
     ? { id: 's1', numero: 7, disponible: 500000, regalo_disponible: 0, maximo: 500000, expira_en: '2099-01-01T00:00:00Z', vale: false } : null;
   let n = 0;
   const contexto: Record<string, any> = {
-    crypto, Date, JSON, ordenEnPantalla, $, AbortSignal, Object, Math, Number, String, vistos: [] as unknown[], totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados,
+    crypto, Date, JSON, ordenEnPantalla, $, AbortSignal, Object, Math, Number, String, vistos: [] as unknown[], totales, efectivoAlcanza, saldoCanjeable, pagoConDolarones, dolaronesGanados,
     anticipoDePedido, transferenciaDe, CLAVE_DESDE, debePreguntarSocio, descuentoDe, TOPE_DESCUENTO, maximoCanje, montosRapidos, montoTransferidoRazonable,
     MINIMO_REGALO, ...PUERTA, addEventListener() {}, location: { reload() {} }, navigator: { onLine: op.enLinea ?? true }, window: { open() {} }, ocultarEnMano() {}, SIN_RED_EN_MANO,
     localStorage: { getItem: (k: string) => almacen[k] ?? null, setItem: (k: string, v: string) => { almacen[k] = v; } },
@@ -801,7 +801,8 @@ test('#933 recargar con el cobro en duda: Dolarones que cubren todo. El botón s
 });
 
 test('#933 recargar con el cobro en duda: vales juntos en el ticket', async () => {
-  const vales = [{ codigo: 'DP-A', disponible: 10000 }, { codigo: 'DP-B', disponible: 10000 }];
+  // Con su vencimiento, como los manda el servidor: desde #927 la caja no cobra con un vale que no sabe vigente.
+  const vales = [{ codigo: 'DP-A', disponible: 10000, expira_en: '2099-01-01T00:00:00Z' }, { codigo: 'DP-B', disponible: 10000, expira_en: '2099-01-01T00:00:00Z' }];
   const antes = armar({ dolaronesReal: true, socio: SOCIO_VALE, vales, codigo: 'DP-A', valores: { dolarones: '200' }, efectivo: '100', fetch: timeoutUnaVez });
   await antes.clic('cobrar-efectivo');
   assert.deepEqual(antes.enviadas[0].codigo_vale, ['DP-A', 'DP-B']);
@@ -810,6 +811,36 @@ test('#933 recargar con el cobro en duda: vales juntos en el ticket', async () =
   await despues.clic('cobrar-efectivo');
   assert.deepEqual(despues.crudas, [antes.crudas[0]]);
 });
+
+// #927 + #933: un socio que paga con un cupón y con su cuenta. El cobro en duda es ESA venta: los dos códigos, el socio y el cupón.
+for (const [nombre, recarga] of [['sin recargar', false], ['recargando', true]] as const) {
+  test(`#927 cobro en duda de un socio con cupón y cuenta (${nombre}): el reintento manda el mismo cuerpo, con los dos códigos, y el ticket conserva socio y cupón`, async () => {
+    const cupones = [{ codigo: 'DP-C', disponible: 10000, expira_en: '2099-01-01T00:00:00Z', completo: false, origen: 'devolucion' }];
+    const antes = armar({ dolaronesReal: true, socio: SOCIO_D, vales: cupones, codigo: 'DC-x', valores: { dolarones: '200' }, efectivo: '100', fetch: timeoutUnaVez });
+    await antes.clic('cobrar-efectivo');
+    assert.equal(antes.enviadas[0].cliente_id, 's1');
+    assert.equal(antes.enviadas[0].dolarones, 20000, 'el total en Dolarones: cupón + cuenta');
+    assert.equal(antes.enviadas[0].codigo_vale, 'DP-C');
+    assert.equal(antes.enviadas[0].codigo_socio, 'DC-x');
+    assert.equal(antes.estado().cobroIncierto?.id, antes.estado().idVenta, 'quedó en duda');
+    const c = recarga ? recargada(antes) : antes;
+    assert.equal(c.estado().idVenta, antes.estado().idVenta);
+    assert.deepEqual(c.venta().socio, SOCIO_D, 'el socio sigue en el ticket');
+    assert.equal(c.venta().codigoSocio, 'DC-x');
+    assert.deepEqual(c.venta().valesCargados, cupones, 'el cupón sigue en el ticket, con su origen');
+    assert.equal(c.$('dolarones').value, '200');
+    assert.deepEqual(c.habilitados(), ['cobrar-efectivo']);
+    await c.clic('cobrar-efectivo');
+    assert.equal(c.crudas.at(-1), antes.crudas[0], 'mismo cuerpo, byte a byte');
+    assert.equal(antes.crudas.length + (recarga ? c.crudas.length : 0), 2, 'un intento y un reintento');
+    assert.match(c.$('aviso').textContent, /^Cobrado/);
+    assert.equal(c.estado().cobroIncierto, null);
+    // La respuesta de esta prueba no trae el reparto (servidor anterior): el ticket impreso lleva el de la caja, cupón primero, y el saldo del socio solo baja por la cuenta.
+    const impreso = c.impresos[0][0];
+    assert.equal(impreso.dolarones_papel, 10000);
+    assert.equal(impreso.socio.saldo, SOCIO_D.disponible - 10000);
+  });
+}
 
 test('#933 recargar con el cobro en duda: socio con pedido y «ya usó la promo»', async () => {
   const antes = armar({ pedido: PEDIDO_PARCIAL, socio: SOCIO_D, sinPromo: true, efectivo: '200', dolaronesReal: true, fetch: sinRed });

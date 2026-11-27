@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
-import { totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados, debePreguntarSocio } from '../public/venta.js';
+import { totales, efectivoAlcanza, saldoCanjeable, pagoConDolarones, dolaronesGanados, debePreguntarSocio } from '../public/venta.js';
 import { PUERTA } from './prueba-caja.ts';
 
 const venta = (extra:Record<string, unknown> = {}) => ({ id:crypto.randomUUID(),
@@ -237,9 +237,9 @@ test('celular sin red guarda imprimir_en; no imprime localmente ni abre el cajó
     ${cobro}; cobrar`, {
     crypto, Date, $, AbortSignal, Object, debePreguntarSocio, ...PUERTA, navigator:{ onLine:false },   // sin red no se pregunta por el socio (#730)
     lineas:[{ producto_id:PRODUCTO, codigo:'ED-000001', nombre:'Ventilador', precio:25000, cantidad:1 }],
-    socio:null, catalogo:new Map(), pedidoCargado:null,
+    socio:null, valesCargados:[], catalogo:new Map(), pedidoCargado:null,
     impresionRemota:() => true, exigirCaja:() => true, cajaActual:() => 'Caja 1', dolaronesPedidos:() => 0,
-    totales, efectivoAlcanza, saldoCanjeable, dolaronesGanados,
+    totales, efectivoAlcanza, saldoCanjeable, pagoConDolarones, dolaronesGanados,
     descuento:null, descuentoAplicado:() => 0, promoActual:() => 0, pintarDescuento() {}, revisarVencimientoDescuento: () => false,
     pesos:String, dolares:String, pintar() {}, quitarSocio() {}, sincronizar() {}, refrescarMeta() {},
     fetch:async () => { throw new Error('sin red'); },
