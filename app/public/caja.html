@@ -1224,6 +1224,7 @@ function pintar() {
     pintarDescuento(habiaSolicitud && subtotal > 0 ? 'El ticket cambió: el descuento ya no aplica. Pide otro.' : '');
   }
   $('pedir-descuento').hidden = subtotal === 0 || (!!descuento && !descuentoCerrado());
+  pintarTopeDescuento();   // #949: el tope depende del subtotal; solo toca «Enviar a gerencia» y su aviso, nada de lo que apaga la duda del cobro (#933)
   if (subtotal === 0) $('descuento-form').hidden = true;
   guardarTicket();
 
@@ -2513,7 +2514,14 @@ async function sincronizar() {
         break;                                   // sin red: se registra al volver
       }
       if (respuesta.status >= 500) break;
-      if (respuesta.status >= 400) console.error('Cajon: el servidor rechazo la apertura', apertura, respuesta.status);
+      if ([401, 408, 429].includes(respuesta.status)) break;   // sesión caducada o saturación pasajera: se reintenta sola, como las ventas (#949)
+      if (respuesta.status >= 400) {
+        // El servidor la rechazó (identificador, fecha, caja que no es de la tienda, permiso): ya no se reenvía, pero la pantalla lo dice (#949).
+        const rechazo = await respuesta.json().catch(() => null);
+        console.error('Cajon: el servidor rechazo la apertura', apertura, respuesta.status);
+        $('aviso').textContent = `El servidor no registró una apertura del cajón. ${rechazo?.error ? `${rechazo.error} ` : ''}Avísale a gerencia.`;
+        $('aviso').style.color = '#D72B32';
+      }
       await store('cajon', 'readwrite', (s) => s.delete(apertura.id));
     }
   } finally {
@@ -3326,6 +3334,7 @@ async function abrirCajonRegistrado(aviso) {
   }
 }
 $('abrir-cajon').addEventListener('click', async () => {
+  if (!exigirCaja()) return;   // #949: sin caja elegida la apertura quedaba registrada sin caja
   await abrirCajonRegistrado($('aviso'));
   $('codigo').focus();
 });
@@ -3436,14 +3445,16 @@ $('retiro-registrar').addEventListener('click', async () => {
     }
     if (!r.ok) { $('retiro-aviso').textContent = retiro.error ?? 'No se pudo registrar.'; if (pidiendoPin) { $('retiro-pin').value = ''; $('retiro-pin').focus(); } return; }
     $('dialogo-retiro').close();
-    await abrirCajon();
+    const abrio = await abrirCajon();
     imprimirRetiro(retiro).then(pintarImpresora);
     // Lo que se muestra y se imprime es lo que el servidor registró, no lo que hay ahora en el campo.
-    $('aviso').textContent = retiro.tipo === 'gasto'
+    // El retiro ya quedó registrado: si el cajón no abrió, el aviso lo dice (#949, mismo texto que el cobro en efectivo, #817).
+    const falla = abrio ? null : textoFalla('cajon');
+    $('aviso').textContent = (retiro.tipo === 'gasto'
       ? `Gasto de ${pesos(retiro.importe)} registrado.`
       : retiro.tipo === 'terminal' ? `Pago de la terminal de ${pesos(retiro.importe)} registrado. Que firme el comprobante.`
-      : `Retiro de ${pesos(retiro.importe)} registrado. Firmen el comprobante.`;
-    $('aviso').style.color = '#1f7a4d';
+      : `Retiro de ${pesos(retiro.importe)} registrado. Firmen el comprobante.`) + (falla ? ` ${falla.texto}` : '');
+    $('aviso').style.color = falla && !falla.calmo ? '#D72B32' : '#1f7a4d';
     $('codigo').focus();
   } catch {
     $('retiro-aviso').textContent = 'Sin red: necesita conexión para quedar registrado.';
