@@ -105,11 +105,11 @@ async function tienda(env: Env, cal: Calendario) {
        select v.pedido_id is null as es_caja, c.forma_pago, cast(strftime('%w', datetime(c.creado_en, '-6 hours')) as integer) as dia_semana,
          case when cast(strftime('%H', datetime(c.creado_en, '-6 hours')) as integer) < 12 then 'manana'
               when cast(strftime('%H', datetime(c.creado_en, '-6 hours')) as integer) < 16 then 'tarde' else 'noche' end as franja,
-         count(distinct c.venta) as tickets, coalesce(sum(c.neta), 0) as total, coalesce(sum(c.cobrado), 0) as cobrado,
+         count(distinct c.venta) as tickets, coalesce(sum(c.neta), 0) as total, coalesce(sum(c.cobrado), 0) as cobrado, coalesce(sum(c.tarjeta_linea), 0) as tarjeta,
          coalesce(sum(c.neta - c.cobrado - c.anticipo_linea), 0) as dolarones
        from cobros c join ventas v on v.id = c.venta where c.propietario = 'dolaron' group by es_caja, c.forma_pago, dia_semana, franja`,
     ).bind(apertura(cal.primero), apertura(cal.siguiente))
-      .all<{ es_caja: number; forma_pago: string; dia_semana: number; franja: string; tickets: number; total: number; cobrado: number; dolarones: number }>(),
+      .all<{ es_caja: number; forma_pago: string; dia_semana: number; franja: string; tickets: number; total: number; cobrado: number; tarjeta: number; dolarones: number }>(),
     sociosConDolarones(env, apertura(cal.primero), apertura(cal.siguiente), true),
   ]);
   const ventasTotal = filas.results.reduce((s, f) => s + f.total, 0);
@@ -118,8 +118,10 @@ async function tienda(env: Env, cal: Calendario) {
   const cobradoEn = (forma: string) => caja.filter((f) => f.forma_pago === forma).reduce((s, f) => s + f.cobrado, 0);
   const total = suma('total');
   const tickets = suma('tickets');
-  const efectivo = cobradoEn('efectivo');
-  const tarjeta = cobradoEn('tarjeta');
+  // Un ticket mixto (#956) se reparte: su parte en tarjeta a `tarjeta` y el resto a `efectivo`; sus tickets y su total no se duplican.
+  const tarjetaMixto = caja.filter((f) => f.forma_pago === 'mixto').reduce((s, f) => s + f.tarjeta, 0);
+  const efectivo = cobradoEn('efectivo') + cobradoEn('mixto') - tarjetaMixto;
+  const tarjeta = cobradoEn('tarjeta') + tarjetaMixto;
   const transferencia = cobradoEn('transferencia');
   const pagadoConDolarones = caja.reduce((s, f) => s + f.dolarones, 0);
   // Si menos de 5 socios pagaron con Dolarones, restar las otras formas de pago de lo vendido los delataria:
