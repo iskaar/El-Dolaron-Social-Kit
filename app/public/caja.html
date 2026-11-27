@@ -2981,7 +2981,7 @@ $('ticket-contenido').addEventListener('click', async (e) => {
       r = await fetch(`/api/ventas/${ticketId}/cupon`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id: idCancelacion, motivo, caja: cajaActual(),
-          lineas: d.cuponLinea ? [{ linea: Number(d.cuponLinea), cantidad }] : 'todo' }),
+          lineas: d.cuponLinea ? [{ linea: Number(d.cuponLinea), cantidad }] : 'todo', ...aprobacionCupon(form) }),
       });
       cuerpo = await r.json();
     } catch {
@@ -2989,8 +2989,16 @@ $('ticket-contenido').addEventListener('click', async (e) => {
       avisoTicket(ticketId, 'Sin red: no se pudo dar el cupón. Reabre el ticket antes de entregar nada.', '#D72B32');
       return;
     }
+    if (r.status === 403 && cuerpo.requiere_aprobacion) {   // #948: compra fuera del plazo de devoluciones
+      for (const b of form.querySelectorAll('button')) b.disabled = false;
+      if (!ticketVisible(ticketId)) { avisoTicket(ticketId, `${cuerpo.error ?? 'Hace falta aprobación.'} No se devolvió nada: reabre el ticket.`, '#D72B32'); return; }   // ventana cerrada a media petición (#945)
+      $('ticket-aviso').textContent = '';
+      pedirAprobacionCupon(form, cuerpo);
+      return;
+    }
     if (!r.ok) {
       for (const b of form.querySelectorAll('button')) b.disabled = false;
+      if (form.querySelector('.pin-cupon')) { form.querySelector('.pin-cupon').value = ''; form.querySelector('.pin-cupon').focus(); }
       avisoTicket(ticketId, cuerpo.error ?? 'No se pudo dar el cupón.', '#D72B32');
       return;
     }
@@ -3111,6 +3119,25 @@ function panelAprobacion({ error, duenos = [] }, conVolver = false) {
     <div class="aviso-dialogo aviso-aprobacion"></div>
   </div>`;
 }
+
+/**
+ * Cupón de una compra fuera del plazo de devoluciones (#948): el servidor pide al supervisor o a gerencia. Sus campos salen en el mismo formulario
+ * (sin ventana nueva) y la cajera toca «Devolver en cupón» otra vez con el PIN escrito; `aprobacionCupon` lo agrega al pedido, con el mismo id.
+ */
+function pedirAprobacionCupon(form, { error, duenos = [] }) {
+  form.querySelector('.aprobacion-cupon')?.remove();
+  const bloque = document.createElement('div');
+  bloque.className = 'aprobacion-cupon';
+  bloque.innerHTML = `<p class="nota" style="color:#D72B32;margin:0">${escapar(error)}</p>${duenos.length === 0
+    ? '<p class="nota">Nadie con permiso tiene PIN: pide a gerencia que entre a esta caja.</p>'
+    : `<select class="aprobador-cupon" aria-label="Quién aprueba">${duenos.map((u) => `<option value="${escapar(u.correo)}">${escapar(u.nombre || u.correo)}</option>`).join('')}</select>
+       <input type="password" class="pin-cupon" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="PIN de quien aprueba (6 dígitos)">
+       <small>Escribe el PIN y toca «Devolver en cupón» otra vez.</small>`}`;
+  form.querySelector('.cupon').before(bloque);
+  bloque.querySelector('.pin-cupon')?.focus();
+}
+const aprobacionCupon = (form) => form.querySelector('.pin-cupon')
+  ? { aprobador: form.querySelector('.aprobador-cupon').value, pin: form.querySelector('.pin-cupon').value } : {};
 
 /** Pregunta cada 5 s si el dueño ya respondió; la caja puede seguir cobrando mientras tanto. */
 function esperarAprobacion(solicitudId, ticketId) {
