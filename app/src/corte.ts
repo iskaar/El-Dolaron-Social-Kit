@@ -23,7 +23,8 @@
  * se puede volver a contar para que cuadre.
  */
 
-import { lineasNetas } from './netas.ts';
+import { lineasNetas, MIXTO_EFECTIVO, MIXTO_TARJETA } from './netas.ts';
+export { MIXTO_EFECTIVO, MIXTO_TARJETA };
 import { contadoDe } from '../public/venta.js';
 import { leerUsuario, cajasDe, apruebaDinero } from './cuentas.ts';
 import { claveFondo } from '../public/fondos.js';
@@ -170,9 +171,7 @@ const leerCorte = (env: Env, id: string) =>
   env.DB.prepare(`${CON_TERMINAL} where c.id = ?`).bind(id).first<Corte>();
 
 // Pago mixto (#956): ventas.forma_pago = 'mixto', `efectivo` es solo la parte en efectivo (cambio siempre 0) y la de tarjeta se calcula.
-// Una sola definicion para el corte y los reportes (netas.ts).
-export const MIXTO_EFECTIVO = 'efectivo - cambio';
-export const MIXTO_TARJETA = 'total - dolarones - anticipo - efectivo + cambio';
+// Una sola definicion para el corte y los reportes: vive en netas.ts y se re-exporta aqui.
 // Lo cobrado (o devuelto) de una forma de pago, sin la parte pagada con Dolarones.
 const dinero = (forma: string, importe = 'total - dolarones') =>
   `coalesce(sum(case when forma_pago = '${forma}' then ${importe} end), 0)`;

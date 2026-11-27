@@ -73,7 +73,7 @@ export const rangoDe = (url: URL, ahora = Date.now()) => {
  * Cobrado en el ticket (netas.ts ya descuenta el anticipo) mas el anticipo de los pedidos recibidos en el periodo: el dinero entra
  * el dia del apartado, no el de la venta. Los Dolarones usados (neta - cobrado - anticipo) van en su propia fila. Con `porDia` cada
  * fila trae ademas el dia de la tienda en que entro el dinero (#802, vista Ventas): sumadas dan lo mismo que sin dia.
- * D1 admite 5 terminos por compound SELECT: son 4.
+ * D1 admite 5 terminos por compound SELECT: son 4 (la CTE por_forma tiene los suyos, aparte). Un ticket mixto cuenta en `tickets` de efectivo y de tarjeta (usa las dos).
  * Los tickets «con Dolarones» se cuentan por TICKET (suma de lo que cada pieza le debe a Dolarones <> 0), no por pieza: el reparto por pieza del cobrado y del
  * anticipo redondea cada uno por su lado y en un ticket con anticipo y piezas iguales deja +1/-1 centavo en piezas sueltas aunque el ticket no use Dolarones
  * (contaba un ticket de mas; el importe siempre cuadro). #802 A7.
@@ -81,10 +81,16 @@ export const rangoDe = (url: URL, ahora = Date.now()) => {
 export function consultaFormaPago(deTienda: string, deCajas: (columna: string) => string, porDia = false) {
   const dia = (columna: string) => (porDia ? `${diaTienda(columna)} as dia, ` : '');
   const g = porDia ? 'dia, ' : '';
-  return `${lineasNetas(`v.creado_en >= ? and v.creado_en < ?${deTienda}`)}
+  return `${lineasNetas(`v.creado_en >= ? and v.creado_en < ?${deTienda}`)},
+     -- Un ticket mixto (#956) se reparte: su parte en tarjeta (tarjeta_linea) a 'tarjeta' y el resto a 'efectivo'. Nunca hay fila 'mixto'.
+     por_forma as (
+       select venta, creado_en, case when forma_pago = 'mixto' then 'efectivo' else forma_pago end as forma_pago, cobrado - tarjeta_linea as cobrado
+       from cobros where propietario = 'dolaron'
+       union all
+       select venta, creado_en, 'tarjeta', tarjeta_linea from cobros where propietario = 'dolaron' and forma_pago = 'mixto')
      select ${g}forma_pago, sum(tickets) as tickets, sum(total) as total from (
        select ${dia('creado_en')}forma_pago, count(distinct venta) as tickets, coalesce(sum(cobrado), 0) as total
-       from cobros where propietario = 'dolaron' group by ${g}forma_pago
+       from por_forma group by ${g}forma_pago
        union all
        select ${dia('creado_en')}forma_pago, 0, coalesce(sum(anticipo), 0) from pedidos where creado_en >= ? and creado_en < ?${deCajas('caja')} group by ${g}forma_pago
        union all

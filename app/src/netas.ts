@@ -1,17 +1,26 @@
 // Lineas netas de cada venta (Issue #298). Lo usan los reportes y el corte de caja.
 
+// Pago mixto (#956): ventas.forma_pago = 'mixto', `efectivo` es solo la parte en efectivo (cambio siempre 0) y la de tarjeta se calcula.
+// Una sola definicion para el corte (que las re-exporta) y los reportes.
+export const MIXTO_EFECTIVO = 'efectivo - cambio';
+export const MIXTO_TARJETA = 'total - dolarones - anticipo - efectivo + cambio';
+const TARJETA_MIXTO = `case when v.forma_pago = 'mixto' then ${MIXTO_TARJETA.replace(/[a-z_]+/g, 'v.$&')} else 0 end`;
+
 /**
  * CTE `netas`: cada pieza vendida (no cancelada) con lo que de verdad aporta a
  * `resumen.total`. Cada ticket cuenta `total - devuelto - dolarones_devueltos`
  * (ya con descuento y promo restados); ese neto se reparte entre sus lineas en
  * proporcion a su importe, y los centavos que sobran del redondeo hacia abajo
  * van uno a uno a las lineas con mayor resto, asi cada ticket suma exacto.
+ * Un ticket mixto (#956) reparte igual su parte en tarjeta (fija: una devolucion sale en efectivo) en `tarjeta_linea`;
+ * lo cobrado en efectivo de la pieza es `cobrado - tarjeta_linea`. En los demas tickets `tarjeta_linea` es 0.
  * `filtro` es la condicion sobre `v` (ventas) y trae sus propios `?`.
  */
 export const lineasNetas = (filtro: string, canceladas = false) => `with base as (
     select v.id as venta, l.id, l.producto_id, l.codigo, l.nombre, l.cantidad - l.cancelada_cantidad as cant,
       l.precio * (l.cantidad - l.cancelada_cantidad) as importe, v.total - v.devuelto - v.dolarones_devueltos as neto,
-      l.propietario, v.forma_pago, v.creado_en, v.total - v.dolarones - v.anticipo - v.devuelto as pago, v.anticipo as antic
+      l.propietario, v.forma_pago, v.creado_en, v.total - v.dolarones - v.anticipo - v.devuelto as pago, v.anticipo as antic,
+      ${TARJETA_MIXTO} as tarjeta_v
     from venta_lineas l join ventas v on v.id = l.venta_id where v.cancelada = ${canceladas ? 1 : 0} and ${filtro}),
   piso as (
     select *, sum(importe) over (partition by venta) as suma,
@@ -30,11 +39,15 @@ export const lineasNetas = (filtro: string, canceladas = false) => `with base as
       case when sum(importe) over (partition by venta) > 0 then pago * importe / sum(importe) over (partition by venta) else 0 end as base_c,
       case when sum(importe) over (partition by venta) > 0 then pago * importe % sum(importe) over (partition by venta) else 0 end as resto_c,
       case when sum(importe) over (partition by venta) > 0 then antic * importe / sum(importe) over (partition by venta) else 0 end as base_a,
-      case when sum(importe) over (partition by venta) > 0 then antic * importe % sum(importe) over (partition by venta) else 0 end as resto_a
+      case when sum(importe) over (partition by venta) > 0 then antic * importe % sum(importe) over (partition by venta) else 0 end as resto_a,
+      case when sum(importe) over (partition by venta) > 0 then tarjeta_v * importe / sum(importe) over (partition by venta) else 0 end as base_t,
+      case when sum(importe) over (partition by venta) > 0 then tarjeta_v * importe % sum(importe) over (partition by venta) else 0 end as resto_t
     from netas),
   cobros as (
     select *, base_c + case when resto_c > 0 and row_number() over (partition by venta order by resto_c desc, id)
         <= pago - sum(base_c) over (partition by venta) then 1 else 0 end as cobrado,
       base_a + case when resto_a > 0 and row_number() over (partition by venta order by resto_a desc, id)
-        <= antic - sum(base_a) over (partition by venta) then 1 else 0 end as anticipo_linea
+        <= antic - sum(base_a) over (partition by venta) then 1 else 0 end as anticipo_linea,
+      base_t + case when resto_t > 0 and row_number() over (partition by venta order by resto_t desc, id)
+        <= tarjeta_v - sum(base_t) over (partition by venta) then 1 else 0 end as tarjeta_linea
     from cobro)`;
