@@ -126,7 +126,7 @@ function armar(op: Opciones = {}) {
     preguntarSocio: async () => { preguntas.push(1); return op.respuestaSocio ?? 'cobrar'; }, abrirAlta() {},
     impresionRemota: () => vivo.remota, cajaActual: () => vivo.caja, ...(op.dolaronesReal ? {} : { dolaronesPedidos: () => op.dolarones ?? 0 }),
     descuentoAplicado: () => 0, promoActual: () => 0, totalNeto: () => op.precio ?? 30000, pintarDescuento() {}, promoAgotada() {},
-    pintarPromoCupo() {}, revisarCancelarArmado() {}, pintarImpresionRemota() {}, escapar: String, pesos: String, dolares: String,
+    pintarPromoCupo() {}, revisarCancelarArmado() {}, pintarTopeDescuento() {}, pintarImpresionRemota() {}, escapar: String, pesos: String, dolares: String,
     quitarSocio() {}, sincronizar() {}, refrescarMeta() {}, cargarCatalogo() {}, pintarImpresora() {}, promoConfig: null,
     abrirCajon: async () => { cajones.push(1); return true; }, imprimirTicket: async (...args: any[]) => { impresos.push(args); return true; },
     store: async (almacenIdb: string, _m: string, fn: any) => fn({ put(v: unknown) { if (almacenIdb === 'ventas') guardadas.push(v); } }),
