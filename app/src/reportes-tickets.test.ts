@@ -104,14 +104,14 @@ test('exporta los tickets a CSV: encabezado, centavos, hora de la tienda y los m
   assert.ok(todos.texto.startsWith('﻿'), 'BOM para Excel');
   const filas = filasCsv(todos.texto);
   assert.deepEqual(filas[0], ['fecha', 'ticket', 'caja', 'cajero', 'forma_pago', 'estado', 'piezas', 'cantidad', 'total', 'devuelto',
-    'dolarones', 'dolarones_devueltos', 'vendido', 'socio']);
+    'dolarones', 'dolarones_devueltos', 'vendido', 'socio', 'parte_efectivo', 'parte_tarjeta']);
   assert.equal(filas.length, 5);   // encabezado + 4 tickets, todos: no se pagina
   const por = (id: string) => filas.find((f) => f[1] === id)!;
   assert.equal(por(efectivo.id)[0], `${tienda21} 21:05`);
   assert.deepEqual(por(efectivo.id).slice(2), [
-    'Caja 1', DUENO, 'efectivo', 'vigente', 'Ventilador', '1', '250.00', '0.00', '0.00', '0.00', '250.00', 'no']);
+    'Caja 1', DUENO, 'efectivo', 'vigente', 'Ventilador', '1', '250.00', '0.00', '0.00', '0.00', '250.00', 'no', '', '']);
   // Devolvio 1 de 2: el ticket vale lo que queda.
-  assert.deepEqual(por(doble.id).slice(5), ['con devoluciones', 'Ventilador', '2', '500.00', '250.00', '0.00', '0.00', '250.00', 'no']);
+  assert.deepEqual(por(doble.id).slice(5), ['con devoluciones', 'Ventilador', '2', '500.00', '250.00', '0.00', '0.00', '250.00', 'no', '', '']);
   // Un cancelado ya no vale nada, aunque conserve su total.
   assert.deepEqual(por(cancelada.id).slice(5, 13), ['cancelado', 'Ventilador', '1', '250.00', '0.00', '0.00', '0.00', '0.00']);
 

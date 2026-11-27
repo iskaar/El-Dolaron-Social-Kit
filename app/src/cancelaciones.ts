@@ -48,17 +48,23 @@ export async function cancelarCore(
   extra: (ahora: string) => D1PreparedStatement[] = () => [],
 ): Promise<Resultado> {
   const venta = await env.DB.prepare(
-    'select id, total, dolarones, anticipo, cancelada, devuelto, devuelto_cupon, dolarones_devueltos, revision from ventas where id = ?',
+    'select id, total, dolarones, anticipo, cancelada, devuelto, devuelto_cupon, dolarones_devueltos, revision, forma_pago, efectivo, cambio from ventas where id = ?',
   )
     .bind(id)
     .first<{
       id: string; total: number; dolarones: number; anticipo: number; cancelada: number;
       devuelto: number; devuelto_cupon: number; dolarones_devueltos: number; revision: number;
+      forma_pago: string; efectivo: number; cambio: number;
     }>();
   if (!venta) return { status: 404, cuerpo: { error: 'La venta no existe.' } };
   if (venta.cancelada) return { status: 200, cuerpo: { id, cancelada: true, ya_estaba: true } };
   // Unica puerta de las cancelaciones completas (cajero, PIN del dueno y aprobacion remota); ver pedidos.ts.
   if (venta.anticipo > 0) return { status: 409, cuerpo: { error: TICKET_CON_ANTICIPO } };
+  // Un mixto (#956) con piezas ya devueltas: lo devuelto salio en efectivo y la parte en tarjeta no se movio, asi que cancelar completo
+  // ya no sabria cuanto sale del cajon ni cuanto se cancela en la terminal.
+  if (venta.forma_pago === 'mixto' && (venta.devuelto > 0 || venta.devuelto_cupon > 0)) {
+    return { status: 409, cuerpo: { error: 'Este ticket mixto ya tiene piezas devueltas: devuelve lo que queda pieza por pieza.' } };
+  }
   // El dinero de un cupón se quedó en el cajón (Issue #330): cancelado completo, el corte del mismo turno
   // ya no contaría la venta y faltaría ese dinero. Lo que queda se devuelve pieza por pieza.
   if (venta.devuelto_cupon > 0) {
@@ -103,12 +109,17 @@ export async function cancelarCore(
 
   // Lo que se regresa en dinero; lo pagado con Dolarones regresa al saldo.
   // Sin lo ya devuelto por piezas canceladas sueltas.
+  // Mixto (#956): la parte en efectivo sale del cajon y la de tarjeta se cancela en la terminal.
+  const mixto = venta.forma_pago === 'mixto'
+    ? { en_efectivo: venta.efectivo - venta.cambio, en_tarjeta: venta.total - venta.dolarones - venta.anticipo - venta.efectivo + venta.cambio }
+    : {};
   return {
     status: 200,
     cuerpo: {
       id, cancelada: true,
       devuelto: venta.total - venta.dolarones - venta.devuelto,
       dolarones: venta.dolarones - venta.dolarones_devueltos,
+      ...mixto,
     },
   };
 }

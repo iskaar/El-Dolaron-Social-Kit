@@ -40,6 +40,8 @@ const enDinero = (v: Pick<VentaCorregible, 'total' | 'dolarones' | 'anticipo'>) 
 /** Por qué no: el estado del ticket, quien corrige y la forma que se quiere. null si se puede. Pura, para probarla y para el detalle del ticket. */
 export function motivoDeRechazo(v: VentaCorregible, nueva: string, quien: Quien, desde = inicioDelDia()): { status: number; error: string } | null {
   const no = (error: string, status = 409) => ({ status, error });
+  // correcciones_pago solo admite efectivo, tarjeta y transferencia (CHECK de la migracion 080): un mixto se cancela y se cobra de nuevo (#956).
+  if (v.forma_pago === 'mixto') return no('Un ticket mixto no se corrige: cancélalo y vuelve a cobrar.', 400);
   if (v.cancelada) return no('Este ticket está cancelado: no hay forma de pago que corregir.');
   if (v.corte_id) return no('Este ticket ya entró a un corte de caja: su forma de pago ya no se puede corregir aquí. Avísale a gerencia.');
   if (v.devuelta) return no('Este ticket tiene piezas devueltas: su forma de pago ya no se puede corregir.');

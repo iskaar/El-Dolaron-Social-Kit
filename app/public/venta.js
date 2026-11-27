@@ -355,6 +355,12 @@ export function efectivoAlcanza({ formaPago, total, efectivo }) {
   return formaPago !== 'efectivo' || efectivo >= total;
 }
 
+/**
+ * Pago mixto (#956): `total` es lo que se cobra (sin Dolarones ni anticipo) y `efectivo` la parte en efectivo; el resto va con tarjeta.
+ * Las dos partes llevan algo: más de $0 y menos de lo que se cobra. Sin cambio: quien cobra escribe la parte exacta.
+ */
+export const mixtoValido = ({ total, efectivo }) => Number.isInteger(efectivo) && efectivo > 0 && efectivo < total;
+
 /** Billetes de MXN en centavos: $20, $50, $100, $200, $500 y $1,000. */
 export const BILLETES = [2000, 5000, 10000, 20000, 50000, 100000];
 

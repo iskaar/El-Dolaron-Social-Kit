@@ -142,7 +142,8 @@ async function prepararPieza(env: Env, ventaId: string, lineaId: number, p: Pedi
   if (p.cantidad > quedan) return falla(400, `Solo quedan ${quedan} de esa pieza en el ticket.`);
 
   // Un ticket con tarjeta o transferencia puede devolverse en efectivo del cajon (Isaac, 17/10); el corte lo cuenta asi.
-  const devolverEn = p.devolverEn === 'efectivo' ? 'efectivo' : venta.forma_pago;
+  // Un ticket mixto (#956) siempre devuelve en efectivo: su parte en tarjeta queda fija. resolverDevolucion pasa por aqui y coincide.
+  const devolverEn = p.devolverEn === 'efectivo' || venta.forma_pago === 'mixto' ? 'efectivo' : venta.forma_pago;
   const pagado = venta.total - venta.dolarones;
   const importe = importePiezas({
     precio: linea.precio, cantidad: p.cantidad, restan: venta.descuento > 0 ? await piezasQueQuedan(env, ventaId) : 0,
