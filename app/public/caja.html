@@ -2280,6 +2280,7 @@ async function cobrar(forma) {
     t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual(), anticipo);
     if (t.total !== validado.total || t.aPagar !== validado.aPagar) {
       pintar();
+      $('codigo').focus();   // el lector sigue en su campo, no en un botón
       return avisoRojo(`El total cambió mientras la ventana estaba abierta: ahora son ${pesos(t.aPagar)}. Revísalo y vuelve a cobrar. Si ya cobraste otro importe en la terminal, no cobres otra vez: llama a gerencia.`);
     }
   }
