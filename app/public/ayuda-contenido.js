@@ -1247,6 +1247,21 @@ export const ESCENARIOS = [
     textos: ['Más opciones', ['srv-worker', 'El folio ya pertenece a otra venta'], 'Ventas de hoy (toca un ticket para ver el desglose)', 'Cancelar venta', 'Ayuda'],
   },
   {
+    id: 'sistema-registro-otro-total', categoria: 'fallas', titulo: 'Después de «Cobrado.» sale en rojo «El sistema registró» otro total',
+    palabras: ['otro total', 'total distinto', 'no coincide el total', 'cambió el precio', 'el total cambió', 'diferencia en el ticket'],
+    pasos: [
+      'La venta ya quedó registrada: no la cobres otra vez ni la canceles por tu cuenta.',
+      'Entrega el ticket impreso: lleva el total que registró el sistema.',
+      'Si fue en efectivo, entrega el cambio que dice «Cobrado. Cambio».',
+      'Si fue con tarjeta o transferencia, compara ese total con lo que se cobró en la terminal o con el comprobante.',
+      'Toca «Ayuda»: gerencia cobra o devuelve la diferencia.',
+    ],
+    ojo: 'Pasa cuando el precio de una pieza o una promoción cambió con el ticket abierto. Si lo que sale es «El total cambió mientras la ventana estaba abierta», la venta todavía no se registró: revisa el total nuevo y toca otra vez el botón de cobro; si ya habías cobrado otro importe en la terminal, no cobres otra vez y llama a gerencia.',
+    ver: ['terminal-cobro-no-registro', 'cobrar-tarjeta'],
+    pantalla: 'caja',
+    textos: ['Cobrado.', 'El sistema registró', 'Cobrado. Cambio', 'Ayuda', 'El total cambió mientras la ventana estaba abierta'],
+  },
+  {
     id: 'pide-iniciar-sesion', categoria: 'fallas', titulo: 'La página me pide iniciar sesión',
     palabras: ['sesión vencida', 'login', 'acceso', 'cloudflare', 'pide contraseña', 'cerró sesión sola'],
     pasos: [
