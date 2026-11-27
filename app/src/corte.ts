@@ -169,6 +169,10 @@ const CON_TERMINAL = `select c.*, (select coalesce(sum(importe), 0) from retiros
 const leerCorte = (env: Env, id: string) =>
   env.DB.prepare(`${CON_TERMINAL} where c.id = ?`).bind(id).first<Corte>();
 
+// Pago mixto (#956): ventas.forma_pago = 'mixto', `efectivo` es solo la parte en efectivo (cambio siempre 0) y la de tarjeta se calcula.
+// Una sola definicion para el corte y los reportes (netas.ts).
+export const MIXTO_EFECTIVO = 'efectivo - cambio';
+export const MIXTO_TARJETA = 'total - dolarones - anticipo - efectivo + cambio';
 // Lo cobrado (o devuelto) de una forma de pago, sin la parte pagada con Dolarones.
 const dinero = (forma: string, importe = 'total - dolarones') =>
   `coalesce(sum(case when forma_pago = '${forma}' then ${importe} end), 0)`;
@@ -192,6 +196,8 @@ const devuelto = (forma: string) => `(select ${dinero(forma, 'importe')} from de
 // Pieza de un ticket de este corte, cobrado con tarjeta o transferencia, que se devolvio en efectivo de este cajon:
 // el ticket la resto de su forma (ventas.devuelto) pero el dinero salio del cajon. Sin filtrar `forma` es todo lo
 // que salio en efectivo; con `forma`, lo que hay que regresarle a esa forma.
+// Sin `forma` cuenta tambien los mixtos (#956) A PROPOSITO: una pieza de un ticket mixto siempre se devuelve en efectivo del cajon
+// y su parte en tarjeta no se mueve; por eso el corte no los saca de aqui ni los suma a `forma = 'tarjeta'`.
 const enEfectivo = (forma = '') => `(select coalesce(sum(d.importe), 0) from devoluciones d join ventas v on v.id = d.venta_id
   where v.corte_id = ?1 and d.corte_id = ?1 and d.forma_pago = 'efectivo' and v.forma_pago != 'efectivo'${forma ? ` and v.forma_pago = '${forma}'` : ''})`;
 
@@ -248,15 +254,15 @@ export async function registrarCorte(request: Request, env: Env, correo: string,
            (select max(hasta) from cortes where caja = ?2) as desde,
            coalesce((select fondo_siguiente from cortes where caja = ?2 order by hasta desc limit 1), ?7) as fondo,
            (select count(*) from ventas where ${VIGENTES}) as tickets,
-           (select ${dinero('efectivo', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('efectivo')} as ev,
-           (select ${dinero('efectivo', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('efectivo')} + ${enEfectivo()} as ed,
+           (select ${dinero('efectivo', COBRADO)} + ${dinero('mixto', MIXTO_EFECTIVO)} from ventas where ${VIGENTES}) + ${anticipos('efectivo')} as ev,
+           (select ${dinero('efectivo', NETO)} + ${dinero('mixto', MIXTO_EFECTIVO)} from ventas where ${CANCELADAS}) + ${devuelto('efectivo')} + ${enEfectivo()} as ed,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'retiro') as re,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'gasto') as ga,
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'nomina') as no,
            -- Entra: el titular de la terminal paga en efectivo lo cobrado con tarjeta (Issue #515).
            (select coalesce(sum(importe), 0) from retiros where corte_id = ?1 and tipo = 'terminal') as te,
-           (select ${dinero('tarjeta', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('tarjeta')} + ${enEfectivo('tarjeta')} as tv,
-           (select ${dinero('tarjeta', NETO)} from ventas where ${CANCELADAS}) + ${devuelto('tarjeta')} as td,
+           (select ${dinero('tarjeta', COBRADO)} + ${dinero('mixto', MIXTO_TARJETA)} from ventas where ${VIGENTES}) + ${anticipos('tarjeta')} + ${enEfectivo('tarjeta')} as tv,
+           (select ${dinero('tarjeta', NETO)} + ${dinero('mixto', MIXTO_TARJETA)} from ventas where ${CANCELADAS}) + ${devuelto('tarjeta')} as td,
            (select ${dinero('transferencia', COBRADO)} from ventas where ${VIGENTES}) + ${anticipos('transferencia')}
              + ${enEfectivo('transferencia')} as xv,
            (select ${dinero('transferencia', NETO)} from ventas where ${CANCELADAS})

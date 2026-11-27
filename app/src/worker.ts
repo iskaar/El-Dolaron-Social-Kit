@@ -14,7 +14,7 @@ import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, procesa
 import { PRENDAS_ROPA, PRECIOS_ROPA, nombreRopa, partesDeNombre, paqueteValido } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
-import { efectivoAlcanza, promoInauguracion, CLAVE_DESDE, claveRastreoDe, precioBuenFin, ENVIO_ID, huellaTicket, LIBRE_ID, LIBRE_PRECIO_MIN, LIBRE_PRECIO_MAX, descripcionLibre } from '../public/venta.js';
+import { efectivoAlcanza, mixtoValido, promoInauguracion, CLAVE_DESDE, claveRastreoDe, precioBuenFin, ENVIO_ID, huellaTicket, LIBRE_ID, LIBRE_PRECIO_MIN, LIBRE_PRECIO_MAX, descripcionLibre } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
 import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon, retirarSolicitud, listarSolicitudes } from './devoluciones.ts';
 import { cancelarVenta, listarCancelaciones, estadoSolicitud } from './cancelaciones.ts';
@@ -35,7 +35,7 @@ import { rutaCep, transferenciasPorValidar, validarTransferencia } from './cep.t
 import { subirComprobante, verComprobante } from './comprobante.ts';
 import { verFotoReportada } from './pagos-reportados.ts';
 import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDeVenta, saldo } from './dolarones.ts';
-import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe, CajaAjena, CLAVE_TOPE_RETIRO } from './corte.ts';
+import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe, CajaAjena, CLAVE_TOPE_RETIRO, MIXTO_EFECTIVO, MIXTO_TARJETA } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
 import { rutaDinero } from './dinero.ts';
 import { sentenciasMover, esExistenciaInsuficiente, piezasSinExistencia, fueraDeSoledad, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD, sucursales, enCaminoSql, enTiendaSql, existenciaTotalSql, folioEnCaminoSql } from './existencias.ts';
@@ -195,7 +195,7 @@ async function rechazoPorMl(env: Env, id: string, nuevo: string, anterior: strin
 }
 // Transferencia: confirmada por Isaac como forma de pago; sin ella se capturaba
 // como efectivo o tarjeta y descuadraba el corte (Issue #93).
-const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia']);
+const FORMAS_PAGO = new Set(['efectivo', 'tarjeta', 'transferencia', 'mixto']);
 const estacionValida = (valor: unknown, tienda: string): valor is string =>
   typeof valor === 'string' && cajasDe(tienda).includes(valor);
 // R3: captura, «+N», suma por UPC, fusión, descarte y ajustes de Soledad. Una cuenta de sucursal no captura. (`/api/conteo/ajustes` ya no va aquí: #798
@@ -1970,6 +1970,9 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   if (imprimirEn && formaPago === 'efectivo') {
     return json({ error: 'En el celular sólo tarjeta o transferencia; no se puede cobrar efectivo con impresión remota.' }, 400);
   }
+  if (imprimirEn && formaPago === 'mixto') {
+    return json({ error: 'El pago mixto no se cobra desde el celular: usa la caja de la computadora.' }, 400);
+  }
   // Quien cobro sale de Access; la caja es la suya (Issue #105) o la de la computadora, y debe ser de esta tienda (#793).
   // Se resuelve antes de escribir nada: una caja ajena rechaza la venta completa. Una venta encolada antes del corte de caja llega sin caja: ''.
   const caja = await cajaDe(env, correo, venta.caja, tienda);
@@ -2101,6 +2104,11 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const porPagar = total - (Number.isInteger(dolarones) ? dolarones : 0);
   if (anticipo > porPagar) return json({ error: 'El anticipo no puede pasar de lo que se cobra.' }, 400);
   const aPagar = porPagar - anticipo;
+  // Mixto (#956): `efectivo` es la parte en efectivo, entera y estrictamente entre $0 y lo que se cobra; sin cambio (cambio = 0 al guardar).
+  // Se revisa el valor crudo: el redondeo de `efectivo` convertiria 50.5 en 51.
+  if (formaPago === 'mixto' && !(Number.isSafeInteger(venta.efectivo) && mixtoValido({ total: aPagar, efectivo: venta.efectivo as number }))) {
+    return json({ error: 'En «Mixto» el efectivo debe ser más de $0 y menos de lo que se cobra; el resto va con tarjeta.' }, 400);
+  }
   if (!efectivoAlcanza({ formaPago, total: aPagar, efectivo })) {
     return json({ error: 'El efectivo no alcanza para el total.' }, 400);
   }
@@ -2502,13 +2510,16 @@ const TICKETS_CSV_MAX = 5000;
 async function exportarTicketsCsv(url: URL, env: Env): Promise<Response> {
   const { donde, datos } = filtrosTickets(url);
   const { results } = await env.DB.prepare(
-    `select ${COLUMNAS_TICKET} from ventas v where ${donde} order by v.creado_en desc, v.id desc limit ?`,
+    `select ${COLUMNAS_TICKET},
+            case when v.forma_pago = 'mixto' then ${MIXTO_EFECTIVO} end as parte_efectivo,
+            case when v.forma_pago = 'mixto' then ${MIXTO_TARJETA} end as parte_tarjeta
+     from ventas v where ${donde} order by v.creado_en desc, v.id desc limit ?`,
   )
     .bind(...datos, TICKETS_CSV_MAX)
     .all<{
       id: string; total: number; forma_pago: string; cancelada: number; creado_en: string; dolarones: number;
       devuelto: number; dolarones_devueltos: number; caja: string; cajero: string; con_socio: number;
-      piezas: string | null; cantidad: number; cancelada_cantidad: number;
+      piezas: string | null; cantidad: number; cancelada_cantidad: number; parte_efectivo: number | null; parte_tarjeta: number | null;
     }>();
 
   const filas = results.map((f) => [
@@ -2520,11 +2531,13 @@ async function exportarTicketsCsv(url: URL, env: Env): Promise<Response> {
     // Igual que «Vendido» en la lista: un cancelado ya no vale nada.
     pesosDe(f.cancelada ? 0 : f.total - f.devuelto - f.dolarones_devueltos),
     f.con_socio ? 'sí' : 'no',
+    // Al final para no mover las columnas de siempre (#956): solo un ticket mixto las llena.
+    f.parte_efectivo === null ? '' : pesosDe(f.parte_efectivo), f.parte_tarjeta === null ? '' : pesosDe(f.parte_tarjeta),
   ]);
   return respuestaCsv(
     'tickets.csv',
     ['fecha', 'ticket', 'caja', 'cajero', 'forma_pago', 'estado', 'piezas', 'cantidad', 'total', 'devuelto',
-      'dolarones', 'dolarones_devueltos', 'vendido', 'socio'],
+      'dolarones', 'dolarones_devueltos', 'vendido', 'socio', 'parte_efectivo', 'parte_tarjeta'],
     filas,
   );
 }
