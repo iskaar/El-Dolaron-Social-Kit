@@ -321,7 +321,8 @@ test('portal.js solo usa ids que existen en portal.html (campo de código y secc
 
 test('la caja muestra el premio de referido en el cobro, con y sin red (los tres caminos y la sincronización)', () => {
   const caja = readFileSync('public/caja.html', 'utf8');
-  assert.equal(caja.match(/venta\.referido_liberado = cuerpo\.referido_liberado \?\? 0;/g)?.length, 3);
+  // #943: las tres copias (una por camino) son ahora una sola, en aplicarRespuesta(); que los tres caminos la usan lo corre caja-total-servidor.test.ts.
+  assert.equal(caja.match(/venta\.referido_liberado = cuerpo\.referido_liberado \?\? 0;/g)?.length, 1);
   assert.match(caja, /venta\.referido_liberado > 0 \? ` · \$\{avisoReferido\(venta\.referido_liberado\)\}`/);
   assert.match(caja, /cuerpo\.referido_liberado > 0 \? ` \$\{avisoReferido\(cuerpo\.referido_liberado\)\}\.`/);
   assert.match(caja, /Referido: \+\$\{dolares\(centavos\)\} para el cliente y para quien lo invitó/);

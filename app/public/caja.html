@@ -2060,17 +2060,7 @@ async function cobrarConDolarones(venta, t, boton = 'el mismo botón de cobro', 
     $('aviso').style.color = '#D72B32';
     return false;
   }
-  // Un reenvio de la misma venta ya confirmada devuelve `duplicada` sin saldo: se imprime lo local.
-  if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
-  venta.vale_emitido = cuerpo.vale_emitido;
-  venta.vale_usado = cuerpo.vale_usado;
-  venta.vales_usados = cuerpo.vales_usados;
-  venta.saldo_pedido = cuerpo.saldo_pedido;
-  venta.excedente_transferencia = cuerpo.excedente_transferencia;
-  venta.referido_liberado = cuerpo.referido_liberado ?? 0;
-  if (socio.vale) return { vale:true };
-  const saldo = cuerpo.saldo ?? { disponible: socio.disponible - venta.dolarones };
-  return { numero: socio.numero, ganados: cuerpo.ganados ?? dolaronesGanados(t.aPagar), bono_promo: cuerpo.bono_promo ?? 0, saldo: saldo.disponible };
+  return cuerpo;   // lo aplica aplicarRespuesta(), igual que en las otras rutas (#943); `t` ya no se usa aquí
 }
 
 /* ---------- pedidos por WhatsApp (Issue #269) ---------- */
@@ -2262,8 +2252,8 @@ async function cobrar(forma) {
     $('codigo').focus();
     return;
   }
-  const anticipo = pedidoCargado ? anticipoDePedido(pedidoCargado.saldo, totalNeto(), usados) : 0;
-  const t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual(), anticipo);
+  let anticipo = pedidoCargado ? anticipoDePedido(pedidoCargado.saldo, totalNeto(), usados) : 0;
+  let t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual(), anticipo);
   if (!previo?.cuerpo && usados > saldoCanjeable(socio, t.total)) {
     $('aviso').textContent = 'Los regalos de apertura requieren un ticket de $1,000 MXN o más antes de descontar Dolarones. Revisa el importe solicitado.';
     $('aviso').style.color = '#D72B32';
@@ -2316,6 +2306,17 @@ async function cobrar(forma) {
       $('socio').focus();
       return;
     }
+    // #943: la ventana pudo estar abierta un rato y el descuento o la promo pudieron vencer mientras tanto. El total y el anticipo se calculan
+    // otra vez aquí, y con ellos se arma la venta. Si ya no son los que se validaron arriba (y los que se cobraron), no se registra a ciegas.
+    const validado = t;
+    revisarVencimientoDescuento();
+    anticipo = pedidoCargado ? anticipoDePedido(pedidoCargado.saldo, totalNeto(), usados) : 0;
+    t = totales(lineas, efectivo, usados, descuentoAplicado() + promoActual(), anticipo);
+    if (t.total !== validado.total || t.aPagar !== validado.aPagar) {
+      pintar();
+      $('codigo').focus();   // el lector sigue en su campo, no en un botón
+      return avisoRojo(`El total cambió mientras la ventana estaba abierta: ahora son ${pesos(t.aPagar)}. Revísalo y vuelve a cobrar. Si ya cobraste otro importe en la terminal, no cobres otra vez: llama a gerencia.`);
+    }
   }
 
   // El folio va ANTES del primer pintar(): pintar() guarda el ticket, y debe guardarlo con el folio con el que se envía (#817).
@@ -2348,25 +2349,13 @@ async function cobrar(forma) {
     };
     cuerpoEnviado = previo?.cuerpo ?? JSON.parse(JSON.stringify({ ...venta, ...(usados > 0 ? codigosDeVenta(socio, valesCargados, codigoSocio) : {}) }));
     let socioTicket = socio && !socio.vale && { numero: socio.numero, ganados: 0, saldo: socio.disponible };
-    let excedente = 0;
+    let registrada = null;   // lo que contestó el servidor al registrar la venta; null si se encoló sin respuesta
     if (usados > 0) {
-      socioTicket = await cobrarConDolarones(venta, t, nombres[boton], previo?.cuerpo ? codigosDeCuerpo(previo.cuerpo) : undefined);
-      if (!socioTicket) return;
-      excedente = venta.excedente_transferencia ?? 0;
-      if (socioTicket.vale) socioTicket = null;
+      registrada = await cobrarConDolarones(venta, t, nombres[boton], previo?.cuerpo ? codigosDeCuerpo(previo.cuerpo) : undefined);
+      if (!registrada) return;
     } else if (pedidoCargado || transf || previo?.cuerpo?.clave_rastreo) {
-      const cuerpo = await cobrarConPedido(venta, nombres[boton]);
-      if (!cuerpo) return;
-      excedente = cuerpo.excedente_transferencia ?? 0;
-      if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
-      venta.vale_emitido = cuerpo.vale_emitido;
-      venta.saldo_pedido = cuerpo.saldo_pedido;
-      venta.referido_liberado = cuerpo.referido_liberado ?? 0;
-      if (socioTicket) {
-        socioTicket.ganados = cuerpo.ganados ?? 0;
-        socioTicket.bono_promo = cuerpo.bono_promo ?? 0;
-        socioTicket.saldo = cuerpo.saldo?.disponible ?? socioTicket.saldo;
-      }
+      registrada = await cobrarConPedido(venta, nombres[boton]);
+      if (!registrada) return;
     } else {
       // El servidor decide si la promoción ya empezó. Un timeout conserva la
       // venta en cola con el mismo folio y el ticket deja el beneficio pendiente.
@@ -2387,14 +2376,7 @@ async function cobrar(forma) {
         return;
       }
       if (r?.ok && cuerpo && Object.hasOwn(cuerpo, 'ganados') && Object.hasOwn(cuerpo, 'vale_emitido')) {
-        if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
-        venta.vale_emitido = cuerpo.vale_emitido;
-        venta.referido_liberado = cuerpo.referido_liberado ?? 0;
-        if (socioTicket) {
-          socioTicket.ganados = cuerpo.ganados ?? 0;
-          socioTicket.bono_promo = cuerpo.bono_promo ?? 0;
-          socioTicket.saldo = cuerpo.saldo?.disponible ?? socioTicket.saldo;
-        }
+        registrada = cuerpo;
       } else if (lineas.some((l) => l.en_mano)) {
         // #832: una venta con una pieza «en la mano» nunca se encola. Se deja el folio en duda como en las otras rutas (#830): el finally lo guarda
         // en `cobroIncierto` y solo queda el mismo botón; el ticket no se puede tocar hasta que el servidor conteste.
@@ -2407,9 +2389,13 @@ async function cobrar(forma) {
         venta.sin_red = true;
         venta.vale_pendiente = !socioTicket && dolaronesGanados(t.aPagar, 5) > 0;
         venta.recompensa_pendiente = !!socioTicket && dolaronesGanados(t.aPagar) > 0;
+        venta.total_caja = t.total;   // #943: al sincronizar se compara con el que registre el servidor
         await store('ventas', 'readwrite', (s) => s.put(venta));
       }
     }
+    // #943: una sola función aplica la respuesta en las tres rutas. `cobro` es lo que quedó registrado: lo del servidor si su total no es el de la caja.
+    const cobro = registrada ? aplicarRespuesta(venta, registrada, socioTicket, t) : t;
+    const excedente = venta.excedente_transferencia ?? 0;
     // El cajon primero: cajon y ticket van en fila por el mismo USB, y el cajero
     // no espera a que termine el logo. Una venta con tarjeta no toca el cajon.
     // Nada de esto espera al servidor ni bloquea el cobro; si falla, el pie lo dice.
@@ -2419,7 +2405,7 @@ async function cobrar(forma) {
     const fallo = (clave) => { const falla = textoFalla(clave); if (falla) (nodoAviso ? pintarFalla(falla, nodoAviso) : fallas.push(falla)); };
     if (!venta.imprimir_en) {
       if (forma === 'efectivo' && efectivo > 0) abrirCajon()?.then((abrio) => { if (!abrio) fallo('cajon'); });
-      imprimirTicket({ ...venta, total: t.total, descuento: t.descuento, cambio: t.cambio, socio: socioTicket,
+      imprimirTicket({ ...venta, total: cobro.total, descuento: cobro.descuento, cambio: cobro.cambio, socio: socioTicket,
         ...(pedidoCargado ? { pedido_folio: pedidoCargado.folio } : {}) }, venta.lineas)
         .then((impreso) => { pintarImpresora(); if (!impreso) fallo('ticket'); });
     }
@@ -2442,7 +2428,7 @@ async function cobrar(forma) {
     await store('catalogo', 'readwrite', (s) => s.put({ clave: 'piezas', datos: [...catalogo.values()], fecha: Date.now() }));
 
     const ganados = socioTicket?.ganados || venta.vale_emitido?.importe || 0;
-    $('aviso').textContent = (forma === 'efectivo' && efectivo > 0 ? `Cobrado. Cambio ${pesos(t.cambio)}` : 'Cobrado.')
+    $('aviso').textContent = (forma === 'efectivo' && efectivo > 0 ? `Cobrado. Cambio ${pesos(cobro.cambio)}` : 'Cobrado.')
       + (ganados ? ` · Ganó ${dolares(ganados)}` : '')
       + (socioTicket?.bono_promo > 0 ? ` · Bono noviembre: +${dolares(socioTicket.bono_promo)}` : '')
       + (venta.referido_liberado > 0 ? ` · ${avisoReferido(venta.referido_liberado)}` : '');
@@ -2460,6 +2446,9 @@ async function cobrar(forma) {
     if (venta.recompensa_pendiente) $('aviso').textContent += ' · Se revisará si ganó Dolarones al sincronizar.';
     $('aviso').style.color = '#1f7a4d';
     nodoAviso = $('aviso').firstChild;
+    // #943: la venta ya quedó registrada (no se frena ni se repite), pero con otro total: se dice en rojo, con qué hacer.
+    if (cobro.total !== t.total) fallas.unshift({ texto: `${avisoOtroTotal(cobro.total, t.total)} El ticket impreso lleva lo registrado. `
+      + (forma === 'efectivo' && efectivo > 0 ? 'Entrega el cambio que dice aquí y avisa a gerencia.' : 'No vuelvas a cobrar: compara con lo que se cobró en la terminal o en la transferencia y llama a gerencia para cobrar o devolver la diferencia.') });
     for (const falla of fallas) pintarFalla(falla, nodoAviso);
     lineas = [];
     idVenta = null;
@@ -2483,6 +2472,31 @@ async function cobrar(forma) {
     $('codigo').focus();
   }
 }
+
+/**
+ * Lo que contestó /api/ventas al registrar la venta (201, o `duplicada` en un reintento) se aplica aquí, en las tres rutas de cobro (#943):
+ * dónde se imprime, vales, saldo del pedido, excedente de la transferencia, referido y lo que ganó el socio. Devuelve el total, el descuento y
+ * el cambio que quedaron registrados: los del servidor si su total no es el de la caja (precio que cambió con el ticket abierto, borde de una
+ * promo), y los de la caja (`t`) si coinciden o si la respuesta no los trae (servidor anterior).
+ */
+function aplicarRespuesta(venta, cuerpo, socioTicket, t) {
+  if (Object.hasOwn(cuerpo, 'imprimir_en')) venta.imprimir_en = cuerpo.imprimir_en;
+  venta.vale_emitido = cuerpo.vale_emitido;
+  venta.vale_usado = cuerpo.vale_usado;
+  venta.vales_usados = cuerpo.vales_usados;
+  venta.saldo_pedido = cuerpo.saldo_pedido;
+  venta.excedente_transferencia = cuerpo.excedente_transferencia;
+  venta.referido_liberado = cuerpo.referido_liberado ?? 0;
+  if (socioTicket) {
+    // Sin `ganados` o `saldo` (un reintento `duplicada` no trae saldo) el ticket lleva lo calculado aquí; con Dolarones, como siempre lo hizo esa ruta.
+    socioTicket.ganados = cuerpo.ganados ?? (venta.dolarones > 0 ? dolaronesGanados(t.aPagar) : 0);
+    socioTicket.bono_promo = cuerpo.bono_promo ?? 0;
+    socioTicket.saldo = cuerpo.saldo?.disponible ?? socioTicket.saldo - venta.dolarones;
+  }
+  return Number.isInteger(cuerpo.total) && cuerpo.total !== t.total
+    ? { total: cuerpo.total, descuento: cuerpo.descuento ?? 0, cambio: cuerpo.cambio ?? 0 } : t;
+}
+const avisoOtroTotal = (registrado, deLaCaja) => `El sistema registró ${pesos(registrado)}, no ${pesos(deLaCaja)}.`;
 
 /** Clave, monto, banco y foto del comprobante: de una transferencia no sobrevive nada al ticket siguiente. */
 function limpiarDatosTransferencia() {
@@ -2535,6 +2549,11 @@ async function sincronizar() {
           : `Venta ${venta.id} sincronizada. El servidor confirmó que no se emitió vale.`;
         if (venta.imprimir_en) $('aviso').textContent = `Venta ${venta.id} sincronizada. Ticket enviado a ${cuerpo.imprimir_en || venta.imprimir_en}.`;
       }
+      // #943: el servidor registró esta venta con otro total que el que la caja cobró sin red (el precio cambió mientras tanto). Ya quedó
+      // registrada; se agrega en rojo al aviso que haya (sin borrarlo: puede ser el «Cobrado. Cambio» de esa misma venta).
+      // ponytail: el aviso dura hasta el siguiente; un registro fijo o un aviso a gerencia, si llega a hacer falta.
+      if (Number.isInteger(venta.total_caja) && Number.isInteger(cuerpo.total) && cuerpo.total !== venta.total_caja)
+        pintarFalla({ texto: `Venta ${venta.id} sincronizada. ${avisoOtroTotal(cuerpo.total, venta.total_caja)} Avisa a gerencia: se cobró sin red con el otro importe.` }, $('aviso').firstChild);
       await store('ventas', 'readwrite', (s) => s.delete(venta.id));
     }
     for (const apertura of await store('cajon', 'readonly', (s) => s.getAll())) {

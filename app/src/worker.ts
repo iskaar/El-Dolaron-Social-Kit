@@ -1999,8 +1999,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
   const pedidoHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pedido)))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
   const reintento = async (): Promise<Response | null> => {
-    const previo = await env.DB.prepare('select pedido_hash, imprimir_en, anticipo, pedido_id from ventas where id = ?').bind(id)
-      .first<{ pedido_hash:string | null; imprimir_en:string | null; anticipo:number; pedido_id:string | null }>();
+    const previo = await env.DB.prepare('select pedido_hash, imprimir_en, anticipo, pedido_id, total, descuento, cambio from ventas where id = ?').bind(id)
+      .first<{ pedido_hash:string | null; imprimir_en:string | null; anticipo:number; pedido_id:string | null; total:number; descuento:number; cambio:number }>();
     if (!previo) return null;
     // null: venta registrada antes de la migracion 021, se acepta como antes.
     if (previo.pedido_hash !== null && previo.pedido_hash !== pedidoHash)
@@ -2011,7 +2011,8 @@ async function registrarVenta(request: Request, env: Env, ctx: ExecutionContext,
       where venta_id = ? and tipo = 'referido_nuevo'`).bind(id).first<{ importe:number }>();
     const bono = await env.DB.prepare(`select coalesce(sum(importe), 0) as importe from dolarones_movimientos
       where venta_id = ? and tipo = 'promo'`).bind(id).first<{ importe:number }>();
-    const respuesta = json({ id, duplicada:true, imprimir_en:previo.imprimir_en, ganados:ganado?.importe ?? 0,
+    // #943: el total, el descuento y el cambio registrados, como en el 201: la caja los compara con los suyos también en un reintento.
+    const respuesta = json({ id, duplicada:true, total:previo.total, descuento:previo.descuento, cambio:previo.cambio, imprimir_en:previo.imprimir_en, ganados:ganado?.importe ?? 0,
       referido_liberado:referido?.importe ?? 0, bono_promo:bono?.importe ?? 0,
       anticipo:previo.anticipo, saldo_pedido:previo.pedido_id ? await saldoDe(env, previo.pedido_id) : null,
       excedente_transferencia:await excedenteDe(env, 'venta', id),

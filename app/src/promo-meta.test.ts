@@ -238,7 +238,8 @@ test('el portal informa la meta solo mientras la promo corre', async () => {
 
 test('la caja, el ticket y el portal conocen el bono', () => {
   const caja = readFileSync('public/caja.html', 'utf8');
-  assert.equal(caja.match(/socioTicket\.bono_promo = cuerpo\.bono_promo \?\? 0;/g)?.length, 2);
+  // #943: las copias por camino son ahora una sola, en aplicarRespuesta(); que los tres caminos la usan lo corre caja-total-servidor.test.ts.
+  assert.equal(caja.match(/socioTicket\.bono_promo = cuerpo\.bono_promo \?\? 0;/g)?.length, 1);
   assert.match(caja, /Bono noviembre: \+\$\{dolares\(socioTicket\.bono_promo\)\}/);
   assert.match(readFileSync('public/impresora.js', 'utf8'), /venta\.socio\.bono_promo\) partes\.push\(renglonMonto\('Bono noviembre/);
   assert.match(readFileSync('public/portal.js', 'utf8'), /pintarPromo\(s\.promo_meta\)/);
