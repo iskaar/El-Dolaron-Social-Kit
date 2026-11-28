@@ -10,7 +10,7 @@ import { fichaDeManifiesto, normalizarUpc, precioListaMxn, type FichaManifiesto 
 import { decodificarNombre } from './nombre.ts';
 import { codigoLeido, SIN_CODIGO } from '../public/upc.js';
 import { ESTADOS } from '../public/estados.js';
-import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, procesarRellenoUpcitemdb, rutaImagenUpc, rutaImagenPieza } from './imagenes-upc.ts';
+import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, procesarRellenoUpcitemdb, registrarUpcDesconocido, rutaImagenUpc, rutaImagenPieza } from './imagenes-upc.ts';
 import { PRENDAS_ROPA, PRECIOS_ROPA, nombreRopa, partesDeNombre, paqueteValido } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
 import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, montosBandaActivos, parsearMontosExtra, type Destino } from './precio.ts';
@@ -768,7 +768,7 @@ async function capturarManualEscaner(request: Request, env: Env, correo: string)
  * #365). El precio de venta de una pieza nueva es solo para la pantalla: al
  * guardar se recalcula aquí mismo; solo el dueño puede sustituirlo (#461).
  */
-async function precioDeManifiesto(upcCrudo: string, env: Env): Promise<Response | { ficha: FichaManifiesto; precioLista: number; precioManual?: number; config: Record<string, string> }> {
+async function precioDeManifiesto(upcCrudo: string, env: Env, consultar = false): Promise<Response | { ficha: FichaManifiesto; precioLista: number; precioManual?: number; config: Record<string, string> }> {
   const upc = normalizarUpc(upcCrudo);
   if (!upc || upc.length > 14) return json({ error: 'Código de barras inválido.' }, 400);
   const ficha = await fichaDeManifiesto(upc, env);
@@ -781,7 +781,11 @@ async function precioDeManifiesto(upcCrudo: string, env: Env): Promise<Response 
       where upc in (${claves.map(() => '?').join(', ')}) and propietario = 'dolaron' and estado_analisis = 'listo'
         and precio > 0 and trim(nombre) <> '' order by actualizado_en desc limit 1`)
       .bind(...claves).first<{ nombre: string; marca: string; categoria: string; precio_lista: number; precio: number }>();
-    if (!propia) return json({ error: 'Ese código no está en el catálogo ni en el manifiesto: captura la pieza con foto.' }, 404);
+    if (!propia) {
+      // #965: solo al escanear. Si UPCitemdb lo conoce con confianza queda como renglón del manifiesto y sigue el camino de siempre.
+      if (consultar && await registrarUpcDesconocido(upc, env)) return await precioDeManifiesto(upcCrudo, env);
+      return json({ error: 'Ese código no está en el catálogo ni en el manifiesto: captura la pieza con foto.' }, 404);
+    }
     return { ficha: { upc, nombre: propia.nombre, descripcion: propia.nombre, marca: propia.marca, categoria: propia.categoria,
       departamento: '', precio_usd: 0, tcin: '' }, precioLista: propia.precio_lista,
       ...(propia.precio_lista > 0 ? {} : { precioManual: propia.precio }), config };
@@ -791,8 +795,8 @@ async function precioDeManifiesto(upcCrudo: string, env: Env): Promise<Response 
   return { ficha, precioLista: precioListaMxn(ficha.precio_usd, tipoCambio), config };
 }
 
-async function buscarEnManifiesto(upcCrudo: string, env: Env): Promise<Response> {
-  const resultado = await precioDeManifiesto(upcCrudo, env);
+async function buscarEnManifiesto(upcCrudo: string, env: Env, consultar = false): Promise<Response> {
+  const resultado = await precioDeManifiesto(upcCrudo, env, consultar);
   if (resultado instanceof Response) return resultado;
   const { ficha, precioLista, precioManual, config } = resultado;
   const categoria = ficha.categoria || 'otros';
@@ -821,7 +825,8 @@ async function resolverCodigo(env: Env, url: URL, usuario: Usuario | null, corre
   if (datos.piezas.length || datos.siguiente) return encontradas;
   const q = (url.searchParams.get('q') ?? '').trim();
   if (!/^\d{6,14}$/.test(q) || !puede(usuario, ['capturista'])) return json({ error: 'Sin coincidencias.' }, 404);
-  const respuesta = await buscarEnManifiesto(q, env);
+  // #965: solo las capturas de El Dolarón consultan UPCitemdb; la separación de FEP no cambia.
+  const respuesta = await buscarEnManifiesto(q, env, propietarioDe(usuario) === 'dolaron');
   if (!respuesta.ok) return respuesta;
   const ficha = await respuesta.json() as { upc: string; imagen: unknown };
   if (!ficha.imagen) {

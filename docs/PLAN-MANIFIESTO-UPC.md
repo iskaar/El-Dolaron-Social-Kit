@@ -49,7 +49,15 @@ el código completo leído, con sus ceros iniciales, en `productos.upc`.
    mismo camino que la captura sin foto (Issue #115): pieza `listo`, código `ED-`, y sale en
    `/etiquetas` con una etiqueta por pieza. **El precio sale del manifiesto en el servidor**;
    el cliente solo manda cantidad y estado.
-4. **Sin match** — 404 "captura la pieza con foto".
+4. **UPC fuera de la hoja (#965)** — al escanear un UPC que no está en `manifiesto` ni existe como pieza,
+   `GET /api/piezas/resolver` lo consulta una vez en UPCitemdb ([detalle y presupuesto](IMAGENES-UPC.md#consulta-de-upc-fuera-del-manifiesto-965)).
+   Si el resultado es confiable (UPC igual, imagen `target.scene7.com`, oferta de Target con precio) se guarda como
+   renglón de `manifiesto` con `origen = 'upcitemdb'` y la captura sigue por este mismo camino: nombre traducido,
+   precio por la fórmula sobre el precio en dólares, imagen oficial, sin foto. La hoja manda: si el UPC aparece después
+   en la hoja, `importar_manifiesto.py` reemplaza el renglón y lo marca `origen = 'hoja'` (requiere la migración 093).
+   El precio de lista en dólares es el `price` de la oferta de Target (decisión de gerencia del 27/11; una sola función,
+   `precioListaUsd`). Sin resultado, sin presupuesto, 429, tiempo agotado o error: el paso 5.
+5. **Sin match** — 404 "captura la pieza con foto".
    Desde el Issue #373 el escáner no detiene al capturista: en `/inventario`, solo al tocar «Buscar en internet» manda `POST /api/borradores/upc/buscar {id, upc, stock, estado_fisico}`. La pieza nace
    `pendiente` con su código y cantidad y el Worker, en `waitUntil`, le pregunta a Gemini por Vertex
    con búsqueda de Google **solo el código** (sin foto). Con nombre seguro (confianza ≥ 0.5) y

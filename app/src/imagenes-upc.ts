@@ -17,7 +17,7 @@ const imagenValida = (valor: unknown): valor is string => {
   } catch { return false; }
 };
 const referencia = (r: Referencia) => ({
-  url: r.url, nombre: r.nombre, origen: 'target', enlace: enlace(r.tcin), tcin: r.tcin,
+  url: r.url, nombre: r.nombre, origen: 'target', enlace: r.tcin ? enlace(r.tcin) : '', tcin: r.tcin,
   codigo_verificado: !!r.upc_fuente, confirmada: !!r.confirmado_en,
 });
 
@@ -319,24 +319,35 @@ async function guardarReferencia(env: Env, upc: string, tcin: string, url: strin
 // #718: UPCitemdb (plan gratuito, sin llave) devuelve la imagen de Target por UPC sin raspar Target.
 // Plan DEV ($99/mes, 20,000/día): llave en /prod/v1/ con la variable UPCITEMDB_KEY (aún no existe ni se usa).
 const UPCITEMDB = 'https://api.upcitemdb.com/prod/trial/lookup';
-const PRESUPUESTO_UPCITEMDB = 80; // de 100/día: el resto queda para el escaneo y las ráfagas
+// El plan de prueba da 100 consultas al día (límite real del proveedor: se calibra aquí). Un solo contador diario en D1:
+//  - el relleno del cron se detiene en 50 y deja el resto al escaneo;
+//  - el escaneo (UPC nuevo #965 y respaldo de imagen #718) llega hasta 95; los 5 últimos son margen del propio proveedor.
+const PRESUPUESTO_RELLENO_UPCITEMDB = 50;
+const PRESUPUESTO_ESCANEO_UPCITEMDB = 95;
 const POR_CORRIDA_UPCITEMDB = 5;
 const REINTENTO_SIN_RESULTADO_DIAS = 30;
+const TIEMPO_ESCANEO_UPCITEMDB_MS = 4_000; // el escaneo no espera más: sin respuesta, el flujo de siempre
 let pausaUpcitemdbMs = 10_000; // el plan gratuito da 429 en ráfagas
 /** Solo para pruebas. */
 export const pausarUpcitemdbPor = (ms: number) => { pausaUpcitemdbMs = ms; };
+/** Solo para pruebas. */
+export const PRESUPUESTOS_UPCITEMDB = { relleno: PRESUPUESTO_RELLENO_UPCITEMDB, escaneo: PRESUPUESTO_ESCANEO_UPCITEMDB };
 const claveConsultas = () => `upcitemdb_consultas_${new Date().toISOString().slice(0, 10)}`;
 
-/** Gasta una consulta del día en D1 (atómico); false si el presupuesto se agotó. */
-async function gastarConsultaUpcitemdb(env: Env): Promise<boolean> {
+/** Gasta una consulta del día en D1 (atómico); false si se llegó al tope de quien pregunta. */
+async function gastarConsultaUpcitemdb(env: Env, tope: number): Promise<boolean> {
   const clave = claveConsultas();
   const { meta } = await env.DB.prepare(`insert into config (clave, valor) values (?, '1')
     on conflict (clave) do update set valor = cast(cast(valor as integer) + 1 as text) where cast(valor as integer) < ?`)
-    .bind(clave, PRESUPUESTO_UPCITEMDB).run();
+    .bind(clave, tope).run();
   if (!meta.changes) return false;
   await env.DB.prepare("delete from config where clave like 'upcitemdb_consultas_%' and clave < ?").bind(clave).run();
   return true;
 }
+
+/** Un 429 o una respuesta que no es 200 no cuenta como consulta usada. */
+const devolverConsultaUpcitemdb = (env: Env) => env.DB.prepare(
+  "update config set valor = cast(max(cast(valor as integer) - 1, 0) as text) where clave = ?").bind(claveConsultas()).run();
 
 /** UPC sin imagen utilizable: no se vuelve a consultar durante 30 días. */
 const marcarSinImagen = (env: Env, upc: string) => env.DB.prepare(`insert into config (clave, valor) values (?, ?)
@@ -348,38 +359,98 @@ const avisarModelo = (upc: string, tcin: string, h: Hallazgo) => {
   if (h.model && h.model !== tcin) console.warn(JSON.stringify({ mensaje: 'upcitemdb: model distinto al TCIN del manifiesto', upc, tcin, model: h.model }));
 };
 
-/** Hallazgo con UPC verificado, null si no hay imagen (queda marcado) o 'alto' si hay que dejar de consultar (límite, error). */
-async function consultarUpcitemdb(upc: string, env: Env): Promise<Hallazgo | null | 'alto'> {
-  if (!await gastarConsultaUpcitemdb(env)) return 'alto';
+type ItemUpcitemdb = Record<string, unknown>;
+
+/** El primer item con UPC/EAN igual al pedido; null si no hay; 'alto' si hay que dejar de consultar (límite, error, sin presupuesto). */
+async function pedirUpcitemdb(upc: string, env: Env, tope: number, ms: number): Promise<ItemUpcitemdb | null | 'alto'> {
+  if (!await gastarConsultaUpcitemdb(env, tope)) return 'alto';
   try {
     // Al normalizar, un UPC-A de 12 dígitos con cero inicial queda en 11.
     const respuesta = await fetch(`${UPCITEMDB}?upc=${upc.padStart(12, '0')}`, {
-      redirect: 'manual', signal: AbortSignal.timeout(10_000),
+      redirect: 'manual', signal: AbortSignal.timeout(ms),
       headers: { 'user-agent': 'ElDolaron-escaner/1.0 (+https://eldolaron.com)', accept: 'application/json' },
     });
     if (respuesta.status !== 200) {
       await respuesta.body?.cancel();
+      await devolverConsultaUpcitemdb(env);
       console.warn(JSON.stringify({ mensaje: 'upcitemdb no respondió', status: respuesta.status }));
       return 'alto';
     }
-    const datos = await leerJson(respuesta.body, 500_000) as { code?: string; items?: Array<Record<string, unknown>> };
-    if (datos.code === 'EXCEED_LIMIT') return 'alto';
+    const datos = await leerJson(respuesta.body, 500_000) as { code?: string; items?: ItemUpcitemdb[] };
+    if (datos.code === 'EXCEED_LIMIT') { await devolverConsultaUpcitemdb(env); return 'alto'; }
     const item = datos.code === 'OK' ? datos.items?.[0] : undefined;
-    const coincide = !!item && [item.upc, item.ean].some((c) => typeof c === 'string' && normalizarUpc(c) === upc);
-    const imagenes = Array.isArray(item?.images) ? item.images.filter(httpsValida) : [];
-    // Regla automática conservadora (#718): solo entra sola la imagen scene7; otras fuentes quedan para «Buscar imagen» en /admin.
-    const imagen = imagenes.find(imagenValida);
-    if (!coincide || !imagen) { await marcarSinImagen(env, upc); return null; }
-    return { imagen, titulo: typeof item!.title === 'string' ? item!.title : '', model: typeof item!.model === 'string' ? item!.model : '' };
+    return item && [item.upc, item.ean].some((c) => typeof c === 'string' && normalizarUpc(c) === upc) ? item : null;
   } catch (error) {
     console.error(JSON.stringify({ mensaje: 'upcitemdb fallido', upc, error: error instanceof Error ? error.message.slice(0, 200) : 'error desconocido' }));
     return 'alto';
   }
 }
 
+/** Hallazgo con UPC verificado, null si no hay imagen (queda marcado) o 'alto' si hay que dejar de consultar (límite, error). */
+async function consultarUpcitemdb(upc: string, env: Env, tope: number): Promise<Hallazgo | null | 'alto'> {
+  const item = await pedirUpcitemdb(upc, env, tope, 10_000);
+  if (item === 'alto') return item;
+  const imagenes = Array.isArray(item?.images) ? item.images.filter(httpsValida) : [];
+  // Regla automática conservadora (#718): solo entra sola la imagen scene7; otras fuentes quedan para «Buscar imagen» en /admin.
+  const imagen = imagenes.find(imagenValida);
+  if (!item || !imagen) { await marcarSinImagen(env, upc); return null; }
+  return { imagen, titulo: typeof item.title === 'string' ? item.title : '', model: typeof item.model === 'string' ? item.model : '' };
+}
+
+/**
+ * #965: precio de lista en dólares (centavos) de la oferta de Target, 0 si no hay oferta confiable.
+ * Decisión de gerencia del 27/11 (Issue #965): el precio de lista es el `price` de la oferta de Target (su precio vigente);
+ * no se usa `list_price`. Cambiar la regla es cambiar este único cálculo.
+ */
+export function precioListaUsd(item: ItemUpcitemdb): number {
+  const ofertas = Array.isArray(item.offers) ? item.offers as Array<Record<string, unknown>> : [];
+  const oferta = ofertas.find((o) => typeof o?.merchant === 'string' && /^target\b/i.test(o.merchant.trim()) && Number(o.price) > 0);
+  if (!oferta) return 0;
+  return Math.round(Number(oferta.price) * 100);
+}
+
+/**
+ * #965: lo que UPCitemdb sabe de un UPC que escaneamos y no está en el manifiesto, o null si no es confiable
+ * (sin resultado, otro UPC, sin imagen scene7, sin oferta de Target con precio) o si no se pudo preguntar.
+ * Respeta la marca de 30 días «sin resultado» y el tope del escaneo; espera pocos segundos.
+ */
+async function fichaUpcitemdb(upc: string, env: Env) {
+  if (!/^\d{6,14}$/.test(upc)) return null;
+  const desde = new Date(Date.now() - REINTENTO_SIN_RESULTADO_DIAS * 86_400_000).toISOString().slice(0, 10);
+  if (await env.DB.prepare('select 1 from config where clave = ? and valor > ?').bind(`upcitemdb_sin_${upc}`, desde).first()) return null;
+  const item = await pedirUpcitemdb(upc, env, PRESUPUESTO_ESCANEO_UPCITEMDB, TIEMPO_ESCANEO_UPCITEMDB_MS);
+  if (item === 'alto') return null;
+  const imagen = Array.isArray(item?.images) ? item.images.find(imagenValida) : undefined;
+  const precioUsd = item ? precioListaUsd(item) : 0;
+  const texto = (valor: unknown, largo: number) => typeof valor === 'string' ? valor.trim().slice(0, largo) : '';
+  const titulo = texto(item?.title, 200);
+  if (!item || !imagen || !precioUsd || !titulo) { await marcarSinImagen(env, upc); return null; }
+  const model = texto(item.model, 12);
+  return { titulo, marca: texto(item.brand, 60), categoria: texto(item.category, 80), tcin: /^\d{1,12}$/.test(model) ? model : '', imagen, precioUsd };
+}
+
+/**
+ * #965: guarda en `manifiesto` (origen 'upcitemdb') el UPC que la hoja no trae, con la imagen que la misma consulta devolvió,
+ * para que la captura siga por el camino del manifiesto. No pisa un renglón de la hoja. false = flujo de siempre.
+ */
+export async function registrarUpcDesconocido(upc: string, env: Env): Promise<boolean> {
+  const f = await fichaUpcitemdb(upc, env);
+  if (!f) return false;
+  try {
+    await env.DB.prepare(`insert into manifiesto (upc, descripcion, departamento, precio_usd, tcin, marca, origen, actualizado_en)
+      values (?, ?, ?, ?, ?, ?, 'upcitemdb', ?) on conflict (upc) do nothing`)
+      .bind(upc, f.titulo, f.categoria, f.precioUsd, f.tcin, f.marca, new Date().toISOString()).run();
+    await guardarReferencia(env, upc, f.tcin, f.imagen, f.titulo, upc);
+    return true;
+  } catch (error) {
+    console.error(JSON.stringify({ mensaje: 'upcitemdb sin guardar', upc, error: error instanceof Error ? error.message.slice(0, 200) : 'error desconocido' }));
+    return false;
+  }
+}
+
 /** Escaneo: Target falló; solo una imagen scene7 con UPC coincidente se acepta, con la misma forma de respuesta. */
 async function respaldoUpcitemdb(upc: string, tcin: string, env: Env, ctx: ExecutionContext): Promise<Response | null> {
-  const h = await consultarUpcitemdb(upc, env);
+  const h = await consultarUpcitemdb(upc, env, PRESUPUESTO_ESCANEO_UPCITEMDB);
   if (!h || h === 'alto' || !imagenValida(h.imagen)) return null;
   avisarModelo(upc, tcin, h);
   if (await guardarReferencia(env, upc, tcin, h.imagen, h.titulo || upc, upc)) ctx.waitUntil(guardarImagenComoFoto(upc, env));
@@ -407,7 +478,7 @@ async function guardarHallazgo(upc: string, h: Hallazgo, env: Env): Promise<void
  */
 export async function procesarRellenoUpcitemdb(env: Env): Promise<void> {
   const usadas = await env.DB.prepare('select valor from config where clave = ?').bind(claveConsultas()).first<{ valor: string }>();
-  if (Number(usadas?.valor ?? 0) >= PRESUPUESTO_UPCITEMDB) return;
+  if (Number(usadas?.valor ?? 0) >= PRESUPUESTO_RELLENO_UPCITEMDB) return;
   const desde = new Date(Date.now() - REINTENTO_SIN_RESULTADO_DIAS * 86_400_000).toISOString().slice(0, 10);
   const { results } = await env.DB.prepare(`select ltrim(upc, '0') as codigo, max(stock > 0) as con_stock, max(creado_en) as creado
     from productos where propietario = 'dolaron' and estado_analisis = 'listo' and foto_key = '' and upc <> ''
@@ -422,7 +493,7 @@ export async function procesarRellenoUpcitemdb(env: Env): Promise<void> {
   let consultadas = 0;
   for (const upc of validos.filter((c) => !conReferencia.has(c)).slice(0, POR_CORRIDA_UPCITEMDB)) {
     if (consultadas++) await new Promise((resolve) => setTimeout(resolve, pausaUpcitemdbMs));
-    const h = await consultarUpcitemdb(upc, env);
+    const h = await consultarUpcitemdb(upc, env, PRESUPUESTO_RELLENO_UPCITEMDB);
     if (h === 'alto') return;
     if (!h) continue;
     try {
