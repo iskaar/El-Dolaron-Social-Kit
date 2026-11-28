@@ -46,6 +46,11 @@ export const admiteOtraTalla=p=>!!p?.upc&&!!normalizarUpc(p.upc)&&(!!p.talla||pi
  * Una pieza ya registrada (`guardada`/`existente`) no: la foto es de una pieza nueva; reemplazar la suya es «Foto nueva» (#549).
  */
 export function piezaSinRegistrar(a){return a&&(a.tipo==='nueva'||a.tipo==='sin-registro')?a:null;}
+/**
+ * #969: ¿se ofrece la foto de una pieza nueva? Gerencia/FEP (`fotoSinCodigo`) y la Ropa siempre; el resto solo con una tarjeta de pieza CON fuente
+ * abierta (`nueva`: tiene ficha, la foto es de esa pieza). Sin tarjeta (producto sin código) o en «Sin registro» se aparta para gerencia.
+ */
+export const puedeFotoNueva=({fotoSinCodigo,esRopa,actual})=>!!(fotoSinCodigo||esRopa||actual?.tipo==='nueva');
 /** Capturas cuya etiqueta ya salió desde este teléfono: una subida repetida (se perdió la respuesta, recarga) no la reimprime. */
 const CLAVE_AUTOIMPRESAS='inventario-autoimpresas';
 export function capturaImpresa(id){try{return JSON.parse(localStorage.getItem(CLAVE_AUTOIMPRESAS)||'[]').includes(id);}catch{return false;}}
@@ -255,7 +260,7 @@ export async function iniciar(ctx) {
   function actualizarDisparo(){
     const actual=flujo.actual(),falta=esRopa&&!piezaSinRegistrar(actual)?tablero.faltante():'';
     // #969: la foto de un producto sin código (Mercancía) es de gerencia; la Ropa sigue igual para todos.
-    const sinEntrada=!esRopa&&!fotoSinCodigo;disparo.hidden=sinEntrada;
+    const sinEntrada=!puedeFotoNueva({fotoSinCodigo,esRopa,actual});disparo.hidden=sinEntrada;
     const motivo=sinEntrada?'':falta||faltaCalzado(actual)||(pendienteFoto?'Espera la foto':'');bloquear(disparo,motivo);ayudaDisparo.textContent=motivo;
     movil?.pintarCamara?.();
     if(!pc()){disparo.textContent=falta?falta.replace('Falta ','Elige '):'';disparo.setAttribute('aria-label',falta?disparo.textContent:'Tomar foto');}
@@ -384,7 +389,7 @@ export async function iniciar(ctx) {
     mensaje(a?.revision?'Cerrada · la pieza queda por revisar':'Cerrada sin guardar','aviso');foco();
   }
   async function fotoNueva(a=null){
-    if(!esRopa&&!fotoSinCodigo)return mensaje('Apártala para gerencia','aviso');
+    if(!puedeFotoNueva({fotoSinCodigo,esRopa,actual:a||flujo.actual()}))return mensaje('Apártala para gerencia','aviso');
     if(!pc())return movil.tomar(piezaSinRegistrar(a||flujo.actual()));
     if(esRopa&&!a&&!tablero.validar())return;
     if(faltaCalzado(a))throw new Error(faltaCalzado(a));

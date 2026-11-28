@@ -7,7 +7,7 @@ import { ropa, opciones, talla } from './inventario-ropa.js';
 import { stepper, bloquear, cerrarHoja } from './inventario-ui.js';
 import { estadoEnvio, sincronizarMarcas, marcaDeLaBase } from './envio-etiquetas.js';
 import { esRopa } from './ropa.js';
-import { cambiosTarjeta, capturaImpresa, corregirExistencia, etiquetasPorCorreccion, faltaCalzado, piezaSinRegistrar } from './inventario-capturar.js';
+import { cambiosTarjeta, capturaImpresa, puedeFotoNueva as puedeFoto, corregirExistencia, etiquetasPorCorreccion, faltaCalzado, piezaSinRegistrar } from './inventario-capturar.js';
 import { etiqueteraLista, noImprime } from './etiquetera.js';
 import { esCalzado } from './tallas.js';
 import { avisoReimpresion, pesos } from './ficha.js';
@@ -23,7 +23,7 @@ export async function iniciarCelular(ctx,captura) {
   const apagada=nodo('p','Cámara en pausa · toca para encender','camara-apagada');visor.append(apagada);
   visor.addEventListener('click',e=>{if(!e.target.closest('button')&&!camara.pista())void cambiarCamara(true);});
   // #969: la foto de un producto sin código (Mercancía) es de gerencia; en Ropa, de todos. FEP (`finanzas`) captura solo con foto.
-  const puedeFotoNueva=()=>ctx.fotoSinCodigo||captura.esRopa();
+  const puedeFotoNueva=(actual=captura.flujo.actual())=>puedeFoto({fotoSinCodigo:ctx.fotoSinCodigo,esRopa:captura.esRopa(),actual});
   const contador=nodo('p',''),carrusel=nodo('div',undefined,'carrusel'),tira=nodo('section',undefined,'tira-capturas');tira.append(contador,carrusel);
   const todas=boton('Ver todas',()=>{const c=nodo('div',undefined,'lista-capturas');for(const r of sesion.values())c.append(miniatura(r));hoja('Capturas de 24 h',c);});const revisarBoton=boton('',()=>{const r=porRevisar()[0];if(r)return corregir(r.id);},'revisar-pendientes');revisarBoton.hidden=true;
   const encabezado=nodo('div',undefined,'cabecera-carrusel');encabezado.append(contador,revisarBoton,todas);tira.prepend(encabezado);
@@ -173,7 +173,7 @@ export async function iniciarCelular(ctx,captura) {
   }
   async function conservar(foto,a){
     reposo.actividad();ctx.problemas.cola();
-    if(!puedeFotoNueva())throw new Error('Apártala para gerencia');
+    if(!puedeFotoNueva(a))throw new Error('Apártala para gerencia');
     const upc=a?.upc;const ropaSinCodigo=captura.esRopa()&&!upc;
     if(faltaCalzado(a))throw new Error('Elige el número de calzado');
     if(ropaSinCodigo&&!captura.tablero.validar())throw new Error('Completa talla y precio');

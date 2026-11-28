@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { crearCaptura, avisoExistente, cambiosTarjeta, vigilarLectorEnCampo, piezaSinRegistrar, faltaCalzado, numeroCalzado } from '../public/inventario-capturar.js';
+import { crearCaptura, puedeFotoNueva, avisoExistente, cambiosTarjeta, vigilarLectorEnCampo, piezaSinRegistrar, faltaCalzado, numeroCalzado } from '../public/inventario-capturar.js';
 import { registroFoto, formularioPendiente } from '../public/foto-pendiente.js';
 import worker, { permitidaParaVendedor } from './worker.ts';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
@@ -489,6 +489,16 @@ test('#969: cerrar la tarjeta no guarda nada, deja libre al lector y no descarta
   liberar();await guardando;
   assert.equal(flujo.actual()!.tipo,'guardada');assert.equal(llamadas.filter(r=>r==='/api/borradores/upc').length,1);
   assert.equal(flujo.cerrar(),true,'terminado el guardado, la tarjeta ya se puede cerrar');
+});
+
+test('#969: la foto de una pieza nueva solo se aparta para gerencia cuando no hay fuente',()=>{
+  const capturista={fotoSinCodigo:false,esRopa:false};
+  assert.equal(puedeFotoNueva({...capturista,actual:{tipo:'nueva'}}),true,'tarjeta con ficha (manifiesto o consulta): la foto es de esa pieza, para todos');
+  assert.equal(puedeFotoNueva({...capturista,actual:null}),false,'producto sin código: se aparta');
+  assert.equal(puedeFotoNueva({...capturista,actual:{tipo:'sin-registro'}}),false,'«Sin registro»: se aparta');
+  assert.equal(puedeFotoNueva({...capturista,actual:{tipo:'existente'}}),false);
+  assert.equal(puedeFotoNueva({...capturista,esRopa:true,actual:null}),true,'la Ropa no cambia');
+  assert.equal(puedeFotoNueva({fotoSinCodigo:true,esRopa:false,actual:{tipo:'sin-registro'}}),true,'gerencia y FEP siempre');
 });
 
 test('#549: el obturador del celular solo entrega la foto a una tarjeta sin registrar; guardada o existente = pieza nueva',()=>{
