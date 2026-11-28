@@ -180,6 +180,20 @@ test('Inventario drena registros de /escanear y /captura; conserva las fotos ant
   assert.equal(cuerpos.at(-1)!.get('precio_ropa'),'5000');assert.equal(cuerpos.at(-1)!.get('marca'),'Wild Fable');
 });
 
+test('#967: una foto que el servidor rechaza (4xx) informa su motivo, sigue en la cola y no frena a las demás; 401, 403 y 5xx no lo leen',async()=>{
+  const reg=(id:string)=>({id,foto:new Blob([id]),cantidad:1,estado_fisico:'nuevo',creado:Number(id.slice(1))});
+  const cola=new Map([reg('a1'),reg('b2')].map(r=>[r.id,r]));const estados:[string,string,string|undefined][]=[];let respuesta=():Response=>Response.json({error:'Ese UPC ya existe con este grado.'},{status:409});
+  const subida=crearSubida({pendientes:async()=>[...cola.values()],leer:async id=>cola.get(id),borrar:async id=>cola.delete(id),
+    enviar:async(_ruta,o)=>(o.body as FormData).get('id')==='a1'?respuesta():Response.json({id:'b2'}),alEstado:(estado,r,motivo)=>{estados.push([estado,r.id,motivo]);}});
+  await subida.subir();
+  assert.deepEqual(estados.filter(e=>e[0]==='error'),[['error','a1','Ese UPC ya existe con este grado.']]);
+  assert.deepEqual([...cola.keys()],['a1'],'la rechazada se conserva y la siguiente sí sube');
+  estados.length=0;respuesta=()=>new Response('<html>413</html>',{status:413});await subida.subir();
+  assert.deepEqual(estados.filter(e=>e[0]==='error'),[['error','a1',undefined]],'un cuerpo que no es JSON no da motivo ni rompe la cola');
+  for(const status of [401,403,500,429]){estados.length=0;respuesta=()=>Response.json({error:'No leer'},{status});await subida.subir();assert.ok(estados.every(e=>e[2]===undefined),`${status} no manda motivo`);}
+  assert.equal(cola.size,1);
+});
+
 test('#779: la cola sin red sube en orden de captura (creado), no en el orden del almacén',async()=>{
   const reg=(id:string,creado:number)=>({id,foto:new Blob([id]),cantidad:1,estado_fisico:'nuevo',creado});
   const cola=new Map([reg('c',300),reg('a',100),reg('b',200)].map(r=>[r.id,r]));const orden:string[]=[];

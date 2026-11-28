@@ -88,7 +88,7 @@ interface Ejemplo {
 async function ejemplosDeIsaac(env: Env): Promise<Ejemplo[]> {
   const { results } = await env.DB.prepare(
     `select nombre, categoria, precio_lista, precio from productos
-     where precio > 0 and precio_lista > 0 and precio <> precio_sugerido and nombre <> ''
+     where precio > 0 and precio_lista > 0 and precio_sugerido > 0 and precio <> precio_sugerido and nombre <> ''
      order by actualizado_en desc limit ?`,
   )
     .bind(EJEMPLOS_MAXIMOS)

@@ -62,8 +62,8 @@ export function stepper(valor, cambiar, { min = 1, max = 99, nombre = 'Cantidad'
     let hecho = false;
     const cerrar = (aplicar, volver) => {
       if (hecho) return; hecho = true;
-      // Solo dígitos; fuera de rango se acota a min/max (fijar).
-      if (aplicar && /^\d+$/.test(input.value.trim())) fijar(Number(input.value.trim()));
+      // Hasta 3 dígitos; fuera de rango se acota a min/max (fijar). Más de 3 es un código de barras que cayó aquí (#967): se ignora, no se acota.
+      if (aplicar && /^\d{1,3}$/.test(input.value.trim())) fijar(Number(input.value.trim()));
       input.remove(); salida.hidden = false; if (volver) salida.focus();
     };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); cerrar(true, true); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cerrar(false, true); } });

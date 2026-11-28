@@ -46,6 +46,23 @@ test('un capturista escanea, pone la cantidad y la pieza queda lista con su ED- 
   assert.equal((db.prepare('select count(*) n from productos where upc = ?').get('191907910414') as { n: number }).n, 1);
 });
 
+test('la pieza nueva guarda el precio calculado como sugerido, aunque gerencia escriba otro (#966)', async () => {
+  const { db, pedir } = conManifiesto();
+  const config = Object.fromEntries((db.prepare('select clave, valor from config').all() as { clave: string; valor: string }[])
+    .map((c) => [c.clave, c.valor]));
+  const calculado = calcularPrecio({ precioLista: 9232, categoria: 'despensa', estadoFisico: 'nuevo', config }).precio;
+  const sugerido = (id: string) => db.prepare('select precio, precio_sugerido from productos where id = ?').get(id) as { precio: number; precio_sugerido: number };
+  const normal = crypto.randomUUID();
+  assert.equal((await pedir('/api/borradores/upc', { id: normal, upc: '191907910414', stock: 1 })).status, 201);
+  assert.deepEqual({ ...sugerido(normal) }, { precio: calculado, precio_sugerido: calculado });
+  // Gerencia escribe otro precio (por debajo del de lista): precio es el escrito, el sugerido el del servidor.
+  db.prepare("update usuarios set roles = 'dueno' where correo = 'cap@prueba.mx'").run();
+  db.prepare("update productos set upc = '000' where id = ?").run(normal);   // el UPC es único: libera el de la prueba
+  const gerencia = crypto.randomUUID();
+  assert.equal((await pedir('/api/borradores/upc', { id: gerencia, upc: '191907910414', stock: 1, precio: 1234 })).status, 201);
+  assert.deepEqual({ ...sugerido(gerencia) }, { precio: 1234, precio_sugerido: calculado });
+});
+
 test('lo que no esta en el manifiesto, sin tipo de cambio o con cantidad mala no deja pieza', async () => {
   const { db, pedir } = conManifiesto();
   const antes = (db.prepare('select count(*) n from productos').get() as { n: number }).n;
