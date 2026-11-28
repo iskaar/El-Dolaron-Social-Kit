@@ -467,6 +467,30 @@ test('#967: un UPC sin ficha cuesta una sola consulta (el resolver ya miró el m
   assert.deepEqual(mas,['/api/piezas/resolver','/api/piezas','/api/manifiesto/012345678905']);
 });
 
+test('#969: cerrar la tarjeta no guarda nada, deja libre al lector y no descarta un guardado en curso',async()=>{
+  const llamadas:string[]=[];let liberar!:()=>void;const espera=new Promise<void>(r=>{liberar=r;});let lento=false;
+  const api=async(ruta:string,cuerpo?:any)=>{llamadas.push(ruta);
+    if(ruta.startsWith('/api/piezas/resolver?'))return /q=0123/.test(ruta)?{ficha:{nombre:'Lámpara',precio:24900}}:Promise.reject(Object.assign(new Error('Sin coincidencias.'),{status:404}));
+    if(lento)await espera;return {id:cuerpo.id,nombre:'Lámpara',stock:cuerpo.stock,estado_analisis:'listo'};};
+  const flujo=crearCaptura({api,enLinea:()=>true,imprimir:async()=>true});
+  assert.equal(flujo.cerrar(),false,'sin tarjeta no hay nada que cerrar');
+  // Una tarjeta del manifiesto se cierra sin tocar el servidor, aunque esté editada; el siguiente código entra como si nada.
+  await flujo.leer('012345678905');flujo.actual()!.nombre='Otro';flujo.actual()!.cantidad=3;
+  assert.equal(flujo.cerrar(),true);assert.equal(flujo.actual(),null);
+  assert.equal(llamadas.includes('/api/borradores/upc'),false,'cerrar no guarda');
+  await flujo.leer('012345678905');assert.equal(flujo.actual()!.cantidad,1,'la tarjeta cerrada no deja su cantidad ni su edición');
+  flujo.cerrar();   // sin cerrarla, leer otro código la guardaría (comportamiento que no cambia)
+  // «Sin registro» también se cierra.
+  await flujo.leer('999999999999');assert.equal(flujo.actual()!.tipo,'sin-registro');assert.equal(flujo.cerrar(),true);assert.equal(flujo.actual(),null);
+  // Con un guardado en curso cerrar no hace nada; el guardado termina y deja su tarjeta «Guardada».
+  await flujo.leer('012345678905');lento=true;
+  const guardando=flujo.guardar();await new Promise(r=>setImmediate(r));
+  assert.equal(flujo.cerrar(),false,'no descarta lo que ya va en camino');assert.equal(flujo.actual()!.tipo,'nueva');
+  liberar();await guardando;
+  assert.equal(flujo.actual()!.tipo,'guardada');assert.equal(llamadas.filter(r=>r==='/api/borradores/upc').length,1);
+  assert.equal(flujo.cerrar(),true,'terminado el guardado, la tarjeta ya se puede cerrar');
+});
+
 test('#549: el obturador del celular solo entrega la foto a una tarjeta sin registrar; guardada o existente = pieza nueva',()=>{
   const nueva={tipo:'nueva',id:'n',upc:'1'},sinRegistro={tipo:'sin-registro',id:'s',upc:'2'};
   assert.equal(piezaSinRegistrar(nueva),nueva);

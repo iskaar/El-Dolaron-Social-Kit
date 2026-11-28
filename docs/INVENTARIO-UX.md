@@ -316,13 +316,15 @@ LISTO ──lee código──► BUSCANDO ──► NUEVA (manifiesto) ──Gua
 **Celular — Sin registro (UPC fuera del manifiesto)**
 
 ```
-| ▲ Sin registro · 012345678905         | estado: aviso
+| ▲ Sin registro · apártala para gerencia | estado: aviso (#969)
 +--------------------------------------+
-| [ Buscar en internet ]             |
-| [[ Tomar foto ]]   [ Sin foto ]*     |  * solo dueño
+| Apártala para gerencia y sigue con   |
+| la siguiente pieza.                  |
+| [ Cerrar ]                           |  todos
+| [ Buscar en internet ] [[ Tomar foto ]] |  solo gerencia
 +--------------------------------------+
 ```
-La búsqueda IA comienza solo al tocar `Buscar en internet`, nunca por tiempo ni por leer otro código. Resultado: tarjeta con imagen 120×120, nombre y `[[ Es esta ]]` / `[ No es ]`. «Sin foto» abre formulario manual (solo dueño; ver 4.3 hoja «Pieza sin foto»). Seguir escaneando no cancela: la búsqueda continúa y queda en el carrusel como «⏳ buscando».
+Quien no es gerencia solo ve el aviso y `Cerrar`: la pieza sin fuente se aparta físicamente (regla de captura corta, #969). La búsqueda IA comienza solo al tocar `Buscar en internet`, nunca por tiempo ni por leer otro código. Resultado: tarjeta con imagen 120×120, nombre y `[[ Es esta ]]` / `[ No es ]`. «Pieza sin foto» (formulario manual, solo gerencia; ver 4.3) está en el menú, no en esta tarjeta. Seguir escaneando no cancela: la búsqueda continúa y queda en el carrusel como «⏳ buscando».
 
 **Celular — Sin código: Ropa** (Issue #458: tablero en el flujo, debajo del visor, sin tapar la foto)
 

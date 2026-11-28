@@ -22,6 +22,8 @@ export async function iniciarCelular(ctx,captura) {
   const icono=document.createElementNS('http://www.w3.org/2000/svg','svg'),uso=document.createElementNS('http://www.w3.org/2000/svg','use'),etiquetaCamara=nodo('span');icono.setAttribute('class','icono');icono.setAttribute('aria-hidden','true');uso.setAttribute('href','#i-camara');icono.append(uso);alternar.replaceChildren(icono,etiquetaCamara);reanudar.before(alternar);
   const apagada=nodo('p','Cámara en pausa · toca para encender','camara-apagada');visor.append(apagada);
   visor.addEventListener('click',e=>{if(!e.target.closest('button')&&!camara.pista())void cambiarCamara(true);});
+  // #969: la foto de un producto sin código (Mercancía) es de gerencia; en Ropa, de todos. FEP (`finanzas`) captura solo con foto.
+  const puedeFotoNueva=()=>ctx.fotoSinCodigo||captura.esRopa();
   const contador=nodo('p',''),carrusel=nodo('div',undefined,'carrusel'),tira=nodo('section',undefined,'tira-capturas');tira.append(contador,carrusel);
   const todas=boton('Ver todas',()=>{const c=nodo('div',undefined,'lista-capturas');for(const r of sesion.values())c.append(miniatura(r));hoja('Capturas de 24 h',c);});const revisarBoton=boton('',()=>{const r=porRevisar()[0];if(r)return corregir(r.id);},'revisar-pendientes');revisarBoton.hidden=true;
   const encabezado=nodo('div',undefined,'cabecera-carrusel');encabezado.append(contador,revisarBoton,todas);tira.prepend(encabezado);
@@ -47,7 +49,7 @@ export async function iniciarCelular(ctx,captura) {
     if(localStorage.getItem('inventario-vibracion')!=='false')navigator.vibrate?.(tipo==='error'?[200,100,200]:tipo==='etiqueta'?[150,80,150,80,150]:40);
     visor.dataset.destello=tipo;setTimeout(()=>{delete visor.dataset.destello;},tipo==='etiqueta'?1500:350);
   }
-  function pintarCamara(){const activa=!!camara.pista();alternar.setAttribute('aria-pressed',String(activa));etiquetaCamara.textContent=activa?'Cámara':'Apagada';apagada.hidden=activa;video.hidden=!activa;reanudar.hidden=!usarCamara||activa;subirArchivo.hidden=activa;sincronizarReposo();}
+  function pintarCamara(){const activa=!!camara.pista();alternar.setAttribute('aria-pressed',String(activa));etiquetaCamara.textContent=activa?'Cámara':'Apagada';apagada.hidden=activa;video.hidden=!activa;reanudar.hidden=!usarCamara||activa;subirArchivo.hidden=activa||!puedeFotoNueva();sincronizarReposo();}
   const reposo=crearReposoCamara({apagar:()=>cambiarCamara(false)});
   function sincronizarReposo(){reposo.pausar(!camara.pista()||$('hoja').open||document.hidden||$('modo-capturar').hidden);}
   // Mientras el capturista teclea nombre o precio la cámara no lee: un código ajeno no guarda una tarjeta a medias.
@@ -171,6 +173,7 @@ export async function iniciarCelular(ctx,captura) {
   }
   async function conservar(foto,a){
     reposo.actividad();ctx.problemas.cola();
+    if(!puedeFotoNueva())throw new Error('Apártala para gerencia');
     const upc=a?.upc;const ropaSinCodigo=captura.esRopa()&&!upc;
     if(faltaCalzado(a))throw new Error('Elige el número de calzado');
     if(ropaSinCodigo&&!captura.tablero.validar())throw new Error('Completa talla y precio');
@@ -289,7 +292,7 @@ export async function iniciarCelular(ctx,captura) {
   }
   function opcionesCamara(){
     const c=nodo('div',undefined,'formulario');
-    c.append(boton('Subir foto',()=>{archivoPara=null;galeria.click();}));
+    if(puedeFotoNueva())c.append(boton('Subir foto',()=>{archivoPara=null;galeria.click();}));
     if(ctx.dueno)c.append(boton('Pieza sin foto',()=>captura.manual()));const pista=camara.pista(),rango=pista?.getCapabilities?.().zoom;
     if(rango&&rango.max>rango.min){const l=nodo('label','Zoom'),input=nodo('input');input.type='range';Object.assign(input,{min:rango.min,max:rango.max,step:rango.step||.1,value:pista.getSettings().zoom||rango.min});input.oninput=()=>{const zoom=Number(input.value);if(pista.getSettings().zoom!==zoom)pista.applyConstraints({advanced:[{zoom}]}).catch(()=>{});localStorage.setItem('captura-zoom',input.value);};l.append(input);c.append(l);}
     c.append(boton('Producto sin código',()=>{captura.flujo.limpiar();cerrarHoja();}),boton('Reanudar cámara',async()=>{cerrarHoja();await cambiarCamara(true);}),boton('Escribir código',()=>{cerrarHoja();$('busqueda').hidden=false;$('consulta').inputMode='numeric';$('consulta').focus();}));hoja('Cámara',c);
@@ -302,5 +305,5 @@ export async function iniciarCelular(ctx,captura) {
   addEventListener('online',()=>{pintar();void subir();});addEventListener('offline',pintar);setInterval(subir,20000);
   await recuperar();
   if(ctx.enfocado?.encendido())void empezar();
-  return {empezar,tomar,fotoPieza,subir,sonar,actividad:()=>reposo.actividad(),async abrir(){pintar();pintarCamara();if(!inicio.hidden)return;reanudar.textContent='Reanudar';},pausar(){camara.pausar();pintarCamara();reanudar.textContent='Reanudar';},camara,corregir};
+  return {empezar,tomar,fotoPieza,subir,sonar,pintarCamara,actividad:()=>reposo.actividad(),async abrir(){pintar();pintarCamara();if(!inicio.hidden)return;reanudar.textContent='Reanudar';},pausar(){camara.pausar();pintarCamara();reanudar.textContent='Reanudar';},camara,corregir};
 }

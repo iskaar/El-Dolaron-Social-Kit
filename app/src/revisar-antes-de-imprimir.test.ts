@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { crearCaptura, cuerpoRevision } from '../public/inventario-capturar.js';
 import { registroFoto, formularioPendiente } from '../public/foto-pendiente.js';
 import worker from './worker.ts';
-import { tienda } from './prueba-d1.ts';
+import { tienda, DUENO } from './prueba-d1.ts';
 
 const UPC = '0191907910414';
 function montar() {
@@ -75,7 +75,7 @@ test('servidor: «Guardar e imprimir» de la revisión confirma de una vez con l
   assert.equal(t.fila(lista.id).por_revisar, 1);
 });
 
-test('servidor: nombre solo con la casilla «Editar inventario»; el precio de una pieza con etiqueta lo pide el capturista a gerencia (#479) y aun así confirma', async (t0) => {
+test('servidor: nombre solo con la casilla «Editar inventario»; un precio escrito solo lo acepta gerencia (#479, #969) y repetir el actual no cuenta', async (t0) => {
   const t = montar(); t0.after(async () => { await t.esperar(); t.db.close(); });
   t.env.DEV_USUARIO = 'cap@prueba.mx';
   const { id } = await t.foto();
@@ -89,12 +89,26 @@ test('servidor: nombre solo con la casilla «Editar inventario»; el precio de u
   assert.equal((await t.pedir(`/api/borradores/${otra}/revision`, { nombre: 'Con casilla' }, 'PATCH')).status, 200);
   assert.equal(t.fila(otra).nombre, 'Con casilla');
   assert.equal(t.fila(otra).por_revisar, 1, 'guardar sin `confirmar` no libera la etiqueta');
+  // #969: la primera revisión no acepta un precio escrito por quien no es gerencia (403); ni confirma ni cambia nada.
   const caro = t.fila(otra).precio - 100;
-  const pedido = await t.pedir(`/api/borradores/${otra}/revision`, { confirmar: true, precio: caro }, 'PATCH');
-  assert.equal(pedido.status, 200);
-  assert.ok(pedido.cuerpo.aviso, 'se pidió el cambio de precio a gerencia');
-  assert.equal(t.fila(otra).precio, antes.precio, 'el precio no cambió');
+  const escrito = await t.pedir(`/api/borradores/${otra}/revision`, { confirmar: true, precio: caro }, 'PATCH');
+  assert.equal(escrito.status, 403);
+  assert.match(escrito.cuerpo.error, /gerencia/);
+  assert.deepEqual([t.fila(otra).precio, t.fila(otra).por_revisar], [antes.precio, 1], 'el 403 no confirma ni cambia el precio');
+  // Repetir el precio actual no es escribir uno: confirma.
+  const mismoPrecio = await t.pedir(`/api/borradores/${otra}/revision`, { confirmar: true, precio: t.fila(otra).precio }, 'PATCH');
+  assert.equal(mismoPrecio.status, 200, JSON.stringify(mismoPrecio.cuerpo));
   assert.equal(t.fila(otra).por_revisar, 0);
+  // Solo el grado (lo que manda la tarjeta): el servidor recalcula con la banda y también confirma; sin precio escrito no hay 403.
+  const { id: grado } = await t.nueva();
+  const delGrado = await t.pedir(`/api/borradores/${grado}/revision`, { confirmar: true, estado_fisico: 'danado' }, 'PATCH');
+  assert.equal(delGrado.status, 200, JSON.stringify(delGrado.cuerpo));
+  assert.deepEqual([t.fila(grado).estado_fisico, t.fila(grado).por_revisar], ['danado', 0]);
+  // Gerencia sí escribe el precio de la primera revisión.
+  t.env.DEV_USUARIO = DUENO;
+  const { id: gerencia } = await t.nueva();
+  assert.equal((await t.pedir(`/api/borradores/${gerencia}/revision`, { confirmar: true, precio: 1900 }, 'PATCH')).status, 200);
+  assert.deepEqual([t.fila(gerencia).precio, t.fila(gerencia).por_revisar], [1900, 0]);
 });
 
 test('tarjeta UPC: elegir el grado cambia el precio mostrado al de ese grado y respeta el que gerencia ya escribió; el grado viaja en el alta', async () => {

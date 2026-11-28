@@ -14,8 +14,10 @@ if (!modos.length) location.replace('/sin-acceso');
 const dueno = identidad.usuario?.roles.includes('dueno');
 let modo, siguiente = null, consulta = '', generacion = 0, cambioModo = 0, apagar = null, piezaActual = null, filtroTimer, cargando = false;
 const modulos = new Map(), activos = new Map();
+// #969: la foto de una pieza sin código (Mercancía) es de gerencia; FEP (`finanzas`) no tiene manifiesto y captura solo con foto.
+const fotoSinCodigo = dueno || identidad.usuario?.roles.includes('finanzas') === true;
 // Sin red, el celular encola la foto; la PC no encola nada y solo puede esperar (#967).
-const sinRedCaptura = () => pc() ? 'Sin red · espera la señal' : 'Sin red · toma foto';
+const sinRedCaptura = () => pc() || !fotoSinCodigo ? 'Sin red · espera la señal' : 'Sin red · toma foto';
 const foco = () => { if (pc()) { $('consulta').focus({ preventScroll:true }); $('consulta').select(); } };
 const ficha = crearFicha({ mensaje, confirmar, integrada:true, antesCamara:apagarCamaras,
   alRepetida:(origen,destino,upc) => resolverRepetida(origen,destino,{...contexto,cerrar:cerrarHoja,upc,alTerminar:id=>ficha.abrir(id)}), elegirMotivo:() => new Promise(resolve => {
@@ -94,7 +96,7 @@ async function buscar(mas = false, abrir = false) {
   finally { if (turno === generacion) { cargando = false; bloquear($('mas'), ''); $('resultados').setAttribute('aria-busy', 'false'); } }
 }
 const problemas = {};
-const contexto = { $, nodo, boton, mensaje, hoja, confirmar, api, pesos, identidad, dueno, pc, foco, ficha, resultado, problemas,
+const contexto = { $, nodo, boton, mensaje, hoja, confirmar, api, pesos, identidad, dueno, fotoSinCodigo, pc, foco, ficha, resultado, problemas,
   pieza:() => piezaActual, cambiarModo, imprimir:async (...args) => (await cargar('imprimir')).imprimir(...args) };
 // Modo enfocado (#461): solo celular y Capturar; la navegación se oculta con el mismo [hidden] que ya usa el modo único.
 const enfocado = contexto.enfocado = crearEnfocado({ $, problemas, aplica:() => !pc() && modo === 'capturar',
@@ -124,7 +126,7 @@ async function cambiarModo(nuevo) {
   $('consulta').placeholder = { capturar:'UPC, ED- o nombre', buscar:'ED-, nombre o UPC', revisar:'Buscar en la cola', imprimir:'Código para filtrar' }[modo];
   $('consulta').inputMode = modo === 'buscar' ? 'search' : 'none';
   $('camara-etiqueta').hidden = modo !== 'buscar';
-  const neutros = { capturar: pc() ? 'Escanea o escribe' : 'Escanea o toma foto', buscar: NEUTRO_BUSCAR, revisar: 'Revisa tus piezas', imprimir: 'Etiquetas por imprimir' };
+  const neutros = { capturar: pc() ? 'Escanea o escribe' : fotoSinCodigo ? 'Escanea o toma foto' : 'Escanea un código', buscar: NEUTRO_BUSCAR, revisar: 'Revisa tus piezas', imprimir: 'Etiquetas por imprimir' };
   ponerNeutro(neutros[modo]);
   mensaje(navigator.onLine ? neutros[modo] : modo === 'capturar' ? sinRedCaptura() : 'Este modo necesita red', navigator.onLine ? 'neutro' : 'aviso');
   if (modo === 'buscar') { $('detalle-buscar').append($('ficha')); await buscar(); if (turno !== cambioModo) return; }

@@ -41,7 +41,7 @@ import { rutaDinero } from './dinero.ts';
 import { aplicarOverridesEnv, rutaCm } from './cm.ts';
 import { sentenciasMover, esExistenciaInsuficiente, piezasSinExistencia, fueraDeSoledad, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD, sucursales, enCaminoSql, enTiendaSql, existenciaTotalSql, folioEnCaminoSql } from './existencias.ts';
 import { rutaBultos } from './bultos.ts';
-import { rutaPiezas, buscarPiezas, escribirExistencia, autorizarPrecio } from './piezas.ts';
+import { rutaPiezas, buscarPiezas, escribirExistencia, autorizarPrecio, esGerencia, SOLO_GERENCIA_PRECIO } from './piezas.ts';
 import { rutaSolicitudesPrecio, crearSolicitud } from './solicitudes-precio.ts';
 import { UPC_VISIBLE, MISMO_UPC, claveTalla, PIEZA_UPC, CAPTURA_SUMADA, conflictoCapturaSumada, capturaSumada, sumarCaptura, conflictoUpc, corregirUpc, upcValido, type PiezaUpc } from './upc-inventario.ts';
 import { rutaCamaraRemota } from './camara-remota.ts';
@@ -552,6 +552,10 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   if (!Number.isSafeInteger(precioLista) || precioLista < 0) {
     return json({ error: 'Precio de lista invalido.' }, 400);
   }
+  // #969: el precio de lista también fija el precio (la fórmula): cambiarlo es escribir un precio.
+  if (cambios.precio_lista !== undefined && precioLista !== fila.precio_lista && !esGerencia(usuario)) {
+    return json({ error: SOLO_GERENCIA_PRECIO }, 403);
+  }
   if (!Number.isFinite(stock) || stock < (captura ? 1 : 0) || stock > 999
       || (captura && cambios.stock !== undefined && !Number.isInteger(Number(cambios.stock)))) {
     return json({ error: 'Existencia invalida.' }, 400);
@@ -586,6 +590,9 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     if (!Number.isSafeInteger(precio) || precio < 0) {
       return json({ error: 'Precio invalido.' }, 400);
     }
+    // #969: un precio escrito solo lo acepta gerencia. Los escalones de ropa sin código siguen para todos; repetir el actual no cuenta.
+    const escalonRopa = categoria === 'ropa' && !normalizarUpc(upc) && PRECIOS_ROPA.includes(precio);
+    if (!esCaducado && precio !== fila.precio && !escalonRopa && !esGerencia(usuario)) return json({ error: SOLO_GERENCIA_PRECIO }, 403);
     if (esDestinoBanda(destino, extrasBanda)) {
       // Banda: manda el precio de la banda. Etiqueta: el precio tecleado por el dueno se respeta tal cual.
       precio = ajustarManual({ precio, destino: destino as Destino, config });
@@ -751,9 +758,12 @@ async function capturarManualEscaner(request: Request, env: Env, correo: string)
   }
   if (existente && (existente.codigo || existente.estado_analisis === 'descartado')) return json({ error: 'La pieza ya tiene etiqueta o se canceló.' }, 409);
   if (upc && await fichaDeManifiesto(normalizarUpc(upc), env)) return json({ error: 'Ese código sí está en la hoja: vuelve a escanearlo.' }, 409);
+  // #969: una pieza sin registro se aparta para gerencia; solo gerencia le escribe precio (de venta o de lista).
+  const usuario = await leerUsuario(env, correo);
+  if ((cuerpo.precio !== undefined || cuerpo.precio_lista !== undefined) && !esGerencia(usuario)) return json({ error: SOLO_GERENCIA_PRECIO }, 403);
   const respuesta = await altaManual({ id: cuerpo.id, nombre: cuerpo.nombre, categoria: cuerpo.categoria,
     estado_fisico: cuerpo.estado_fisico, precio_lista: cuerpo.precio_lista, precio: cuerpo.precio,
-    stock: cuerpo.stock, destino: 'etiqueta' }, env, correo, upc, await leerUsuario(env, correo));
+    stock: cuerpo.stock, destino: 'etiqueta' }, env, correo, upc, usuario);
   // Otro reintento pudo terminarla mientras se validaban los datos; nunca repone stock.
   if (respuesta.ok && (await respuesta.clone().json() as { existente?: boolean }).existente) return respuesta;
   if (!respuesta.ok) {
@@ -1220,6 +1230,10 @@ async function revisarCaptura(id: string, request: Request, env: Env, correo: st
   }
   if (!conBanda && cambios.precio !== undefined && !fijo && cambios.precio !== fila.precio && !autorizarPrecio(usuario, { codigo: null, preciadaPorSistema: true })) {
     return json({ error: 'Solo gerencia escribe un precio fuera de los escalones de ropa.' }, 403);
+  }
+  // #969: pieza con código de barras (o sin etiqueta): un precio escrito solo lo acepta gerencia. Con etiqueta ya confirmada sigue la solicitud de precio.
+  if (conBanda && typeof cambios.precio === 'number' && cambios.precio !== fila.precio && (libre || !fila.codigo) && !esGerencia(usuario)) {
+    return json({ error: SOLO_GERENCIA_PRECIO }, 403);
   }
   const nombreEditado = cambios.nombre === undefined ? undefined : typeof cambios.nombre === 'string' ? decodificarNombre(cambios.nombre).trim().slice(0, 120) : '';
   if (nombreEditado !== undefined && !libre) return json({ error: 'El nombre solo se corrige al revisar una pieza nueva (en ropa sale de prenda y marca).' }, 400);

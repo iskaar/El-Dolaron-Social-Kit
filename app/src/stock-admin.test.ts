@@ -95,7 +95,7 @@ test('la camara reenvia el mismo id: actualiza la talla pero conserva el stock (
   assert.deepEqual({ ...fila }, { stock: 1, talla: 'L' });
 });
 
-test('con etiqueta, solo gerencia cambia el precio; sin etiqueta, el capturista lo pone (#75)', async () => {
+test('con etiqueta o sin ella, solo gerencia escribe el precio (#75, #969)', async () => {
   const t = tienda();
   t.db.prepare("insert into usuarios(correo, roles, activo, editar_inventario, creado_en, actualizado_en) values ('cap@prueba.mx', 'capturista', 1, 1, '', '')").run();
   t.env.DEV_USUARIO = 'cap@prueba.mx';
@@ -108,7 +108,14 @@ test('con etiqueta, solo gerencia cambia el precio; sin etiqueta, el capturista 
   }
   assert.equal((await t.pedir(ruta, { nombre: 'Ventilador de pie', precio: 25000 }, 'PATCH')).status, 200);
   t.db.prepare("update productos set codigo = null where id = ?").run(PRODUCTO);
-  assert.equal((await t.pedir(ruta, { precio: 5000 }, 'PATCH')).cuerpo.precio, 5000);
+  // #969: sin etiqueta tampoco: el capturista ya no pone precio ni precio de lista; repetir el actual sí pasa.
+  for (const cuerpo of [{ precio: 5000 }, { precio_lista: 99900 }]) {
+    const r = await t.pedir(ruta, cuerpo, 'PATCH');
+    assert.equal(r.status, 403, JSON.stringify(cuerpo));
+    assert.match(r.cuerpo.error, /gerencia/);
+    assert.equal(precio(), 25000);
+  }
+  assert.equal((await t.pedir(ruta, { precio: 25000 }, 'PATCH')).status, 200);
   t.db.prepare("update productos set codigo = 'ED-000001' where id = ?").run(PRODUCTO);
   t.env.DEV_USUARIO = DUENO;
   assert.equal((await t.pedir(ruta, { precio: 9000 }, 'PATCH')).cuerpo.precio, 9000);

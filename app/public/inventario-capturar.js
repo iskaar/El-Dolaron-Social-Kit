@@ -106,13 +106,15 @@ export function avisoExistente(existencia,cantidad,permiteSumar){
 
 /** Estado de captura: UUID estable al reintentar; precio y existencia confirmados solo por el servidor. */
 export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>navigator.onLine, uuid=()=>crypto.randomUUID(), permiteUpc=true, permiteSumar=true, textoSinRed='Sin red · toma foto' }) {
-  let actual=null, resultados=[], siguiente=null, ajuste=null, fila=Promise.resolve(), grado='nuevo';
+  let actual=null, resultados=[], siguiente=null, ajuste=null, fila=Promise.resolve(), grado='nuevo', guardando=null;
   function pintar(){cambiar({actual,resultados,siguiente,ajuste});}
   async function guardar(){
     if(!actual||actual.tipo!=='nueva')return;
     if(!enLinea())throw new Error(SIN_RED_GUARDAR);
     const abierta=actual;
     if(faltaCalzado(abierta))throw new Error('Falta el número del calzado');
+    guardando=abierta;   // #969: «Cerrar sin guardar» no descarta un guardado en curso
+    try{
     if(abierta.revision){
       // Pieza ya creada (UPC buscado en internet): se ajusta la existencia vista y luego «Guardar» la confirma y libera su etiqueta (#573).
       const cuerpo=cuerpoRevision(abierta),vista=abierta.ficha.stock;
@@ -126,6 +128,7 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     const guardada=await api('/api/borradores/upc',{id:abierta.id,upc:abierta.upc,stock:abierta.cantidad,estado_fisico:abierta.estado,...(abierta.talla?{talla:abierta.talla}:{}),...cambiosTarjeta(abierta)});
     actual={...abierta,tipo:'guardada',pieza:guardada,...(guardada.existente&&{deuda:abierta.id})};pintar();
     const salio=guardada.estado_analisis&&guardada.estado_analisis!=='listo'?false:await imprimir(guardada.id,abierta.cantidad,{reimprimir:!!guardada.existente,...(guardada.existente&&{deuda:abierta.id})});actual.faltaEtiqueta=!salio;pintar();return guardada;
+    }finally{guardando=null;}
   }
   async function leer(texto,mas=false){
     if(!enLinea())throw new Error(textoSinRed);
@@ -195,7 +198,9 @@ export function crearCaptura({ api, imprimir, cambiar=()=>{}, enLinea=()=>naviga
     },
     cantidad(n){if(actual&&actual.tipo==='nueva'){actual.cantidad=n;if(n===0)actual=null;pintar();}},
     estado(e){grado=e;if(actual?.pieza&&!piezaRopa(actual.pieza)&&actual.pieza.estado_fisico!==grado){actual=null;resultados=[];}else if(actual)actual.estado=piezaRopa(actual.ficha||{})?'nuevo':e;pintar();},
-    limpiar(){actual=null;resultados=[];pintar();}, actual:()=>actual };
+    limpiar(){actual=null;resultados=[];pintar();},
+    // #969: cierra la tarjeta abierta sin guardarla. Con un guardado en curso no hace nada (devuelve false): el guardado termina y su tarjeta «Guardada» queda.
+    cerrar(){if(!actual||actual===guardando)return false;actual=null;resultados=[];pintar();return true;}, actual:()=>actual };
 }
 
 /**
@@ -225,7 +230,7 @@ export function numeroCalzado({nodo,boton},actual,ficha,cambiar){
 }
 
 export async function iniciar(ctx) {
-  const {$,nodo,boton,mensaje,hoja,api,pesos,dueno,pc,foco,resultado}=ctx;
+  const {$,nodo,boton,mensaje,hoja,api,pesos,dueno,fotoSinCodigo,pc,foco,resultado}=ctx;
   const raiz=$('modo-capturar');raiz.replaceChildren();
   const columnas=nodo('div',undefined,'columnas'),entrada=nodo('div'),derecha=nodo('div');columnas.append(entrada,derecha);raiz.append(columnas);
   const tipo=nodo('div',undefined,'segmentado');tipo.setAttribute('role','group');tipo.setAttribute('aria-label','Tipo de pieza');
@@ -246,10 +251,13 @@ export async function iniciar(ctx) {
   let espejo,hoy=0;const textoHoy=()=>{pie.textContent=`Hoy: ${hoy} ${hoy===1?'pieza':'piezas'}`;};
   function elegirTipo(ropa){esRopa=ropa;localStorage.setItem('captura-modo',ropa?'ropa':'mercancia');mercancia.setAttribute('aria-pressed',String(!ropa));prenda.setAttribute('aria-pressed',String(ropa));tablero.raiz.hidden=!ropa;grado.hidden=ropa;if(ropa)tablero.sincronizar();actualizarDisparo();}
   const ayudaDisparo=nodo('span','','solo-lector');ayudaDisparo.id='ayuda-disparo';ayudaDisparo.setAttribute('role','status');disparo.after(ayudaDisparo);disparo.setAttribute('aria-describedby',ayudaDisparo.id);
-  const neutro=()=>mensaje(pc()?'Escanea o escribe':'Escanea o toma foto');
+  const neutro=()=>mensaje(pc()?'Escanea o escribe':fotoSinCodigo||esRopa?'Escanea o toma foto':'Escanea un código');
   function actualizarDisparo(){
     const actual=flujo.actual(),falta=esRopa&&!piezaSinRegistrar(actual)?tablero.faltante():'';
-    const motivo=falta||faltaCalzado(actual)||(pendienteFoto?'Espera la foto':'');bloquear(disparo,motivo);ayudaDisparo.textContent=motivo;
+    // #969: la foto de un producto sin código (Mercancía) es de gerencia; la Ropa sigue igual para todos.
+    const sinEntrada=!esRopa&&!fotoSinCodigo;disparo.hidden=sinEntrada;
+    const motivo=sinEntrada?'':falta||faltaCalzado(actual)||(pendienteFoto?'Espera la foto':'');bloquear(disparo,motivo);ayudaDisparo.textContent=motivo;
+    movil?.pintarCamara?.();
     if(!pc()){disparo.textContent=falta?falta.replace('Falta ','Elige '):'';disparo.setAttribute('aria-label',falta?disparo.textContent:'Tomar foto');}
   }
   // Modo enfocado (#461): una etiqueta pedida sin impresora conectada queda como alerta hasta que se conecte.
@@ -265,7 +273,7 @@ export async function iniciar(ctx) {
     const r=turnoImpresion.then(async()=>{if(capturaImpresa(llave))return true;const ok=await imprimir(id,n,opciones);if(ok)anotarCapturaImpresa(llave);return ok;});
     turnoImpresion=r.catch(()=>{});return r;
   }
-  const flujo=crearCaptura({api,imprimir,textoSinRed:pc()?'Sin red · espera la señal':undefined,permiteSumar:dueno||ctx.identidad.usuario?.editar_inventario===true,permiteUpc:!ctx.identidad.usuario?.roles.includes('finanzas'),cambiar:pintar});
+  const flujo=crearCaptura({api,imprimir,textoSinRed:pc()||!fotoSinCodigo?'Sin red · espera la señal':undefined,permiteSumar:dueno||ctx.identidad.usuario?.editar_inventario===true,permiteUpc:!ctx.identidad.usuario?.roles.includes('finanzas'),cambiar:pintar});
   const puedeSumar=dueno||ctx.identidad.usuario?.editar_inventario===true;   // quien puede sumar a una pieza que ya existe
   const altaUpc=!ctx.identidad.usuario?.roles.includes('finanzas');   // misma regla que permiteUpc, para «Otra talla»
   /** «Guardada» tras guardar/sumar: con el interruptor «Este aparato no imprime» (#781) no hay ✓ ni «falta etiqueta», la etiqueta sale en la PC. */
@@ -303,7 +311,7 @@ export async function iniciar(ctx) {
       const nombre=nodo('label','Nombre / descripción'),campoNombre=nodo('input'),precio=nodo('label','Precio ($)'),campoPrecio=nodo('input');
       campoNombre.value=actual.nombre??p.nombre;campoNombre.maxLength=120;campoNombre.readOnly=!(dueno||ctx.identidad.usuario?.editar_inventario===true);
       campoNombre.oninput=()=>{actual.nombre=campoNombre.value;};campoNombre.onchange=()=>espejo?.cambio();nombre.append(campoNombre);
-      campoPrecio.value=actual.precio??String((p.precios?.[actual.estado]??p.precio)/100);campoPrecio.inputMode='decimal';campoPrecio.readOnly=!dueno;
+      campoPrecio.value=actual.precio??String((p.precios?.[actual.estado]??p.precio)/100);campoPrecio.inputMode='decimal';campoPrecio.readOnly=true;   // #969: el precio de una pieza con fuente es el del sistema; nadie lo escribe aquí, tampoco gerencia
       campoPrecio.oninput=()=>{actual.precio=campoPrecio.value;};campoPrecio.onchange=()=>espejo?.cambio();precio.append(campoPrecio);tarjeta.append(nombre,precio);
       for(const campo of [campoNombre,campoPrecio])vigilarLectorEnCampo(campo,{salir:()=>{campo.blur();foco();},alLeer:codigo=>ctx.recibir(codigo,'usb').catch(e=>mensaje(e.message,'error'))});
       if(actual.otraTalla)tarjeta.append(nodo('p','Otra talla de este código: se guarda como pieza aparte','ayuda'));
@@ -327,11 +335,14 @@ export async function iniciar(ctx) {
     }else if(actual.tipo==='nueva'){
       const fila=nodo('div',undefined,'acciones');if(!piezaRopa(p))tarjeta.append(opciones(ESTADOS,actual.estado,e=>flujo.gradoNueva(e),'Grado de esta pieza'));carta.append(fila);
       botonGuardar=boton(etiqueteraLista()?'Guardar e imprimir':'Guardar',async()=>{await flujo.guardar();hoy+=actual.cantidad;textoHoy();const p=flujo.actual()?.pieza;if(p?.existente)mensaje(`Ya existía · +${p.sumadas}${p.codigo?` a ${p.codigo}`:''}${noImprime()?' · la etiqueta sale en la PC':''}`,'aviso');else avisoGuardada();foco();},'primario');
-      bloquear(botonGuardar,faltaCalzado(actual));fila.append(stepper(actual.cantidad,n=>flujo.cantidad(n),{min:0,max:999,nombre:'Piezas de este código'}),botonGuardar);
+      bloquear(botonGuardar,faltaCalzado(actual));fila.append(stepper(actual.cantidad,n=>flujo.cantidad(n),{min:0,max:999,nombre:'Piezas de este código'}),botonGuardar,boton('Cerrar sin guardar',cerrar));
       if(!actual.imagenBuscada){actual.imagenBuscada=true;void imagen(actual,foto);}
       else if(actual.imagen)pintarImagen(actual,foto);
     }else if(actual.tipo==='sin-registro'){
-      mensaje('Sin registro · toma foto','aviso');const fila=nodo('div',undefined,'acciones');fila.append(boton('Buscar en internet',()=>buscarDesconocida(actual),'buscar-internet'),boton('Tomar foto',()=>fotoNueva(actual),'primario'));carta.append(fila);
+      // #969: sin ficha no se captura: se aparta para gerencia y se sigue. Foto y búsqueda en internet son de gerencia.
+      mensaje('Sin registro · apártala para gerencia','aviso');tarjeta.append(nodo('p','Apártala para gerencia y sigue con la siguiente pieza.','ayuda'));
+      const fila=nodo('div',undefined,'acciones');if(dueno)fila.append(boton('Buscar en internet',()=>buscarDesconocida(actual),'buscar-internet'),boton('Tomar foto',()=>fotoNueva(actual),'primario'));
+      fila.append(boton('Cerrar',cerrar));carta.append(fila);
     }else if(actual.tipo==='guardada')tarjeta.append(nodo('p','✓ Guardada'));
     const k=actual.impresas||actual.cantidad||1; // lo que se acaba de sumar (existente) o guardar
     if(actual.faltaEtiqueta&&p.estado_analisis==='listo'&&(!noImprime()||!actual.deuda))tarjeta.append(boton(noImprime()?`Mandar ${k} a la PC`:`Imprimir ${k} ${k===1?'etiqueta':'etiquetas'}`,async()=>{const ok=await conDeuda(actual.deuda,()=>ctx.imprimir([p.id],new Map([[p.id,k]]),{reimprimir:true}));if(ok){actual.faltaEtiqueta=false;if(!avisoPC())mensaje('Etiqueta enviada','etiqueta');ctx.espejoCambio?.();}}));   // el otro aparato ve que ya salió
@@ -366,7 +377,14 @@ export async function iniciar(ctx) {
     try{const {pedirFoto}=await import('./camara-pc.js');$('chip-celular').textContent='● Esperando foto';const r=await pedirFoto({tipo:'foto_pieza',pieza_id:p.id,contenedor:remota});if(['lista','cancelada'].includes(r.estado))remota.replaceChildren();if(r.estado==='lista'){const d=await api(`/api/piezas/${p.id}`);flujo.elegir(d.pieza);$('chip-celular').textContent='● Celular · Listo';mensaje('Foto recibida','ok');}else mensaje(r.motivo||'No se recibió foto','aviso');}
     finally{pendienteFoto=false;$('chip-celular').textContent=textoChip();actualizarDisparo();foco();}
   }
+  /** #969: cierra la tarjeta sin guardarla y deja el lector listo para el siguiente código. */
+  function cerrar(){
+    const a=flujo.actual();
+    if(!flujo.cerrar())return mensaje('Guardando… espera un momento','aviso');
+    mensaje(a?.revision?'Cerrada · la pieza queda por revisar':'Cerrada sin guardar','aviso');foco();
+  }
   async function fotoNueva(a=null){
+    if(!esRopa&&!fotoSinCodigo)return mensaje('Apártala para gerencia','aviso');
     if(!pc())return movil.tomar(piezaSinRegistrar(a||flujo.actual()));
     if(esRopa&&!a&&!tablero.validar())return;
     if(faltaCalzado(a))throw new Error(faltaCalzado(a));
