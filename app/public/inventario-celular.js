@@ -74,7 +74,9 @@ export async function iniciarCelular(ctx,captura) {
   let avance=Date.now();
   ctx.problemas.cola=()=>{const sin=[...sesion.values()].filter(r=>!r.subida);if(!sin.length)avance=Date.now();return{sinSubir:sin.length,sinAvanceMs:Date.now()-avance,colaError:sin.some(r=>r.estado==='error'||r.estado==='sesion'),sesion:sin.some(r=>r.estado==='sesion')};};
   const subida=crearSubida({pendientes,leer,borrar,pausada:id=>revisando===id,
-    alEstado(estado,r){if(estado==='subiendo')avance=Date.now();const datos=sesion.get(r.id);if(datos)datos.estado=estado;pintar();if(estado==='sesion')mensaje('Tu sesión venció · vuelve a entrar','error');},
+    alEstado(estado,r,motivo){if(estado==='subiendo')avance=Date.now();const datos=sesion.get(r.id);if(datos)datos.estado=estado;pintar();if(estado==='sesion')mensaje('Tu sesión venció · vuelve a entrar','error');
+      // #967: el servidor rechazó la foto (4xx): se dice por qué una sola vez (se reintenta cada 20 s) y cómo salir (miniatura › Descartar).
+      else if(motivo&&datos&&datos.motivo!==motivo){datos.motivo=motivo;mensaje(`La foto no subió: ${motivo.replace(/[.\s]+$/,'')}. Tócala en la lista para descartarla.`,'error');}},
     async alSubir(r,d){if(d.existente){sesion.delete(r.id);sesion.set(d.id,{...d,subida:true,cantidad:r.cantidad,estado:d.estado_analisis==='pendiente'?'analizando':'subida'});pintar();await captura.recibirExistente(d,r.id);return;}if(d.estado_analisis==='descartado'){sesion.delete(r.id);pintar();return;}sesion.set(r.id,{...sesion.get(r.id),...r,subida:true,estado:d.estado_analisis==='pendiente'?'analizando':'subida',...d,cantidad:d.stock??r.cantidad});pintar();if(!captura.flujo.actual())void captura.espejo.pieza(d.id);void prepararRevision(d);}   // #775: la PC ve la pieza ya con foto (si aquí no hay otra tarjeta en curso)
   });
   /**
@@ -116,7 +118,7 @@ export async function iniciarCelular(ctx,captura) {
     if(p.estado_analisis==='sin-seguimiento'){mensaje(`No se pudo seguir el análisis de ${p.nombre||'la pieza'}: revísala en su miniatura.`,'aviso');return;}
     if(p.estado_analisis!=='listo'||!(p.precio>0)){
       if(dato){dato.estado='error';pintar();}
-      mensaje(`Aparte, sin etiqueta: ${p.nombre||'pieza sin nombre'}. Ponle precio en la revisión.`,'aviso');sonar('error');return;
+      mensaje(`Aparte, sin etiqueta: ${p.nombre||'pieza sin nombre'}. ${ctx.dueno||ctx.identidad.usuario?.editar_inventario===true?'Ponle precio en Revisar.':'Avisa a gerencia para que le ponga precio.'}`,'aviso');sonar('error');return;
     }
     if(dato){dato.estado='revisar';dato.por_revisar=1;pintar();}
     mensaje(`Por revisar: ${p.nombre}. Toca ✎ para ver precio, cantidad y grado, y guarda para imprimir.`,'aviso');sonar('revisar');
@@ -129,6 +131,14 @@ export async function iniciarCelular(ctx,captura) {
     else if(noImprime())mensaje(`Guardada · la etiqueta de ${nombre} ×${Math.min(99,n)} sale en la PC`,'aviso');   // #781: sin ✓ ni «falta etiqueta»
     else mensaje(`Guardada · falta etiqueta: ${razonSinEtiqueta()}`,'aviso');
     pintar();return ok;
+  }
+  /**
+   * Tras «Guardar e imprimir» (#967): con la hoja ya cerrada y nada más abierto (ni la impresión ni otra revisión), abre la siguiente pieza por revisar.
+   * Solo la dispara un guardado y la que se guardó ya no está por revisar: no se encadena sola y termina cuando no queda ninguna.
+   */
+  async function revisarSiguiente(){
+    if($('hoja').open||revisando)return;
+    const siguiente=porRevisar()[0];if(siguiente)await corregir(siguiente.id);
   }
   /**
    * Si la etiqueta de las unidades anteriores ya salió (en este teléfono, otro dispositivo o la base) y la cantidad sube, salen las que faltan (como +1).
@@ -226,7 +236,7 @@ export async function iniciarCelular(ctx,captura) {
     const guardarBoton=boton(revisar?(etiqueteraLista()?'Guardar e imprimir':'Guardar'):'Guardar cambios',async()=>{
       if(!cambiado&&!revisar)return mensaje('Sin cambios','aviso');
       let avisoPrecio='';
-      if(!navigator.onLine&&(revisar||!local||cantidad!==actual.stock))return mensaje(revisar?'Sin red: se guarda al volver la señal':'Sin red: se suma al volver la señal','aviso');
+      if(!navigator.onLine&&(revisar||!local||cantidad!==actual.stock))return mensaje('Sin red: no se guardó. Inténtalo cuando haya señal','aviso');
       if(tablero&&!tablero.validar())return;
       if(calzado&&!tallaActual)return mensaje('Falta número de calzado: elige la talla','aviso');
       const r=tablero?.valores();if(r){cambios={...cambios,prenda:r.prenda,marca:r.marca,paquete:r.paquete,precio:r.precio_ropa};tallaActual=r.talla;}
@@ -237,8 +247,11 @@ export async function iniciarCelular(ctx,captura) {
         if(tallaActual&&tallaActual!==actual.talla){await api(`/api/borradores/${id}/talla`,{talla:tallaActual},'PATCH');actual.talla=tallaActual;}
         const guardada=await api(`/api/borradores/${id}/revision`,{confirmar:true,...(cambios.estado_fisico!==actual.estado_fisico?{estado_fisico:cambios.estado_fisico}:{}),...(r?{prenda:r.prenda,marca:r.marca,paquete:r.paquete,precio:r.precio_ropa}:{}),...ed},'PATCH');
         Object.assign(datos,{cantidad,talla:tallaActual,estado_fisico:guardada.estado_fisico,nombre:guardada.nombre,precio:guardada.precio,por_revisar:0});
+        // El evento `close` corre después del que libera `revisando` (se registró al abrir la hoja): recién ahí se puede abrir otra.
+        const cerrada=$('hoja').open?new Promise(r=>$('hoja').addEventListener('close',r,{once:true})):null;
         cerrarHoja();await imprimirRevisada(id,cantidad,guardada.nombre);
         if(guardada.aviso)mensaje(guardada.aviso,'aviso');
+        await cerrada;await revisarSiguiente();
         return;
       }
       if(local){

@@ -14,6 +14,8 @@ if (!modos.length) location.replace('/sin-acceso');
 const dueno = identidad.usuario?.roles.includes('dueno');
 let modo, siguiente = null, consulta = '', generacion = 0, cambioModo = 0, apagar = null, piezaActual = null, filtroTimer, cargando = false;
 const modulos = new Map(), activos = new Map();
+// Sin red, el celular encola la foto; la PC no encola nada y solo puede esperar (#967).
+const sinRedCaptura = () => pc() ? 'Sin red · espera la señal' : 'Sin red · toma foto';
 const foco = () => { if (pc()) { $('consulta').focus({ preventScroll:true }); $('consulta').select(); } };
 const ficha = crearFicha({ mensaje, confirmar, integrada:true, antesCamara:apagarCamaras,
   alRepetida:(origen,destino,upc) => resolverRepetida(origen,destino,{...contexto,cerrar:cerrarHoja,upc,alTerminar:id=>ficha.abrir(id)}), elegirMotivo:() => new Promise(resolve => {
@@ -124,7 +126,7 @@ async function cambiarModo(nuevo) {
   $('camara-etiqueta').hidden = modo !== 'buscar';
   const neutros = { capturar: pc() ? 'Escanea o escribe' : 'Escanea o toma foto', buscar: NEUTRO_BUSCAR, revisar: 'Revisa tus piezas', imprimir: 'Etiquetas por imprimir' };
   ponerNeutro(neutros[modo]);
-  mensaje(navigator.onLine ? neutros[modo] : modo === 'capturar' ? 'Sin red · toma foto' : 'Este modo necesita red', navigator.onLine ? 'neutro' : 'aviso');
+  mensaje(navigator.onLine ? neutros[modo] : modo === 'capturar' ? sinRedCaptura() : 'Este modo necesita red', navigator.onLine ? 'neutro' : 'aviso');
   if (modo === 'buscar') { $('detalle-buscar').append($('ficha')); await buscar(); if (turno !== cambioModo) return; }
   // Las fases siguientes activan estos módulos sin cargar hardware al abrir Buscar.
   if ($( `modo-${modo}`).dataset.activo) {
@@ -238,7 +240,7 @@ document.addEventListener('keydown', (e) => {
 });
 document.addEventListener('visibilitychange', () => { if (document.hidden) void apagarCamaras(); });
 addEventListener('blur', () => { void apagarCamaras(); });
-function red() { $('chip-red').textContent = navigator.onLine ? '● Red' : '▲ Sin red'; $('chip-red').classList.toggle('aviso', !navigator.onLine);ficha.repintar(); if (!navigator.onLine) mensaje('Sin red · toma foto', 'aviso'); }
+function red() { $('chip-red').textContent = navigator.onLine ? '● Red' : '▲ Sin red'; $('chip-red').classList.toggle('aviso', !navigator.onLine);ficha.repintar(); if (!navigator.onLine) mensaje(sinRedCaptura(), 'aviso'); }
 addEventListener('online', red); addEventListener('offline', red); red();
 visualViewport?.addEventListener('resize', () => document.body.classList.toggle('teclado-abierto', visualViewport.height < innerHeight * .7));
 await cambiarModo(new URLSearchParams(location.search).has('pieza') ? 'buscar' : modos.includes(location.hash.slice(1)) ? location.hash.slice(1) : modos.includes(localStorage.getItem('inventario-modo')) ? localStorage.getItem('inventario-modo') : modos[0]);
