@@ -127,6 +127,7 @@ const PANTALLAS: Record<string, Rol[]> = {
   '/tablero': INVERSIONISTA,   // #610: solo lectura, agregados
   '/mercadolibre': DUENO,
   '/cuentas': DUENO,
+  '/cm': DUENO,
   '/conteo': TODOS,
   // Issue #287: mensajes de clientes por WhatsApp; datos personales, solo el dueño.
   '/mensajes': DUENO,
@@ -162,6 +163,7 @@ export function permiso(pathname: string, metodo: string): Regla {
   if (ruta === '/api/mensajes' || ruta === '/api/mensajes/responder') return DUENO;
   // #909: solo gerencia, explícito aunque sea el valor por omisión. #910: `finanzas` solo lee el saldo (GET /api/dinero); toda escritura es de gerencia.
   if (ruta === '/api/dinero' || ruta.startsWith('/api/dinero/')) return ruta === '/api/dinero' && metodo === 'GET' ? ['finanzas'] : DUENO;
+  if (ruta === '/api/cm' || ruta.startsWith('/api/cm/')) return DUENO;
   if (ruta === '/api/gastos' || /^\/api\/gastos\/[^/]+(\/comprobante)?$/.test(ruta)) return AUXILIAR;
   if (ruta === '/api/nomina/entrada' || ruta === '/api/nomina/checador') return CAJA;
   if (ruta === '/api/nomina' || ruta.startsWith('/api/nomina/')) return AUXILIAR;

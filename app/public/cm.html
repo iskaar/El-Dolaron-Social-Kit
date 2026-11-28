@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>El Dolarón — Centro de Mando</title>
+<style>
+  @font-face { font-family: Archivo; src: url("/fuentes/archivo-variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+  :root {
+    --azul: #16366B; --rojo: #D72B32; --amarillo: #FFD447; --verde: #1f7a4d; --ambar: #8a5a00;
+    --pagina: #f9f9f7; --superficie: #ffffff; --tinta: #1a1f2b; --suave: #5b6478;
+    --linea: #dfe3ea; --lavado: #eef1f6; --override-bg: #eef4ff; --override-bd: #b5ccf4;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--pagina); color: var(--tinta);
+    font-family: Archivo, system-ui, -apple-system, sans-serif; font-size: 14px; line-height: 1.45; padding-bottom: 84px; }
+  button, input, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--azul); outline-offset: 2px; }
+
+  header.barra { background: var(--azul); color: #fff; padding: 12px 20px; position: sticky; top: 0; z-index: 20; }
+  header.barra .dentro { max-width: 1280px; margin: 0 auto; display: flex; gap: 10px 16px; align-items: center; flex-wrap: wrap; }
+  header.barra h1 { margin: 0; font-size: 18px; font-weight: 700; flex: 1 1 200px; }
+  header.barra .buscar { flex: 1 1 220px; max-width: 320px; min-height: 38px; padding: 6px 12px;
+    border-radius: 8px; border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.14); color: #fff; }
+  header.barra .buscar::placeholder { color: rgba(255,255,255,.78); }
+  header.barra a, header.barra button.salir { color: var(--amarillo); text-decoration: none; font-size: 14px; font-weight: 600;
+    background: transparent; border: 0; cursor: pointer; padding: 6px 4px; }
+  header.barra a:hover, header.barra button.salir:hover { text-decoration: underline; }
+
+  .app { max-width: 1280px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 0 24px; align-items: start; padding: 16px 20px; }
+  .riel { position: sticky; top: 72px; display: flex; flex-direction: column; gap: 3px; }
+  .riel a { display: block; padding: 9px 12px; border-radius: 8px; text-decoration: none; color: var(--suave); font-weight: 600; font-size: 13.5px; }
+  .riel a:hover { background: var(--lavado); color: var(--tinta); }
+  .riel a.activo, .riel a[aria-current="location"] { background: var(--azul); color: #fff; }
+
+  .contenido { min-width: 0; display: grid; gap: 20px; }
+  .panel { background: var(--superficie); border: 1px solid var(--linea); border-radius: 12px; padding: 18px; scroll-margin-top: 84px; }
+  .nueva-banda { display: flex; flex-direction: column; gap: 6px; padding: 12px; margin-bottom: 14px;
+    border: 1px dashed var(--azul); border-radius: 10px; background: #f7faff; }
+  .nueva-banda label { font-size: 12.5px; font-weight: 700; color: var(--azul); }
+  .nueva-banda .fila-input { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .nueva-banda input { flex: 1 1 140px; max-width: 200px; min-height: 44px; padding: 8px 10px;
+    border: 1px solid var(--linea); border-radius: 8px; background: #fff; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .nueva-banda .ayuda { font-size: 12px; color: var(--suave); }
+  .nueva-banda .ayuda.ok { color: var(--verde); font-weight: 600; }
+  .nueva-banda .ayuda.error { color: var(--rojo); font-weight: 600; }
+  .panel h2 { margin: 0 0 4px; font-size: 17px; color: var(--azul); }
+  .panel .desc { margin: 0 0 14px; font-size: 13px; color: var(--suave); }
+  .panel h3 { margin: 18px 0 10px; font-size: 14px; color: var(--tinta); border-top: 1px solid var(--linea); padding-top: 12px; }
+  .malla { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+  .campo { display: flex; flex-direction: column; gap: 5px; padding: 10px; border: 1px solid var(--linea); border-radius: 10px; background: #fff; }
+  .campo.sucio { border-color: var(--azul); box-shadow: 0 0 0 2px rgba(22, 54, 107, .14); background: #f7faff; }
+  .campo.es-override { background: var(--override-bg); border-color: var(--override-bd); }
+  .campo label, .campo .etq { font-size: 12.5px; font-weight: 600; color: var(--tinta); }
+  .campo .ayuda { font-size: 11.5px; color: var(--suave); line-height: 1.35; }
+  .campo .fila-input { display: flex; gap: 6px; align-items: center; }
+  .campo input[type="number"], .campo input[type="text"], .campo input[type="date"], .campo input[type="datetime-local"], .campo select {
+    width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid var(--linea); border-radius: 8px;
+    background: #fff; font-size: 15px; font-variant-numeric: tabular-nums;
+  }
+  .campo input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--azul); flex: none; cursor: pointer; }
+  .check-fila { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; font-weight: 600; font-size: 14px; }
+  .tiendas-checks { display: flex; flex-wrap: wrap; gap: 8px 14px; padding: 4px 0; }
+  .tiendas-checks label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; min-height: 36px; }
+
+  .pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; width: fit-content; }
+  .pill.override { background: #dce8ff; color: var(--azul); }
+  .pill.wrangler { background: var(--lavado); color: var(--suave); }
+  .pill.vacio { background: #f3f4f6; color: #71798a; }
+  .pill.ok { background: #e6f5ed; color: var(--verde); }
+  .pill.error { background: #fdecec; color: var(--rojo); }
+
+  button.mini { min-height: 36px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--linea); background: var(--lavado);
+    font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  button.mini:hover { background: #e2e6ef; }
+  .btn-enlace { display: inline-flex; align-items: center; min-height: 38px; padding: 6px 12px; border-radius: 8px;
+    border: 1px solid var(--linea); background: var(--lavado); color: var(--azul); text-decoration: none; font-weight: 600; font-size: 13px; }
+  .btn-enlace:hover { background: #e2e6ef; }
+  .enlaces-fila { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+  details { margin-top: 14px; border: 1px solid var(--linea); border-radius: 10px; padding: 10px 12px; background: #fafbfd; }
+  summary { cursor: pointer; font-weight: 600; font-size: 13.5px; color: var(--azul); min-height: 32px; display: flex; align-items: center; }
+
+  .tabla-wrap { overflow-x: auto; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--linea); vertical-align: top; }
+  th { color: var(--suave); font-size: 12px; font-weight: 700; }
+  code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; background: var(--lavado); padding: 1px 5px; border-radius: 4px; }
+
+  .caja-estado { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border: 1px solid var(--linea); border-radius: 10px; margin-bottom: 10px; }
+  .caja-estado b { color: var(--azul); }
+
+  .barra-guardar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 30; background: #fff;
+    border-top: 2px solid var(--azul); box-shadow: 0 -4px 16px rgba(0,0,0,.1); padding: 10px 20px; }
+  .barra-guardar .dentro { max-width: 1280px; margin: 0 auto; display: flex; gap: 10px 14px; align-items: center; flex-wrap: wrap; }
+  .barra-guardar .estado-guardar { flex: 1 1 220px; font-size: 13.5px; font-weight: 600; }
+  .barra-guardar .estado-guardar.error { color: var(--rojo); }
+  .barra-guardar .estado-guardar.ok { color: var(--verde); }
+  .btn-primario { min-height: 44px; padding: 10px 18px; border: 0; border-radius: 8px; background: var(--azul); color: #fff; font-weight: 700; cursor: pointer; }
+  .btn-primario:disabled { opacity: .55; cursor: not-allowed; }
+  .btn-claro { min-height: 44px; padding: 10px 16px; border: 1px solid var(--linea); border-radius: 8px; background: var(--lavado); font-weight: 600; cursor: pointer; }
+  .aviso-toast { padding: 12px 14px; border-radius: 10px; background: #e6f5ed; color: var(--verde); font-weight: 600; border: 1px solid #b3dfc6; }
+  .aviso-toast.error { background: #fdecec; color: var(--rojo); border-color: #f3b5b7; }
+
+  @media (max-width: 860px) {
+    .app { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+    .riel { position: static; flex-direction: row; overflow-x: auto; padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--linea); }
+    .riel a { white-space: nowrap; flex: none; }
+    .malla { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header class="barra">
+  <div class="dentro">
+    <h1>El Dolarón · Centro de Mando</h1>
+    <input id="buscar" class="buscar" type="search" placeholder="Buscar variable (ej. dólar, fondo, bono, IA)…" aria-label="Buscar variable" autocomplete="off">
+    <a href="/">← Inicio</a>
+    <button id="salir" class="salir" type="button">Cerrar sesión</button>
+  </div>
+</header>
+
+<div class="app">
+  <nav class="riel" id="riel" aria-label="Secciones del Centro de Mando">
+    <a href="#precios" class="activo">Precios y Dólar</a>
+    <a href="#bandas">Bandas</a>
+    <a href="#caja">Caja y Efectivo</a>
+    <a href="#bonos">Bonos y Retos</a>
+    <a href="#mercadolibre">Mercado Libre</a>
+    <a href="#nomina">Nómina</a>
+    <a href="#ia">IA y Automatización</a>
+    <a href="#promos">Promos e Interruptores</a>
+    <a href="#etiquetera">Etiquetera</a>
+    <a href="#salud">Salud del Sistema</a>
+    <a href="#historial">Historial</a>
+  </nav>
+
+  <main class="contenido" id="contenido">
+    <div id="mensaje-global" class="aviso-toast" role="status" aria-live="polite" hidden></div>
+
+    <section class="panel" id="precios" data-seccion="precios">
+      <h2>Precios, Dólar y Meta</h2>
+      <p class="desc">Tipo de cambio para manifiesto/UPC, porcentajes sobre precio de lista y meta mensual del tablero.</p>
+      <div class="malla" id="sec-precios"></div>
+    </section>
+
+    <section class="panel" id="bandas" data-seccion="bandas">
+      <h2>Bandas de precio</h2>
+      <p class="desc">Importes en pesos MXN para etiquetas de banda compartidas entre familias.</p>
+      <form id="form-nueva-banda" class="nueva-banda" autocomplete="off">
+        <label for="nueva-banda-monto">Agregar nuevo precio de banda ($ MXN, 1–999)</label>
+        <div class="fila-input">
+          <input id="nueva-banda-monto" type="number" min="1" max="999" step="1" inputmode="numeric" placeholder="Ej. 350" required>
+          <button id="btn-agregar-banda" class="btn-primario" type="submit">Agregar banda</button>
+        </div>
+        <span id="aviso-nueva-banda" class="ayuda" role="status" aria-live="polite"></span>
+      </form>
+      <div class="malla" id="sec-bandas"></div>
+      <details id="bandas-anteriores-wrap">
+        <summary>Bandas anteriores ($19–$199, aún vigentes en piso)</summary>
+        <div class="malla" id="sec-bandas-anteriores" style="margin-top:12px"></div>
+      </details>
+      <div class="enlaces-fila"><a class="btn-enlace" href="/bandas">Administrar familias de bandas →</a></div>
+    </section>
+
+    <section class="panel" id="caja" data-seccion="caja">
+      <h2>Caja, Efectivo y Cortes</h2>
+      <p class="desc">Fondos de caja centralizado y por computadora, tope de retiro sin PIN, cupones de devolución y fecha de recolección.</p>
+      <div class="malla" id="sec-caja"></div>
+      <h3>Fondo propio por caja (vacío = usa el fondo centralizado)</h3>
+      <div id="sec-fondos-caja"></div>
+    </section>
+
+    <section class="panel" id="bonos" data-seccion="bonos">
+      <h2>Bonos por tienda y Retos</h2>
+      <p class="desc">Configuración del bono semanal por sucursal y las 9 variables de «Mis retos» (en Dolarones y días).</p>
+      <div class="malla" id="sec-bonos"></div>
+      <h3>Retos del equipo</h3>
+      <div class="malla" id="sec-retos"></div>
+    </section>
+
+    <section class="panel" id="mercadolibre" data-seccion="mercadolibre">
+      <h2>Mercado Libre</h2>
+      <p class="desc">Reglas de precio sugerido y tipo de publicación para publicaciones nuevas.</p>
+      <div class="malla" id="sec-ml"></div>
+      <div class="enlaces-fila"><a class="btn-enlace" href="/mercadolibre">Ir a Mercado Libre →</a></div>
+    </section>
+
+    <section class="panel" id="nomina" data-seccion="nomina">
+      <h2>Nómina y Checador</h2>
+      <p class="desc">Parámetros globales del checador y bono de puntualidad/asistencia (`nomina_config`).</p>
+      <div class="malla" id="sec-nomina"></div>
+      <div class="enlaces-fila"><a class="btn-enlace" href="/nomina">Ir a Nómina y empleados →</a></div>
+    </section>
+
+    <section class="panel" id="ia" data-seccion="ia">
+      <h2>IA y Automatización</h2>
+      <p class="desc">Proveedor de análisis de fotos y tareas automáticas en segundo plano (ropa IA, recortes, portadas).</p>
+      <div class="malla" id="sec-ia"></div>
+    </section>
+
+    <section class="panel" id="promos" data-seccion="promos">
+      <h2>Promociones, Conteo e Interruptores</h2>
+      <p class="desc">Overrides en vivo sobre las variables operativas de <code>wrangler.jsonc</code>. «Heredar» elimina el override y regresa al valor del despliegue.</p>
+      <div class="malla" id="sec-promos"></div>
+    </section>
+
+    <section class="panel" id="etiquetera" data-seccion="etiquetera">
+      <h2>Etiquetera</h2>
+      <p class="desc">Calibración compartida entre navegadores para la impresora de etiquetas AIYIN AE240 BT.</p>
+      <div class="malla" id="sec-etiquetera"></div>
+      <div class="enlaces-fila"><a class="btn-enlace" href="/calibrar-etiqueta">Probar e imprimir calibración →</a></div>
+    </section>
+
+    <section class="panel" id="salud" data-seccion="salud">
+      <h2>Salud del Sistema (solo lectura)</h2>
+      <p class="desc">Últimos avisos de proveedores, cuotas diarias de cron, entorno fijo y accesos a herramientas de estructura.</p>
+      <div id="sec-salud"></div>
+    </section>
+
+    <section class="panel" id="historial" data-seccion="historial">
+      <h2>Historial de cambios</h2>
+      <p class="desc">Registro de cada modificación realizada desde el Centro de Mando.</p>
+      <div id="sec-historial"></div>
+    </section>
+  </main>
+</div>
+
+<div id="barra-guardar" class="barra-guardar" hidden>
+  <div class="dentro">
+    <span id="estado-guardar" class="estado-guardar" role="status" aria-live="polite"></span>
+    <button id="btn-descartar" class="btn-claro" type="button">Descartar</button>
+    <button id="btn-guardar" class="btn-primario" type="button">Guardar cambios</button>
+  </div>
+</div>
+
+<script type="module" src="/cm.js"></script>
+</body>
+</html>

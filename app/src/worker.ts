@@ -13,7 +13,7 @@ import { ESTADOS } from '../public/estados.js';
 import { guardarImagenComoFoto, imagenGuardada, procesarRellenoImagenes, procesarRellenoUpcitemdb, rutaImagenUpc, rutaImagenPieza } from './imagenes-upc.ts';
 import { PRENDAS_ROPA, PRECIOS_ROPA, nombreRopa, partesDeNombre, paqueteValido } from '../public/ropa.js';
 import { procesarColaRopa, rutaRopaAdmin } from './ropa-ia.ts';
-import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, type Destino } from './precio.ts';
+import { calcularPrecio, ajustarManual, esDestinoBanda, prefijoParaFamilia, MONTOS_BANDA, montosBandaActivos, parsearMontosExtra, type Destino } from './precio.ts';
 import { efectivoAlcanza, mixtoValido, promoInauguracion, CLAVE_DESDE, claveRastreoDe, precioBuenFin, ENVIO_ID, huellaTicket, LIBRE_ID, LIBRE_PRECIO_MIN, LIBRE_PRECIO_MAX, descripcionLibre } from '../public/venta.js';
 import { semanaIngreso } from '../public/semana.js';
 import { detalleVenta, cancelarPieza, devolverEnCupon, reimprimirCupon, retirarSolicitud, listarSolicitudes } from './devoluciones.ts';
@@ -38,6 +38,7 @@ import { registrarSocio, buscarSocio, buscarPorCodigo, basesListas, sentenciasDe
 import { registrarCorte, registrarRetiro, rutaTerminal, ultimoCorte, cajaDe, CajaAjena, CLAVE_TOPE_RETIRO, MIXTO_EFECTIVO, MIXTO_TARJETA } from './corte.ts';
 import { rutaGastos } from './gastos.ts';
 import { rutaDinero } from './dinero.ts';
+import { aplicarOverridesEnv, rutaCm } from './cm.ts';
 import { sentenciasMover, esExistenciaInsuficiente, piezasSinExistencia, fueraDeSoledad, tieneUnidadesFuera, MENSAJE_FUERA_DE_SOLEDAD, sucursales, enCaminoSql, enTiendaSql, existenciaTotalSql, folioEnCaminoSql } from './existencias.ts';
 import { rutaBultos } from './bultos.ts';
 import { rutaPiezas, buscarPiezas, escribirExistencia, autorizarPrecio } from './piezas.ts';
@@ -493,9 +494,9 @@ async function listarBorradores(url: URL, env: Env, propietario: string): Promis
 const CATEGORIAS = new Set(CLAVES_CATEGORIA);
 
 /** Etiqueta individual, o una banda de una familia del propietario de la pieza que existe en la tabla `familias`. */
-async function destinoValido(destino: string, env: Env, propietario: string): Promise<boolean> {
+async function destinoValido(destino: string, env: Env, propietario: string, extras: readonly number[] = []): Promise<boolean> {
   if (destino === 'etiqueta') return true;
-  if (!esDestinoBanda(destino)) return false;
+  if (!esDestinoBanda(destino, extras)) return false;
   const prefijo = /^banda_([a-z]+)/.exec(destino)![1];
   // Solo una familia del mismo propietario que la pieza (#694): FEP no usa las bandas de la tienda ni al reves.
   return (await env.DB.prepare('select 1 from familias where prefijo = ? and propietario = ?').bind(prefijo, propietario).first()) !== null;
@@ -563,6 +564,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   if (aparte && (typeof esperado !== 'number' || esperado !== fila.stock)) return stockVencido(fila.stock);
 
   const config = await leerConfig(env);
+  const extrasBanda = parsearMontosExtra(config.bandas_extra);
   let precio: number;
   let destino: string;
 
@@ -575,7 +577,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   if (cambios.precio === undefined) {
     const calculado = calcularPrecio({ precioLista, categoria, estadoFisico, config });
     destino = cambios.destino === undefined ? calculado.destino : String(cambios.destino);
-    precio = porGrado && (precioLista <= 0 || esDestinoBanda(destino)) ? fila.precio : calculado.precio;
+    precio = porGrado && (precioLista <= 0 || esDestinoBanda(destino, extrasBanda)) ? fila.precio : calculado.precio;
     // #479: quien no autoriza el precio de una pieza con etiqueta guarda el grado y pide el precio nuevo al dueño.
     if (porGrado && !esCaducado && precio !== fila.precio && !autorizarPrecio(usuario, fila)) { precioPedido = precio; precio = fila.precio; }
   } else {
@@ -584,7 +586,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
     if (!Number.isSafeInteger(precio) || precio < 0) {
       return json({ error: 'Precio invalido.' }, 400);
     }
-    if (esDestinoBanda(destino)) {
+    if (esDestinoBanda(destino, extrasBanda)) {
       // Banda: manda el precio de la banda. Etiqueta: el precio tecleado por el dueno se respeta tal cual.
       precio = ajustarManual({ precio, destino: destino as Destino, config });
     }
@@ -596,7 +598,7 @@ async function corregirBorrador(id: string, cambios: Record<string, unknown>, en
   }
 
   if (esCaducado) precio = 0;
-  if (!await destinoValido(destino, env, fila.propietario)) {
+  if (!await destinoValido(destino, env, fila.propietario, extrasBanda)) {
     return json({ error: 'Destino invalido.' }, 400);
   }
   // Guardar deja la pieza `listo`: una etiqueta sin nombre o sin precio bloquearia la cola de impresion (#335).
@@ -1716,10 +1718,13 @@ async function guardarCalibracion(request: Request, env: Env): Promise<Response>
  */
 async function listarFamilias(env: Env, propietario: string, todas: boolean): Promise<Response> {
   const verTodas = todas && propietario !== 'fep';
-  const { results } = await env.DB.prepare(
-    `select clave, nombre, prefijo, propietario from familias ${verTodas ? '' : 'where propietario = ?'} order by rowid`,
-  ).bind(...(verTodas ? [] : [propietario])).all();
-  return json({ montos: MONTOS_BANDA, familias: results });
+  const [{ results }, filaExtra] = await Promise.all([
+    env.DB.prepare(
+      `select clave, nombre, prefijo, propietario from familias ${verTodas ? '' : 'where propietario = ?'} order by rowid`,
+    ).bind(...(verTodas ? [] : [propietario])).all(),
+    env.DB.prepare(`select valor from config where clave = 'bandas_extra'`).first<{ valor: string }>(),
+  ]);
+  return json({ montos: montosBandaActivos({ bandas_extra: filaExtra?.valor }), familias: results });
 }
 
 /**
@@ -1755,7 +1760,7 @@ async function crearFamilia(request: Request, env: Env, propietario: string): Pr
   await env.DB.batch([
     env.DB.prepare('insert into familias (clave, nombre, prefijo, creado_en, propietario) values (?, ?, ?, ?, ?)')
       .bind(clave, nombre, prefijo, ahora, propietario),
-    ...MONTOS_BANDA.map((monto) => env.DB.prepare(
+    ...montosBandaActivos(config).map((monto) => env.DB.prepare(
       `insert into productos (id, codigo, nombre, categoria, precio_lista, precio, estado_fisico,
                               estado_analisis, destino, stock, sin_inventario, semana_ingreso,
                               foto_key, creado_en, actualizado_en, propietario)
@@ -2684,7 +2689,7 @@ async function rutaPortalPublico(request: Request, env: Env, url: URL, ctx: Exec
   if (publico) return publico;
   if (!pathname.startsWith('/api/portal/') || pathname === '/api/portal/llegada')
     return json({ error: 'Ruta no encontrada.' }, 404);
-  try { return await portal(request, env, url, ctx); }
+  try { return await portal(request, await aplicarOverridesEnv(env), url, ctx); }
   catch { return json({ error: 'Servicio no disponible.' }, 503); }
 }
 
@@ -2692,6 +2697,7 @@ export default {
   async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
+    const envBase = env;
     // Los textos aprobados viven en legal.ts: una variable de Cloudflare no pasa
     // de 5 KB. Siguen cerrados hasta que exista BASES_APROBADAS_VERSION.
     env.PORTAL_BASES_TEXTO ||= BASES;
@@ -2727,7 +2733,7 @@ export default {
 
       // Issue #296: el Worker de WhatsApp consulta la tienda por service binding, sin Access, con token.
       // Va antes de quienEs; cualquier otra ruta /api/asistente/* responde 404 dentro de rutaAsistente.
-      if (pathname.startsWith('/api/asistente/')) return await rutaAsistente(request, env, url);
+      if (pathname.startsWith('/api/asistente/')) return await rutaAsistente(request, await aplicarOverridesEnv(env), url);
 
       // #603: la PC de la caja verifica transferencias con Banxico. Entra solo con su service token de Access
       // (cep.ts lo verifica); va antes de quienEs porque ese token no trae correo de persona.
@@ -2770,6 +2776,11 @@ export default {
         if (tienda !== TIENDA_CENTRAL && request.method !== 'GET' && CAPTURA_SOLEDAD.test(pathname)) {
           return json({ error: 'Una cuenta de sucursal no captura ni ajusta la existencia de Soledad: la mercancía se captura y etiqueta allá.' }, 403);
         }
+      }
+
+      // Solo las rutas que leen overrides de env (analisis, conteo, promos, vales, socios, ML y /cm) pagan la consulta a D1.
+      if (/^\/api\/(?:borradores|ml|conteo|vales|ventas|socios|portal\/llegada|cm)(?:\/|$)/.test(pathname)) {
+        env = await aplicarOverridesEnv(env);
       }
 
       if (/^\/pieza(?:\.html)?\/?$/.test(pathname) && request.method === 'GET') {
@@ -2902,6 +2913,10 @@ export default {
         if (respuestaML) return respuestaML;
       }
 
+      if (pathname === '/api/cm' || pathname.startsWith('/api/cm/')) {
+        return await rutaCm(request, env, envBase, url, correo, usuario);
+      }
+
       if (pathname === '/api/config') {
         if (request.method === 'PUT') {
           return await guardarConfig(request, env);
@@ -2911,7 +2926,7 @@ export default {
         // Lo mismo la linea de ventas de cada tienda y los valores del bono (#930): con ellas y el porcentaje de /retos se despejaria la venta de la tienda.
         if (!usuario?.roles.includes('dueno')) {
           delete config[CLAVE_TOPE_RETIRO];
-          for (const clave of Object.keys(config)) if (/^bono_(tienda|d)_/.test(clave)) delete config[clave];
+          for (const clave of Object.keys(config)) if (/^(?:bono_(?:tienda|d)_|env_)/.test(clave)) delete config[clave];
         }
         return json(config);
       }
@@ -3249,6 +3264,7 @@ export default {
   // conciliacion de existencias. Sin cuenta conectada no hace nada.
   /** Búsquedas por código (#406): en paralelo, cada una con su reintento. */
   async queue(lote, env): Promise<void> {
+    env = await aplicarOverridesEnv(env);
     await Promise.all(lote.messages.map(async (mensaje) => {
       try {
         await identificarPieza(mensaje.body.id, mensaje.body.upc, env, mensaje.attempts >= 2);
@@ -3260,6 +3276,7 @@ export default {
   },
 
   async scheduled(evento, env, ctx): Promise<void> {
+    env = await aplicarOverridesEnv(env);
     ctx.waitUntil(sincronizar(env));
     // Apartados cuyo plazo llego: vuelven a la venta (Issue #269). Aparte, para que uno no frene al otro.
     ctx.waitUntil(vencerPedidos(env));
