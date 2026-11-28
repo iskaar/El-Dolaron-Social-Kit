@@ -61,6 +61,7 @@
   <a href="/pieza">Buscar pieza →</a>
   <a href="/captura">Ir a capturar →</a>
   <a href="/bandas">Imprimir bandas →</a>
+  <a class="solo-dueno" href="/cm">Centro de mando →</a>
   <a href="#" id="salir">Cerrar sesión</a>
   <a href="/conteo">Conteo de alto valor →</a>
   <span id="resumen"></span>
@@ -76,6 +77,7 @@
       <button id="guardar-config" type="button">Guardar configuración</button>
       <span class="aviso" id="aviso-config"></span>
     </div>
+    <p class="aviso solo-dueno" style="color:#5b6478;margin-top:8px">Fondos de caja, bonos, retos, IA y promociones se administran en <a href="/cm">Centro de mando →</a></p>
   </section>
 
   <!-- Issue #220: piezas en existencia que no pueden salir en eldolaron.com. Solo el dueno. -->
@@ -182,13 +184,12 @@ const CLAVES_CONFIG = [
   // Grado C (#371): % del precio de lista, sin sumar el de categoría. 20 = hasta 80 % de descuento.
   ['pct_liquidacion', 'Liquidación (C) % del precio de lista'],
   ...MONTOS_BANDA.map((p) => [`banda_${p}`, `Banda $${p}`]),
-  ['fondo_caja', 'Fondo por caja $'],
   // Tablero de inversionistas (#610): meta de ventas del mes, en pesos; 0 = sin meta (se oculta la barra).
   ['meta_ventas_mes', 'Meta de ventas del mes $ (tablero)'],
   // Captura por UPC (Issue #365): precio de Target en dólares x esto = precio de lista.
   ['tipo_cambio', 'Tipo de cambio (centavos por dólar, 1850 = $18.50)'],
 ];
-const EN_PESOS = new Set([...MONTOS_BANDA.map((p) => `banda_${p}`), 'fondo_caja', 'meta_ventas_mes']);
+const EN_PESOS = new Set([...MONTOS_BANDA.map((p) => `banda_${p}`), 'meta_ventas_mes']);
 
 const cola = document.getElementById('cola');
 let puedeEditarInventario = true;   // se decide con /api/yo antes de pintar la cola

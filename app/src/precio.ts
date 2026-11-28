@@ -22,12 +22,33 @@ export type Destino = 'etiqueta' | `banda_${string}`;
 
 const BANDA = /^banda_([a-z]{1,2})(\d+)$/;
 
+/** Parsea montos de banda agregados dinámicamente en `config.bandas_extra` (enteros 1..999). */
+export function parsearMontosExtra(valor: string | null | undefined): number[] {
+  if (!valor) return [];
+  const salida = new Set<number>();
+  for (const parte of String(valor).split(',')) {
+    const t = parte.trim();
+    if (!/^\d+$/.test(t)) continue;
+    const n = Number(t);
+    if (Number.isInteger(n) && n >= 1 && n <= 999) salida.add(n);
+  }
+  return [...salida].sort((a, b) => a - b);
+}
+
+/** Montos de banda activos: los 13 fijos más los agregados en `config.bandas_extra`, ordenados. */
+export function montosBandaActivos(config?: Record<string, string | null | undefined> | Map<string, string>): number[] {
+  const crudo = config instanceof Map ? config.get('bandas_extra') : config?.bandas_extra;
+  return [...new Set([...MONTOS_BANDA, ...parsearMontosExtra(crudo)])].sort((a, b) => a - b);
+}
+
 /** Un destino de banda bien formado (p.ej. `banda_ju49`). Que la familia exista lo dice la tabla `familias`. */
-export function esDestinoBanda(destino: string): boolean {
+export function esDestinoBanda(destino: string, extras: readonly number[] = []): boolean {
   const m = BANDA.exec(destino);
   if (m === null) return false;
   const monto = Number(m[2]);
-  return (MONTOS_BANDA as readonly number[]).includes(monto) || (MONTOS_BANDA_ANTERIORES as readonly number[]).includes(monto);
+  return (MONTOS_BANDA as readonly number[]).includes(monto)
+    || (MONTOS_BANDA_ANTERIORES as readonly number[]).includes(monto)
+    || extras.includes(monto);
 }
 
 /** El codigo de barras impreso (p.ej. "JU79") a partir del destino de banda. */
