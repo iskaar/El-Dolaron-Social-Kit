@@ -17,7 +17,11 @@ deja a la caja sin poder registrar ventas el resto del dia. Por eso cada corrida
 a lo mas MAXIMO UPC (30 mil = ~60 mil escrituras); la siguiente corrida, al otro dia,
 sigue donde se quedo. Con Workers Paid (50 M al mes) pasar --maximo 100000.
 Si cambia la descripcion de un UPC, su nombre traducido se borra y se vuelve a
-traducir la siguiente vez que alguien lo escanee. Requiere la migracion 044.
+traducir la siguiente vez que alguien lo escanee. Requiere las migraciones 044 y 093.
+
+La hoja manda (Issue #965): un UPC que el escaner consulto en UPCitemdb queda en la tabla con
+origen 'upcitemdb'; si despues aparece en la hoja, esta corrida lo reemplaza y lo marca 'hoja'
+aunque los demas campos coincidan. Nunca borra un renglon ni baja uno de la hoja a otro origen.
 """
 
 from __future__ import annotations
@@ -155,8 +159,10 @@ CAMPOS = ("descripcion", "precio_usd", "departamento", "tcin")
 
 
 def diferencia(nuevos: dict[str, dict], actuales: dict[str, dict]) -> list[dict]:
+    # Un renglon que no es 'hoja' (lo consulto el escaner, #965) se reemplaza aunque sus campos coincidan.
     return [r for upc, r in nuevos.items()
-            if upc not in actuales or any(str(actuales[upc][c]) != str(r[c]) for c in CAMPOS)]
+            if upc not in actuales or actuales[upc].get("origen", "hoja") != "hoja"
+            or any(str(actuales[upc][c]) != str(r[c]) for c in CAMPOS)]
 
 
 def texto(valor: str) -> str:
@@ -177,7 +183,8 @@ def sql(cambios: list[dict], ahora: str) -> str:
             "  marca = case when manifiesto.descripcion = excluded.descripcion then manifiesto.marca else '' end,\n"
             "  categoria = case when manifiesto.descripcion = excluded.descripcion then manifiesto.categoria else '' end,\n"
             "  descripcion = excluded.descripcion, departamento = excluded.departamento,\n"
-            "  precio_usd = excluded.precio_usd, tcin = excluded.tcin, actualizado_en = excluded.actualizado_en;\n")
+            "  precio_usd = excluded.precio_usd, tcin = excluded.tcin, origen = 'hoja',\n"
+            "  actualizado_en = excluded.actualizado_en;\n")
     return "".join(sentencias)
 
 
@@ -206,7 +213,7 @@ def main(destino: str, maximo: int = MAXIMO, solo_contar: bool = False, archivo:
         todos += filas
     nuevos = un_renglon_por_upc(todos)
     salida = wrangler("d1", "execute", base, *banderas, "--json", "--command",
-                      "select upc, descripcion, precio_usd, departamento, tcin from manifiesto")
+                      "select upc, descripcion, precio_usd, departamento, tcin, origen from manifiesto")
     actuales = {r["upc"]: r for r in json.loads(salida)[0]["results"]}
     cambios = diferencia(nuevos, actuales)
     print(f"{len(camiones)} camiones, {len(todos)} renglones, {len(nuevos)} UPC; "
@@ -258,6 +265,13 @@ def prueba() -> None:
     assert diferencia(elegidos, actuales) == []               # segunda corrida: nada que escribir
     actuales["123456789012"]["precio_usd"] = 1
     assert [c["upc"] for c in diferencia(elegidos, actuales)] == ["123456789012"]
+    # #965: la hoja manda. Un renglon consultado por el escaner se reemplaza y queda 'hoja', aunque los campos coincidan.
+    actuales["191907910414"]["origen"] = "upcitemdb"
+    assert sorted(c["upc"] for c in diferencia(elegidos, actuales)) == ["123456789012", "191907910414"]
+    actuales["191907910414"]["origen"] = "hoja"
+    assert [c["upc"] for c in diferencia(elegidos, actuales)] == ["123456789012"]   # ya es de la hoja: nada que reescribir
+    consulta = sql([elegidos["191907910414"]], "t")
+    assert "origen = 'hoja'" in consulta and "delete" not in consulta.lower()
     assert numero("1.91907910414E+11") == "191907910414" and numero("4.99") == "4.99"
     assert columna("A7") == 0 and columna("J12") == 9 and columna("AA1") == 26
     assert "'O''Neill'" in sql([{"upc": "1", "descripcion": "O'Neill", "departamento": "", "precio_usd": 1, "tcin": ""}], "t")

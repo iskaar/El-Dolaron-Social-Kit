@@ -243,6 +243,9 @@ test('GET /api/piezas/resolver (#491): FEP solo ve lo suyo y no recibe fichas; s
   const pieza=(id:string,codigo:string,upc:string,propietario:string)=>t.db.prepare(`insert into productos(id,codigo,nombre,upc,stock,estado_analisis,semana_ingreso,propietario,creado_en,actualizado_en)
     values(?,?,?,?,1,'listo','S43',?,'','')`).run(id,codigo,id,upc,propietario);
   pieza('dolaron-1','ED-000801','900000000001','dolaron');pieza('fep-1','ED-000802','900000000002','fep');
+  // #965: un UPC desconocido para la tienda se consulta en UPCitemdb (aquí sin respuesta); FEP nunca consulta.
+  const consultas:string[]=[];
+  t0.mock.method(globalThis,'fetch',async(u:string)=>{consultas.push(String(u));return new Response('{}',{status:503});});
   const resolver=async(correo:string,q:string)=>{t.env.DEV_USUARIO=correo;return t.pedir('/api/piezas/resolver?q='+q);};
   const ids=(r:any)=>r.cuerpo.piezas?.map((x:any)=>x.id);
   assert.deepEqual(ids(await resolver('cap@prueba.mx','900000000001')),['dolaron-1']);
@@ -254,6 +257,7 @@ test('GET /api/piezas/resolver (#491): FEP solo ve lo suyo y no recibe fichas; s
   const ficha=await resolver('fep@prueba.mx','191907910414');
   assert.equal(ficha.status,404,'FEP no tiene manifiesto');assert.equal(ficha.cuerpo.ficha,undefined);
   assert.equal((await resolver('cap@prueba.mx','191907910414')).status,200,'la tienda sí');
+  assert.equal(consultas.filter(u=>u.includes('upcitemdb')).length,1,'solo la tienda consultó, y solo el UPC fuera de la hoja');
   assert.equal((await resolver('caja@prueba.mx','900000000001')).status,403,'cajero');
   assert.equal((await resolver('baja@prueba.mx','900000000001')).status,403,'cuenta inactiva');
   assert.equal((await resolver('nadie@prueba.mx','900000000001')).status,403,'sin cuenta');

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tienda, DUENO, PRODUCTO } from './prueba-d1.ts';
 import worker, { permitidaParaVendedor } from './worker.ts';
-import { reiniciarPausaTarget, pausarUpcitemdbPor } from './imagenes-upc.ts';
+import { reiniciarPausaTarget, pausarUpcitemdbPor, precioListaUsd, PRESUPUESTOS_UPCITEMDB } from './imagenes-upc.ts';
 import { codigoLeido, normalizarUpc } from '../public/upc.js';
 import { procesarRecortes } from './recortes.ts';
 import { procesarColaRopa } from './ropa-ia.ts';
@@ -655,16 +655,17 @@ test('#718 cron: hasta 5 UPC por corrida, con stock primero; un 429 detiene la c
 test('#718 cron: con el presupuesto del día agotado no consulta; el contador de ayer se borra', async (t) => {
   const { db, env, ctx, esperar } = preparar();
   pieza(db, '800000000001');
-  db.prepare("insert into config (clave, valor) values (?, '80'), ('upcitemdb_consultas_2000-01-01', '33')").run(`upcitemdb_consultas_${hoy()}`);
+  const tope = PRESUPUESTOS_UPCITEMDB.relleno;   // #965: el cron se detiene antes que el escaneo
+  db.prepare("insert into config (clave, valor) values (?, ?), ('upcitemdb_consultas_2000-01-01', '33')").run(`upcitemdb_consultas_${hoy()}`, String(tope));
   const { consultas } = simular(t, () => respuestaUpcitemdb([]));
   await worker.scheduled!({} as never, env, ctx as never); await esperar();
   assert.equal(consultas.length, 0);
-  // Con 79 usadas queda exactamente una: la consulta gasta la última y borra los días anteriores.
-  db.prepare('update config set valor = ? where clave = ?').run('79', `upcitemdb_consultas_${hoy()}`);
+  // Con una menos que el tope queda exactamente una: la consulta gasta la última y borra los días anteriores.
+  db.prepare('update config set valor = ? where clave = ?').run(String(tope - 1), `upcitemdb_consultas_${hoy()}`);
   pieza(db, '800000000002');
   await worker.scheduled!({} as never, env, ctx as never); await esperar();
   assert.equal(consultas.length, 1);
-  assert.equal(db.prepare('select valor from config where clave=?').get(`upcitemdb_consultas_${hoy()}`)!.valor, '80');
+  assert.equal(db.prepare('select valor from config where clave=?').get(`upcitemdb_consultas_${hoy()}`)!.valor, String(tope));
   assert.equal(db.prepare("select count(*) n from config where clave = 'upcitemdb_consultas_2000-01-01'").get()!.n, 0);
 });
 
@@ -703,7 +704,7 @@ test('#718 escaneo: UPCitemdb sin imagen scene7, con otro UPC, con 429 o sin pre
     t.mock.restoreAll();
   }
   assert.equal(db.prepare('select count(*) n from imagenes_upc').get()!.n, 0);
-  db.prepare("insert or replace into config (clave, valor) values (?, '80')").run(`upcitemdb_consultas_${hoy()}`);
+  db.prepare("insert or replace into config (clave, valor) values (?, ?)").run(`upcitemdb_consultas_${hoy()}`, String(PRESUPUESTOS_UPCITEMDB.escaneo));
   reiniciarPausaTarget();
   const { consultas } = simular(t, () => respuestaUpcitemdb([item(UPC, [SCENE7])]));
   assert.equal((await pedir(RUTA, {})).status, 503);
@@ -716,4 +717,133 @@ test('#718 escaneo: Target sin página (404) también prueba UPCitemdb y sigue p
   const r = await pedir(RUTA, {});
   assert.equal(r.status, 422);
   assert.match(r.cuerpo.error, /ya no tiene/);
+});
+
+// ---- #965: UPC fuera del manifiesto, consultado en UPCitemdb al escanear ----
+const NUEVO = '770000000017';
+const ofertaTarget = (extra: Record<string, unknown> = {}) => ({ merchant: 'Target', price: 12.5, list_price: 20, ...extra });
+const itemNuevo = (extra: Record<string, unknown> = {}) =>
+  item(NUEVO, [AJENA, SCENE7], { title: 'Wild Fable Women Tee', brand: 'Wild Fable', model: '88001122', offers: [ofertaTarget()], ...extra });
+const resolver = (pedir: ReturnType<typeof preparar>['pedir'], upc = NUEVO) => pedir(`/api/piezas/resolver?q=${upc}`, undefined, 'GET');
+const usadas = (db: ReturnType<typeof preparar>['db']) => db.prepare('select valor from config where clave=?').get(`upcitemdb_consultas_${hoy()}`)?.valor;
+const filasNuevas = (db: ReturnType<typeof preparar>['db']) => db.prepare('select count(*) n from manifiesto where upc=?').get(NUEVO)!.n;
+
+test('#965: UPC fuera del manifiesto que UPCitemdb conoce da la tarjeta de manifiesto con precio e imagen, y se guarda sin foto a mano', async (t) => {
+  const { db, pedir, esperar } = preparar();
+  const { consultas } = simular(t, () => respuestaUpcitemdb([itemNuevo()]));
+  const r = await resolver(pedir);
+  assert.equal(r.status, 200);
+  const ficha = r.cuerpo.ficha;
+  // Precio de lista = `price` de la oferta de Target ($12.50), no `list_price`; $12.50 x 18.50 = $231.25.
+  assert.equal(ficha.precio_usd, 1250);
+  assert.equal(ficha.precio_lista, 23125);
+  assert.equal(ficha.imagen.url, SCENE7);
+  assert.equal(ficha.imagen.confirmada, true);
+  assert.equal(ficha.imagen.codigo_verificado, true);
+  assert.equal(ficha.enlace, 'https://www.target.com/p/-/A-88001122');
+  assert.ok(ficha.nombre);
+  assert.equal(ficha.precio, ficha.precios.nuevo);
+  const fila = db.prepare('select origen, tcin, precio_usd from manifiesto where upc=?').get(NUEVO)!;
+  assert.deepEqual({ ...fila }, { origen: 'upcitemdb', tcin: '88001122', precio_usd: 1250 });
+  assert.equal(usadas(db), '1');
+  // Escanearlo otra vez sale por la ruta de manifiesto: ni consulta externa ni gasto.
+  assert.equal((await resolver(pedir)).status, 200);
+  assert.deepEqual(consultas, [NUEVO]);
+  // Guardar: pieza lista con el precio de lista del manifiesto, la imagen oficial como foto y sin otra consulta a UPCitemdb.
+  const id = crypto.randomUUID();
+  const g = await pedir('/api/borradores/upc', { id, upc: NUEVO, stock: 2, estado_fisico: 'nuevo' });
+  assert.equal(g.status, 201);
+  await esperar();
+  const p = db.prepare('select precio_lista, estado_analisis, stock, foto_key, codigo from productos where id=?').get(id)!;
+  assert.equal(p.precio_lista, 23125);
+  assert.equal(p.estado_analisis, 'listo');
+  assert.equal(p.stock, 2);
+  assert.equal(p.foto_key, `fotos/${id}.jpg`);
+  assert.match(String(p.codigo), /^ED-/);
+  assert.deepEqual(consultas, [NUEVO]);
+});
+
+test('#965: sin resultado, otro UPC, sin imagen scene7 o sin oferta de Target conserva el flujo de hoy y deja la marca de 30 días', async (t) => {
+  const casos: Array<[string, () => Response]> = [
+    ['sin resultado', () => respuestaUpcitemdb([])],
+    ['otro UPC', () => respuestaUpcitemdb([item('999999999999', [SCENE7], { offers: [ofertaTarget()] })])],
+    ['sin imagen scene7', () => respuestaUpcitemdb([itemNuevo({ images: [AJENA] })])],
+    ['sin ofertas', () => respuestaUpcitemdb([itemNuevo({ offers: [] })])],
+    ['oferta de otra tienda', () => respuestaUpcitemdb([itemNuevo({ offers: [{ merchant: 'Walmart', price: 9 }] })])],
+    ['oferta de Target sin precio', () => respuestaUpcitemdb([itemNuevo({ offers: [ofertaTarget({ price: 0 })] })])],
+  ];
+  for (const [caso, respuesta] of casos) {
+    const { db, pedir } = preparar();
+    const { consultas } = simular(t, respuesta);
+    const r = await resolver(pedir);
+    assert.equal(r.status, 404, caso);
+    assert.equal(filasNuevas(db), 0, caso);
+    assert.equal(db.prepare('select count(*) n from imagenes_upc').get()!.n, 0, caso);
+    assert.equal(db.prepare('select count(*) n from config where clave = ?').get(`upcitemdb_sin_${NUEVO}`)!.n, 1, caso);
+    // La marca se respeta: el siguiente escaneo no consulta ni gasta.
+    assert.equal((await resolver(pedir)).status, 404, caso);
+    assert.equal(consultas.length, 1, caso);
+    assert.equal(usadas(db), '1', caso);
+    t.mock.restoreAll();
+  }
+});
+
+test('#965: 429, error HTTP o sin presupuesto no crean renglón, no gastan consulta y el escaneo conserva el flujo de hoy', async (t) => {
+  const { db, pedir } = preparar();
+  for (const status of [429, 500]) {
+    const { consultas } = simular(t, () => new Response('{"code":"TOO_FAST"}', { status }));
+    assert.equal((await resolver(pedir)).status, 404);
+    assert.equal(consultas.length, 1);
+    assert.equal(usadas(db), '0', `un ${status} no gasta consulta`);
+    assert.equal(db.prepare('select count(*) n from config where clave = ?').get(`upcitemdb_sin_${NUEVO}`)!.n, 0, 'y no marca el UPC');
+    t.mock.restoreAll();
+  }
+  assert.equal(filasNuevas(db), 0);
+  // El tope del escaneo es mayor que el del cron: con el del cron gastado el escaneo aún consulta; con el suyo, no.
+  assert.ok(PRESUPUESTOS_UPCITEMDB.relleno < PRESUPUESTOS_UPCITEMDB.escaneo);
+  db.prepare('update config set valor = ? where clave = ?').run(String(PRESUPUESTOS_UPCITEMDB.relleno), `upcitemdb_consultas_${hoy()}`);
+  const { consultas } = simular(t, () => respuestaUpcitemdb([itemNuevo()]));
+  assert.equal((await resolver(pedir)).status, 200);
+  assert.equal(consultas.length, 1);
+  t.mock.restoreAll();
+  db.prepare('update config set valor = ? where clave = ?').run(String(PRESUPUESTOS_UPCITEMDB.escaneo), `upcitemdb_consultas_${hoy()}`);
+  const otro = simular(t, () => respuestaUpcitemdb([itemNuevo()]));
+  assert.equal((await resolver(pedir, '770000000024')).status, 404);
+  assert.equal(otro.consultas.length, 0);
+});
+
+test('#965: un tiempo agotado o un fallo de red no rompen el escaneo', async (t) => {
+  const { db, pedir } = preparar();
+  t.mock.method(globalThis, 'fetch', async (_url: string, opciones: RequestInit) => {
+    assert.ok(opciones.signal, 'la consulta del escaneo lleva su propio plazo');
+    throw new DOMException('timeout', 'TimeoutError');
+  });
+  t.mock.method(console, 'error', () => {});
+  assert.equal((await resolver(pedir)).status, 404);
+  assert.equal(filasNuevas(db), 0);
+});
+
+test('#965: la hoja manda y lo ya conocido no se consulta: UPC del manifiesto y pieza ya identificada', async (t) => {
+  const { db, pedir } = preparar();
+  const { consultas } = simular(t, () => respuestaUpcitemdb([itemNuevo()]));
+  const hoja = await resolver(pedir, UPC);
+  assert.equal(hoja.status, 200);
+  assert.equal(db.prepare('select origen from manifiesto where upc=?').get(UPC)!.origen, 'hoja');
+  db.prepare("update productos set upc = '770000000031', estado_analisis = 'listo', nombre = 'Ya identificada' where id = ?").run(PRODUCTO);
+  assert.equal((await resolver(pedir, '770000000031')).status, 200);
+  assert.deepEqual(consultas.filter((c) => c !== UPC), []);   // la imagen de un UPC de la hoja puede pedir su respaldo de #718
+  // Un renglón de la hoja nunca se pisa.
+  db.prepare("insert into manifiesto (upc, descripcion, precio_usd, actualizado_en) values (?, 'De la hoja', 500, '')").run(NUEVO);
+  assert.equal((await resolver(pedir)).cuerpo.ficha.precio_usd, 500);
+  assert.equal(db.prepare('select origen from manifiesto where upc=?').get(NUEVO)!.origen, 'hoja');
+  assert.deepEqual(consultas.filter((c) => c !== UPC), []);   // la imagen de un UPC de la hoja puede pedir su respaldo de #718
+});
+
+test('#965: el precio de lista en dólares es el price de la oferta de Target, no list_price', () => {
+  assert.equal(precioListaUsd({ offers: [{ merchant: 'Target', price: 12.5, list_price: 20 }] }), 1250);
+  assert.equal(precioListaUsd({ offers: [{ merchant: 'Target', price: 12.5 }] }), 1250);
+  assert.equal(precioListaUsd({ offers: [{ merchant: 'Amazon', price: 5 }, { merchant: 'Target', price: '19.99' }] }), 1999);
+  assert.equal(precioListaUsd({ offers: [{ merchant: 'Walmart', price: 5 }] }), 0);
+  assert.equal(precioListaUsd({ offers: [{ merchant: 'Target', price: 0 }] }), 0);
+  assert.equal(precioListaUsd({}), 0);
 });

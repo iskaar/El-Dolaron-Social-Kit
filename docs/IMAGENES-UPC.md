@@ -147,15 +147,47 @@ Segunda fuente de imagen por UPC, sin raspar Target: `GET https://api.upcitemdb.
 - **Al escanear**: si Target falla (reto, 403/429, pausa, 404, sin imagen), prueba UPCitemdb antes del mensaje de
   verificación manual. Solo una imagen scene7 con UPC coincidente se responde, con la misma forma que la de Target.
   Aplica a UPC del manifiesto; los de fuera los cubre el cron.
-- **Presupuesto**: 80 consultas al día (UTC) en `config.upcitemdb_consultas_<AAAA-MM-DD>` (atómico; escaneo y cron
-  lo comparten; el contador de días anteriores se borra). Un 429 o un error detiene la corrida sin marcar nada.
+- **Presupuesto**: un contador en `config.upcitemdb_consultas_<AAAA-MM-DD>` (atómico; escaneo y cron
+  lo comparten; el contador de días anteriores se borra), con tope de 50 para el cron y de 95 para el escaneo (#965). Un 429 o un error detiene la corrida sin marcar nada y no gasta consulta.
 - **Sin resultado**: UPC sin coincidencia ni imagen, o cuya copia falló, queda en `config.upcitemdb_sin_<upc>`
   (fecha) y no se vuelve a consultar durante 30 días. No necesita migración.
 - **Subir al plan DEV** ($99/mes, 20,000 al día, llave en `/prod/v1/`): cambiar el endpoint, enviar la llave desde una
   variable de entorno (nombre propuesto `UPCITEMDB_KEY`, secreto de Worker; no existe ni está en `wrangler`) y subir
-  `PRESUPUESTO_UPCITEMDB` y el lote en `app/src/imagenes-upc.ts`. Requiere decisión de Isaac.
+  los presupuestos y el lote en `app/src/imagenes-upc.ts`. Requiere decisión de Isaac.
 - **Prueba en producción pendiente**: que `api.upcitemdb.com` responda desde Workers y un escaneo real con Target
   bloqueado. Si bloquea a Workers, la alternativa es el mismo relleno como script local en la PC de la caja.
+
+## Consulta de UPC fuera del manifiesto (#965)
+
+Cuando `GET /api/piezas/resolver?q=<upc>` no encuentra pieza propia ni renglón en `manifiesto` ni pieza ya identificada
+en el catálogo, el Worker pregunta a UPCitemdb (mismo endpoint de prueba, sin llave) y, si el resultado es confiable,
+inserta el UPC en `manifiesto` con `origen = 'upcitemdb'` (migración **093**, columna `origen`, por defecto `'hoja'`).
+Desde ahí todo es el camino de manifiesto: traducción del nombre, precio con `calcularPrecio` sobre el precio en dólares
+por `tipo_cambio`, candado de precio, revisión antes de imprimir, sin foto a mano. Solo consultan las cuentas de El Dolarón
+(FEP no cambia). No se consulta desde otras rutas: guardar una captura ya encuentra el renglón.
+
+- **Confiable** = `code` OK, `upc`/`ean` igual al escaneado (ignorando ceros iniciales), una imagen `target.scene7.com`
+  que pase `imagenValida`, título y una oferta cuyo comerciante sea Target con precio mayor a cero.
+- **Precio de lista en dólares** (`precioListaUsd`, un solo lugar): el `price` de la oferta de Target, su precio vigente
+  (decisión de gerencia del 27/11, Issue #965); no se usa `list_price`.
+- **TCIN**: `model` si son de 1 a 12 dígitos; si no, queda vacío (la imagen se guarda igual y no se muestra enlace a Target).
+- **Imagen**: la que devolvió la misma consulta se guarda en `imagenes_upc` como referencia de sistema; no hay segunda
+  petición externa y la pieza recibe la foto al guardarse, como las de manifiesto.
+- **Falla = flujo de hoy**: sin resultado, UPC distinto, sin imagen scene7, sin oferta de Target, sin presupuesto, 429, otro
+  estado que no sea 200, tiempo agotado (4 s) o error al guardar devuelven 404 «sin registro» (foto o «Buscar en internet»).
+  Un resultado no confiable deja la marca de 30 días `upcitemdb_sin_<upc>`, que el escaneo también respeta.
+- **Presupuesto**: un solo contador por día (UTC) pero dos topes, para que el escaneo tenga prioridad: el relleno del cron
+  se detiene en 50 y el escaneo (UPC nuevo y respaldo de imagen) llega a 95, de las 100 del plan de prueba. Un 429, una
+  respuesta que no es 200 o `EXCEED_LIMIT` devuelven la consulta al contador (también en el cron). Estas constantes
+  (`PRESUPUESTO_RELLENO_UPCITEMDB`, `PRESUPUESTO_ESCANEO_UPCITEMDB`, `TIEMPO_ESCANEO_UPCITEMDB_MS`) son un límite real del
+  proveedor y hay que ajustarlas con el uso: `/cm` muestra el consumo del día.
+- **Hoja manda**: `tools/importar_manifiesto.py` reemplaza el renglón `upcitemdb` cuando el UPC aparece en la hoja, aunque
+  los campos coincidan, y lo marca `hoja`; la inserción del escáner nunca pisa un renglón de la hoja
+  (`on conflict do nothing`). El importador no borra renglones.
+- **Activación**: correr la migración 093 antes del deploy (comandos en su encabezado). Sin ella el escáner sigue como hoy
+  (la consulta no puede guardar el renglón) y el importador falla al leer `origen`.
+- Requiere prueba física en tienda: escanear con celular y con lector en la PC un UPC fuera de la hoja que UPCitemdb conozca
+  (tarjeta con nombre, precio e imagen, sin pedir foto) y uno que no conozca (tarjeta «sin registro»).
 
 ## Activación (Isaac)
 
