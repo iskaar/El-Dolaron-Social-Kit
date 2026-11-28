@@ -924,19 +924,21 @@ async function capturarPorUpc(request: Request, env: Env, correo: string, ctx?: 
   const { ficha, precioLista, precioManual, config } = resultado;
   const nombre = nombreEditado ?? decodificarNombre(ficha.nombre || ficha.descripcion).trim().slice(0, 120), categoria = ficha.categoria || 'otros';
   const caducado = estado === 'caducado';   // #733: merma sin precio, siempre $0
-  const precio = caducado ? 0 : cuerpo.precio === undefined ? precioManual ?? calcularPrecio({ precioLista, categoria, estadoFisico: estado, config }).precio : cuerpo.precio as number;
+  // #966: lo que calculó el servidor queda en precio_sugerido aunque gerencia escriba otro precio en la tarjeta.
+  const sugerido = caducado ? 0 : precioManual ?? calcularPrecio({ precioLista, categoria, estadoFisico: estado, config }).precio;
+  const precio = caducado ? 0 : cuerpo.precio === undefined ? sugerido : cuerpo.precio as number;
   if (!nombre || !CATEGORIAS.has(categoria) || !Number.isSafeInteger(precio) || (precio <= 0 && !caducado) || !Number.isSafeInteger(precioLista) || precioLista < 0) {
     return json({ error: 'El producto necesita nombre, categoría y precio válidos.' }, 400);
   }
   const ahora = new Date();
   // Una sola inserción completa: dos reintentos nunca restauran stock ni ven una pieza a medio llenar.
   await env.DB.prepare(`insert into productos
-    (id, upc, nombre, marca, categoria, precio_lista, precio, estado_fisico, stock, talla, semana_ingreso,
+    (id, upc, nombre, marca, categoria, precio_lista, precio, precio_sugerido, estado_fisico, stock, talla, semana_ingreso,
      capturado_por, creado_en, actualizado_en, estado_analisis, destino, propietario, por_revisar)
-    select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', 'etiqueta', 'dolaron', ${porRevisar ? 1 : 0}
+    select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'listo', 'etiqueta', 'dolaron', ${porRevisar ? 1 : 0}
     where not exists (select 1 from productos where ${MISMO_UPC})
       and not exists (select 1 from conteo_ajustes where id = ?) on conflict (id) do nothing`)
-    .bind(cuerpo.id, leido, nombre, ficha.marca.trim().slice(0, 60), categoria, precioLista, precio, estado, stock, talla,
+    .bind(cuerpo.id, leido, nombre, ficha.marca.trim().slice(0, 60), categoria, precioLista, precio, sugerido, estado, stock, talla,
       semanaIngreso(ahora), correo, ahora.toISOString(), ahora.toISOString(), 'dolaron', normalizarUpc(leido), estado, claveTalla(talla), cuerpo.id).run();
   return (await capturaUpcGuardada(cuerpo.id, leido, env, ctx, correo))
     ?? await sumarUpc(cuerpo.id, leido, estado, claveTalla(talla), stock, env, correo, ctx) ?? json({ error: 'La captura cambió. Vuelve a intentarlo.' }, 409);
