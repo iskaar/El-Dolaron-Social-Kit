@@ -22,7 +22,10 @@ export function crearSubida({ pendientes, leer, borrar, enviar = fetch, pausada 
       const r=await leer(entrada.id);if(!r||pausada(r.id))continue;idSubiendo=r.id;alEstado('subiendo',r);
       try{
         const respuesta=await enviar('/api/borradores',{method:'POST',body:formularioPendiente(r)});
-        if(!respuesta.ok){const sesion=respuesta.status===401||respuesta.status===403;alEstado(sesion?'sesion':'error',r);if(sesion||respuesta.status>=500||respuesta.status===408||respuesta.status===429)break;continue;} // ponytail: otro 4xx deja la foto en la cola sin bloquear a las demás
+        if(!respuesta.ok){const sesion=respuesta.status===401||respuesta.status===403,corte=sesion||respuesta.status>=500||respuesta.status===408||respuesta.status===429;
+          // Otro 4xx: el servidor la rechazó; se muestra su motivo (#967) y la foto sigue en la cola sin bloquear a las demás.
+          const motivo=corte?undefined:(await respuesta.json().catch(()=>null))?.error;
+          alEstado(sesion?'sesion':'error',r,typeof motivo==='string'?motivo:undefined);if(corte)break;continue;}
         const guardada=await respuesta.json();
         if(r.correccion_ficha&&guardada.estado_analisis!=='descartado'){
           const correccion=await enviar(`/api/borradores/${r.id}/revision`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(r.correccion_ficha)});

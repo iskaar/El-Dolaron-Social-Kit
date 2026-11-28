@@ -16,21 +16,24 @@ const etiquetar = celular.slice(celular.indexOf('const razonSinEtiqueta'), celul
 function entorno(respuestas: any[] | ((ruta: string) => any) = [], imprimirResultado: boolean | (() => boolean) = true, resumen = '', relojManual = false) {
   const almacen = new Map<string, string>(), mensajes: [string, string][] = [], envios: any[] = [], sonidos: string[] = [], sesion = new Map<string, any>();
   let lista = true, llamadasApi = 0;
+  const hojaAbierta = { valor: false }, abiertas: string[] = [];
   const peticiones: string[] = [], timers: (() => void)[] = [];
   const contexto: any = {
     localStorage: { getItem: (k: string) => almacen.get(k) ?? null, setItem: (k: string, v: string) => almacen.set(k, v) },
     mensaje: (t: string, tipo: string) => mensajes.push([t, tipo]), sonar: (t: string) => sonidos.push(t), pintar() {}, sesion,
     setTimeout: (f: () => void) => { if (relojManual) timers.push(f); else f(); }, Promise, Math, JSON, console,
-    etiqueteraLista: () => lista, noImprime: () => false, $: () => ({ textContent: resumen }),
+    etiqueteraLista: () => lista, noImprime: () => false, $: () => ({ textContent: resumen, open: hojaAbierta.valor }),
+    ctx: { dueno: false, identidad: { usuario: { editar_inventario: true } } }, revisando: null as string | null, corregir: async (id: string) => { abiertas.push(id); },
     api: async (ruta: string) => { llamadasApi++; peticiones.push(ruta); const r = typeof respuestas === 'function' ? (respuestas as any)(ruta) : respuestas.shift(); if (r instanceof Error) throw r; return r; },
     imprimir: async (id: string, n: number, opciones: unknown) => { envios.push({ id, n, opciones: { ...(opciones as object) } }); return typeof imprimirResultado === 'function' ? imprimirResultado() : imprimirResultado; },
   };
   const motor = runInNewContext(`${auxiliares}\n${turno}\n({ etiquetar: null, imprimirCaptura, capturaImpresa })`, contexto);
   const captura = { imprimirCaptura: motor.imprimirCaptura };
   contexto.captura = captura;
-  runInNewContext(`${etiquetar}\nglobalThis.prepararRevision = prepararRevision; globalThis.imprimirRevisada = imprimirRevisada;`, contexto);
+  runInNewContext(`${etiquetar}\nglobalThis.prepararRevision = prepararRevision; globalThis.imprimirRevisada = imprimirRevisada; globalThis.revisarSiguiente = revisarSiguiente;`, contexto);
   return { etiquetar: ((_llave: string, d: any) => contexto.prepararRevision(d)) as (llave: string, d: any, n: number) => Promise<void>,
-    imprimirRevisada: contexto.imprimirRevisada as (id: string, n: number, nombre: string) => Promise<boolean>, mensajes, envios, sonidos, sesion, almacen,
+    imprimirRevisada: contexto.imprimirRevisada as (id: string, n: number, nombre: string) => Promise<boolean>, revisarSiguiente: contexto.revisarSiguiente as () => Promise<void>,
+    rol: contexto.ctx, contexto, hojaAbierta, abiertas, mensajes, envios, sonidos, sesion, almacen,
     desconectar: () => { lista = false; }, motor, llamadas: () => llamadasApi, peticiones, timers };
 }
 const pieza = (campos: Record<string, unknown> = {}) => ({ id: 'p1', nombre: 'Lámpara', precio: 24900, stock: 2, estado_analisis: 'listo', ...campos });
@@ -95,6 +98,37 @@ test('la misma captura no imprime dos veces: ni al reintentar la subida ni tras 
   assert.equal(recargada.envios.length, 0);
   await recargada.imprimirRevisada('p2', 1, 'Lámpara');       // otra captura sí
   assert.equal(recargada.envios.length, 1);
+});
+
+test('#967: sin precio, quien edita sabe dónde ponerlo y quien no, a quién avisar (nunca «dueño»)', async () => {
+  const editor = entorno();
+  editor.sesion.set('p2', { estado: 'analizando' });
+  await editor.etiquetar('p2', pieza({ id: 'p2', estado_analisis: 'error', precio: 0, nombre: 'Algo' }), 1);
+  assert.equal(editor.mensajes.at(-1)![0], 'Aparte, sin etiqueta: Algo. Ponle precio en Revisar.');
+  const dueno = entorno(); dueno.rol.dueno = true; dueno.rol.identidad.usuario.editar_inventario = false;
+  await dueno.etiquetar('p3', pieza({ id: 'p3', precio: 0, nombre: 'Algo' }), 1);
+  assert.match(dueno.mensajes.at(-1)![0], /Ponle precio en Revisar/);
+  const capturista = entorno(); capturista.rol.identidad.usuario.editar_inventario = false;
+  await capturista.etiquetar('p4', pieza({ id: 'p4', precio: 0, nombre: 'Algo' }), 1);
+  assert.equal(capturista.mensajes.at(-1)![0], 'Aparte, sin etiqueta: Algo. Avisa a gerencia para que le ponga precio.');
+  assert.doesNotMatch(capturista.mensajes.at(-1)![0], /dueño|revisión/);
+  assert.deepEqual(capturista.sonidos, ['error']);
+});
+
+test('#967: tras guardar una revisión se abre la siguiente por revisar, solo con la hoja cerrada, sin repetir la guardada y hasta que no quede ninguna', async () => {
+  const e = entorno();
+  for (const [id, estado] of [['a', 'revisar'], ['b', 'revisar'], ['c', 'subida']]) e.sesion.set(id, { id, estado });
+  e.hojaAbierta.valor = true; await e.revisarSiguiente();
+  assert.deepEqual(e.abiertas, [], 'mientras la impresión (u otra hoja) usa la hoja no se abre otra encima');
+  e.hojaAbierta.valor = false; e.contexto.revisando = 'a'; await e.revisarSiguiente();
+  assert.deepEqual(e.abiertas, [], 'ni mientras otra revisión sigue abierta');
+  e.contexto.revisando = null;
+  await e.imprimirRevisada('a', 1, 'Lámpara');   // «Guardar e imprimir» de a: queda impresa y deja de estar por revisar
+  await e.revisarSiguiente();
+  assert.deepEqual(e.abiertas, ['b'], 'abre la que sigue, nunca la que acaba de guardarse');
+  await e.imprimirRevisada('b', 1, 'Lámpara');
+  await e.revisarSiguiente();
+  assert.deepEqual(e.abiertas, ['b'], 'sin pendientes no abre nada y no se repite');
 });
 
 test('D2: si el seguimiento del análisis da 403 se deja de preguntar y no dice «Ponle precio» (FEP o captura ajena)', async () => {

@@ -172,7 +172,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
     $('ajustar').disabled = $('deshacer').disabled = enviando || !!pendiente;
     if (integrada) for (const id of ['menos', 'sumar', 'ajustar', 'deshacer']) {
       const b = $(id), sinRed = globalThis.navigator?.onLine === false;
-      const motivo = sinRed ? 'Sin red: se suma al volver la señal' : b.disabled ? 'Revisa el ajuste pendiente o el límite' : '';
+      const motivo = sinRed ? 'Sin red: no se ajustó. Inténtalo cuando haya señal' : b.disabled ? 'Revisa el ajuste pendiente o el límite' : '';
       b.disabled = false; b.setAttribute('aria-disabled', String(!!motivo)); b.dataset.motivo = motivo;
     }
     // PATCH deja la pieza `listo`: una que aún se analiza se corrige en Inventario › Revisar.
@@ -250,7 +250,7 @@ export function crearFicha({ mensaje, alAbrir = () => {}, confirmar = (texto) =>
 
   async function ajustar(cuerpo, inverso = false) {
     if (!pieza || !puedeEditar || pendiente || enviando) return;
-    if (globalThis.navigator?.onLine === false) return mensaje('Sin red: se suma al volver la señal');
+    if (globalThis.navigator?.onLine === false) return mensaje('Sin red: no se ajustó. Inténtalo cuando haya señal');
     pendiente = { piezaId:pieza.id, nombre:pieza.nombre, cuerpo:{ id:crypto.randomUUID(), ...cuerpo }, inverso };
     quitarDeshacer();
     await enviarAjuste();

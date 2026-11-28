@@ -16,7 +16,7 @@ test('modo enfocado: cada problema crítico que quedaba oculto produce su alerta
   assert.deepEqual(alertasCriticas({sinSubir:1,colaError:true}),['■ 1 sin subir · error de envío']);
   assert.deepEqual(alertasCriticas({sinSubir:1,colaError:true,sesion:true}),['■ Tu sesión venció · vuelve a entrar'],'La sesión vencida manda sobre el error genérico');
   assert.deepEqual(alertasCriticas({impresoraFalta:true}),['▲ Impresora sin conectar · falta etiqueta']);
-  assert.deepEqual(alertasCriticas({errorGuardado:'■ Sin red: se suma al volver la señal'}),['■ Sin red: se suma al volver la señal']);
+  assert.deepEqual(alertasCriticas({errorGuardado:'■ Sin red: no se sumó. Inténtalo cuando haya señal'}),['■ Sin red: no se sumó. Inténtalo cuando haya señal']);
 });
 
 test('modo enfocado: junta varios problemas en una línea y no repite el error que ya dio la cola',()=>{

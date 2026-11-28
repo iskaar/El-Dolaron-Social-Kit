@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { crearCaptura, cambiosTarjeta, vigilarLectorEnCampo, piezaSinRegistrar, faltaCalzado, numeroCalzado } from '../public/inventario-capturar.js';
+import { crearCaptura, avisoExistente, cambiosTarjeta, vigilarLectorEnCampo, piezaSinRegistrar, faltaCalzado, numeroCalzado } from '../public/inventario-capturar.js';
 import { registroFoto, formularioPendiente } from '../public/foto-pendiente.js';
 import worker, { permitidaParaVendedor } from './worker.ts';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
@@ -417,11 +417,54 @@ test('el stepper deja escribir la cantidad en su lugar y la acota a min/max',()=
     input.value=texto;input.emitir('keydown',{key:tecla});return input;};
   escribir('12');assert.equal(salida.value,'12');assert.equal(valores.at(-1),12);assert.ok(!salida.hidden);assert.ok(salida.enfocado);
   assert.equal(raiz.hijos.length,3,'el campo se retira al terminar');
-  escribir('5000');assert.equal(valores.at(-1),50,'acota al máximo');
+  escribir('500');assert.equal(valores.at(-1),50,'acota al máximo');
+  const previo=valores.length;escribir('012345678905');escribir('1000');assert.equal(valores.length,previo,'más de 3 dígitos (un código escaneado en el campo) se rechaza: no se acota a 999 (#967)');
+  assert.equal(salida.value,'50');
   escribir('0');assert.equal(valores.at(-1),1,'acota al mínimo');
   const antes=valores.length;escribir('abc');escribir('12',  'Escape');escribir('');assert.equal(valores.length,antes,'texto no numérico, vacío o Escape no cambian nada');
   salida.onclick();raiz.hijos.find((h:Nodo)=>h.tagName==='input')!.value='7';raiz.hijos.find((h:Nodo)=>h.tagName==='input')!.emitir('blur');assert.equal(valores.at(-1),7,'al salir del campo también aplica');
   raiz.hijos[2].emitir('click');assert.equal(valores.at(-1),8,'los botones ± siguen funcionando');
+});
+
+test('#967: sin red nada se encola y el mensaje lo dice; la PC no manda a tomar foto',async()=>{
+  const llamadas:string[]=[],api=async(ruta:string)=>{llamadas.push(ruta);return {};};
+  const celular=crearCaptura({api,imprimir:async()=>true,enLinea:()=>false});
+  await assert.rejects(celular.leer('012345678905'),/^Error: Sin red · toma foto$/);
+  const pc=crearCaptura({api,imprimir:async()=>true,enLinea:()=>false,textoSinRed:'Sin red · espera la señal'});
+  await assert.rejects(pc.leer('012345678905'),/^Error: Sin red · espera la señal$/);
+  await assert.rejects(pc.sumar({id:'p',stock:1}),/^Error: Sin red: no se sumó\. Inténtalo cuando haya señal$/);
+  assert.equal(llamadas.length,0,'sin red no se llama al servidor ni queda nada pendiente');
+  // «Guardar» con la tarjeta abierta y sin señal: se avisa que no se guardó (antes decía que se sumaría al volver).
+  let enLinea=true;const f=crearCaptura({api:async()=>({ficha:{nombre:'Lámpara',precio:24900}}),imprimir:async()=>true,enLinea:()=>enLinea});
+  await f.leer('012345678905');enLinea=false;
+  await assert.rejects(f.guardar(),/^Error: Sin red: no se guardó\. Inténtalo cuando haya señal$/);
+});
+
+test('#967: «Ya existe» dice cómo sumar según lo que la cuenta puede hacer',()=>{
+  assert.equal(avisoExistente(4,1,true),'Ya existe · ×4 · escanea otra vez o toca «Sumar»');
+  assert.equal(avisoExistente(4,3,true),'Ya existe · ×4 · toca «Sumar 3»','con «N*» el re-escaneo sumaría 1, no N: solo se menciona el botón');
+  assert.equal(avisoExistente(4,1,false),'Ya existe · ×4 · solo consulta');
+  assert.equal(avisoExistente(4,3,false),'Ya existe · ×4 · solo consulta');
+});
+
+test('#967: un UPC sin ficha cuesta una sola consulta (el resolver ya miró el manifiesto); «Buscar más» sin resultados sí consulta',async()=>{
+  const rutas:string[]=[];
+  const api=async(ruta:string)=>{rutas.push(ruta);throw Object.assign(new Error('Sin coincidencias.'),{status:404});};
+  const flujo=crearCaptura({api,imprimir:async()=>true,enLinea:()=>true});
+  await flujo.leer('012345678905');
+  assert.equal(flujo.actual()!.tipo,'sin-registro');assert.equal(flujo.actual()!.upc,'012345678905');
+  assert.deepEqual(rutas.map(r=>r.split('?')[0]),['/api/piezas/resolver'],'sin segunda consulta a /api/manifiesto');
+  // El resolver no pudo responder (error de servidor): no se da por «sin registro».
+  const roto=crearCaptura({api:async()=>{throw Object.assign(new Error('Falla'),{status:500});},imprimir:async()=>true,enLinea:()=>true});
+  await assert.rejects(roto.leer('012345678905'),/Falla/);assert.equal(roto.actual(),null);
+  // Con ficha en el resolver sigue siendo una sola consulta.
+  const conFicha:string[]=[];const f2=crearCaptura({api:async ruta=>{conFicha.push(ruta);return {ficha:{nombre:'Lámpara',precio:24900}};},imprimir:async()=>true,enLinea:()=>true});
+  await f2.leer('012345678905');assert.equal(f2.actual()!.tipo,'nueva');assert.equal(conFicha.length,1);
+  // «Buscar más» (la lista paginada ya no trae nada) no pasa por el resolver: ahí sí se consulta el manifiesto.
+  const mas:string[]=[];let n=0;
+  const f3=crearCaptura({api:async ruta=>{mas.push(ruta.split('?')[0]);if(ruta.startsWith('/api/manifiesto/'))return {nombre:'Lámpara',precio:24900};return ++n===1?{piezas:[],siguiente:'c'}:{piezas:[],siguiente:null};},imprimir:async()=>true,enLinea:()=>true});
+  await f3.leer('012345678905');await f3.leer('012345678905',true);
+  assert.deepEqual(mas,['/api/piezas/resolver','/api/piezas','/api/manifiesto/012345678905']);
 });
 
 test('#549: el obturador del celular solo entrega la foto a una tarjeta sin registrar; guardada o existente = pieza nueva',()=>{
