@@ -74,6 +74,10 @@ async function conExistencia<T extends { id: string }>(env: Env, piezas: T[]) {
 export const autorizarPrecio = (usuario: Usuario | null, pieza: { codigo: string | null; preciadaPorSistema?: boolean }): boolean =>
   (!!usuario?.activo && usuario.roles.includes('dueno')) || (!pieza.codigo && !pieza.preciadaPorSistema);
 
+/** #969: un precio escrito en una pieza nueva lo acepta solo gerencia (rol interno `dueno`); sin código ni sistema de por medio nadie más lo escribe. */
+export const esGerencia = (usuario: Usuario | null): boolean => autorizarPrecio(usuario, { codigo: null, preciadaPorSistema: true });
+export const SOLO_GERENCIA_PRECIO = 'Solo gerencia escribe un precio. Aparta la pieza y avisa a gerencia.';
+
 /** Se inspeccionan 80 candidatas por página, también cuando no hay ninguna repetida. */
 async function piezasRepetidas(env: Env, url: URL, usuario: Usuario | null): Promise<Response> {
   if (!puedeEditarInventario(usuario)) return json({ error:'Tu cuenta no tiene permiso para editar inventario.' }, 403);

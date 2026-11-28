@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { crearCaptura, avisoExistente, cambiosTarjeta, vigilarLectorEnCampo, piezaSinRegistrar, faltaCalzado, numeroCalzado } from '../public/inventario-capturar.js';
+import { crearCaptura, puedeFotoNueva, avisoExistente, cambiosTarjeta, vigilarLectorEnCampo, piezaSinRegistrar, faltaCalzado, numeroCalzado } from '../public/inventario-capturar.js';
 import { registroFoto, formularioPendiente } from '../public/foto-pendiente.js';
 import worker, { permitidaParaVendedor } from './worker.ts';
 import { tienda, PRODUCTO, DUENO } from './prueba-d1.ts';
@@ -469,6 +469,40 @@ test('#967: un UPC sin ficha cuesta una sola consulta (el resolver ya miró el m
   const f3=crearCaptura({api:async ruta=>{mas.push(ruta.split('?')[0]);if(ruta.startsWith('/api/manifiesto/'))return {nombre:'Lámpara',precio:24900};return ++n===1?{piezas:[],siguiente:'c'}:{piezas:[],siguiente:null};},imprimir:async()=>true,enLinea:()=>true});
   await f3.leer('012345678905');await f3.leer('012345678905',true);
   assert.deepEqual(mas,['/api/piezas/resolver','/api/piezas','/api/manifiesto/012345678905']);
+});
+
+test('#969: cerrar la tarjeta no guarda nada, deja libre al lector y no descarta un guardado en curso',async()=>{
+  const llamadas:string[]=[];let liberar!:()=>void;const espera=new Promise<void>(r=>{liberar=r;});let lento=false;
+  const api=async(ruta:string,cuerpo?:any)=>{llamadas.push(ruta);
+    if(ruta.startsWith('/api/piezas/resolver?'))return /q=0123/.test(ruta)?{ficha:{nombre:'Lámpara',precio:24900}}:Promise.reject(Object.assign(new Error('Sin coincidencias.'),{status:404}));
+    if(lento)await espera;return {id:cuerpo.id,nombre:'Lámpara',stock:cuerpo.stock,estado_analisis:'listo'};};
+  const flujo=crearCaptura({api,enLinea:()=>true,imprimir:async()=>true});
+  assert.equal(flujo.cerrar(),false,'sin tarjeta no hay nada que cerrar');
+  // Una tarjeta del manifiesto se cierra sin tocar el servidor, aunque esté editada; el siguiente código entra como si nada.
+  await flujo.leer('012345678905');flujo.actual()!.nombre='Otro';flujo.actual()!.cantidad=3;
+  assert.equal(flujo.cerrar(),true);assert.equal(flujo.actual(),null);
+  assert.equal(llamadas.includes('/api/borradores/upc'),false,'cerrar no guarda');
+  await flujo.leer('012345678905');assert.equal(flujo.actual()!.cantidad,1,'la tarjeta cerrada no deja su cantidad ni su edición');
+  flujo.cerrar();   // sin cerrarla, leer otro código la guardaría (comportamiento que no cambia)
+  // «Sin registro» también se cierra.
+  await flujo.leer('999999999999');assert.equal(flujo.actual()!.tipo,'sin-registro');assert.equal(flujo.cerrar(),true);assert.equal(flujo.actual(),null);
+  // Con un guardado en curso cerrar no hace nada; el guardado termina y deja su tarjeta «Guardada».
+  await flujo.leer('012345678905');lento=true;
+  const guardando=flujo.guardar();await new Promise(r=>setImmediate(r));
+  assert.equal(flujo.cerrar(),false,'no descarta lo que ya va en camino');assert.equal(flujo.actual()!.tipo,'nueva');
+  liberar();await guardando;
+  assert.equal(flujo.actual()!.tipo,'guardada');assert.equal(llamadas.filter(r=>r==='/api/borradores/upc').length,1);
+  assert.equal(flujo.cerrar(),true,'terminado el guardado, la tarjeta ya se puede cerrar');
+});
+
+test('#969: la foto de una pieza nueva solo se aparta para gerencia cuando no hay fuente',()=>{
+  const capturista={fotoSinCodigo:false,esRopa:false};
+  assert.equal(puedeFotoNueva({...capturista,actual:{tipo:'nueva'}}),true,'tarjeta con ficha (manifiesto o consulta): la foto es de esa pieza, para todos');
+  assert.equal(puedeFotoNueva({...capturista,actual:null}),false,'producto sin código: se aparta');
+  assert.equal(puedeFotoNueva({...capturista,actual:{tipo:'sin-registro'}}),false,'«Sin registro»: se aparta');
+  assert.equal(puedeFotoNueva({...capturista,actual:{tipo:'existente'}}),false);
+  assert.equal(puedeFotoNueva({...capturista,esRopa:true,actual:null}),true,'la Ropa no cambia');
+  assert.equal(puedeFotoNueva({fotoSinCodigo:true,esRopa:false,actual:{tipo:'sin-registro'}}),true,'gerencia y FEP siempre');
 });
 
 test('#549: el obturador del celular solo entrega la foto a una tarjeta sin registrar; guardada o existente = pieza nueva',()=>{

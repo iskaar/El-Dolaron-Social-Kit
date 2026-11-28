@@ -2,7 +2,7 @@
 // Captura sin foto (Issue #115): solo el dueno, y con las reglas de la cola.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tienda } from './prueba-d1.ts';
+import { tienda, DUENO } from './prueba-d1.ts';
 
 const pieza = (extra: Record<string, unknown> = {}) =>
   ({ id: crypto.randomUUID(), nombre: 'Licuadora Oster', categoria: 'hogar', estado_fisico: 'nuevo', precio_lista: 89900, stock: 2, ...extra });
@@ -111,13 +111,19 @@ test('un codigo nunca se repite aunque SQLite reutilice el rowid de una pieza bo
 
 // Escáner sin foto (#399): permiso de captura y las mismas reglas del servidor.
 const RUTA_ESCANER = '/api/borradores/upc/manual';
-test('capturista y dueño capturan sin código ni foto y sale a etiquetas con ED- y precio calculado', async () => {
+test('gerencia captura sin código ni foto y sale a etiquetas con ED- y precio calculado; el capturista recibe 403 (#969)', async () => {
   for (const rol of ['capturista', 'dueno']) {
     const t = tienda();
     t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values ('piso@prueba.mx', 'Piso', ?, 1, '', '')`).run(rol);
     t.env.DEV_USUARIO = 'piso@prueba.mx';
     const cuerpo = pieza({ upc: '', estado_fisico: 'danado', precio_lista: 100000, destino: 'banda_g19' });
     const r = await t.pedir(RUTA_ESCANER, cuerpo);
+    // #969: sin registro ni foto, el precio lo escribe solo gerencia; el capturista aparta la pieza y no deja fila.
+    if (rol === 'capturista') {
+      assert.equal(r.status, 403); assert.match(r.cuerpo.error, /gerencia/);
+      assert.equal(t.db.prepare('select id from productos where id = ?').get(cuerpo.id), undefined);
+      continue;
+    }
     assert.equal(r.status, 201);
     assert.equal(r.cuerpo.precio, 30000); // $1000 × 50 % × 60 %, con redondeo vigente.
     const p = t.db.prepare('select * from productos where id = ?').get(cuerpo.id)!;
@@ -134,15 +140,22 @@ test('capturista y dueño capturan sin código ni foto y sale a etiquetas con ED
   }
 });
 
-test('sin etiqueta el capturista pone precio de venta; con etiqueta no lo cambia (#75, #399)', async () => {
+test('el precio de una pieza sin registro lo escribe solo gerencia; con etiqueta nadie más lo cambia (#75, #399, #969)', async () => {
   const t = tienda();
   t.db.prepare(`insert into usuarios (correo, nombre, roles, activo, creado_en, actualizado_en) values ('cap@prueba.mx', 'C', 'capturista', 1, '', '')`).run();
   t.env.DEV_USUARIO = 'cap@prueba.mx';
   const cuerpo = pieza({ upc: '00001234', precio_lista: 0, precio: 12345 });
+  for (const escrito of [{ precio: 12345 }, { precio_lista: 50000 }]) {
+    const r = await t.pedir(RUTA_ESCANER, { ...cuerpo, precio: undefined, precio_lista: undefined, ...escrito });
+    assert.equal(r.status, 403, JSON.stringify(escrito)); assert.match(r.cuerpo.error, /gerencia/);
+    assert.equal(t.db.prepare('select id from productos where id = ?').get(cuerpo.id), undefined, 'no deja una pieza a medias');
+  }
+  t.env.DEV_USUARIO = DUENO;
   assert.equal((await t.pedir(RUTA_ESCANER, cuerpo)).cuerpo.precio, 12345);
   assert.equal(t.db.prepare('select upc from productos where id = ?').get(cuerpo.id)!.upc, '00001234');
+  assert.equal((await t.pedir(RUTA_ESCANER, { ...cuerpo, precio: 100 })).cuerpo.precio, 12345);   // un reintento no cambia el precio
+  t.env.DEV_USUARIO = 'cap@prueba.mx';
   assert.equal((await t.pedir(`/api/borradores/${cuerpo.id}`, { precio: 100 }, 'PATCH')).status, 403);
-  assert.equal((await t.pedir(RUTA_ESCANER, { ...cuerpo, precio: 100 })).cuerpo.precio, 12345);
   assert.equal((await t.pedir('/api/borradores/manual', pieza())).status, 403);
   // El manifiesto sigue imponiendo el precio: la nueva ruta no lo evade.
   t.db.prepare(`insert into manifiesto (upc, descripcion, precio_usd, tcin, nombre, actualizado_en) values ('1234', 'Taza', 999, '1', 'Taza', '')`).run();

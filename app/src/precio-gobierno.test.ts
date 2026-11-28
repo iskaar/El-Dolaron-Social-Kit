@@ -83,6 +83,36 @@ test('la ficha (corregirBorrador) sigue negando el precio de una pieza etiquetad
   assert.equal((await t.pedir(`/api/borradores/${id}`, { precio: 15000, marca: 'Levi' }, 'PATCH')).status, 200);
 });
 
+test('#969: quien no es gerencia no escribe precio en una pieza sin etiqueta; los escalones de ropa y el recálculo por grado siguen', async (t0) => {
+  const t = tienda(); t0.after(() => t.db.close()); equipo(t);
+  const ruta = (id: string) => `/api/borradores/${id}`;
+  const lampara = () => {
+    const id = crypto.randomUUID(), ahora = new Date().toISOString();
+    t.db.prepare(`insert into productos (id, codigo, nombre, marca, categoria, precio, precio_lista, stock, estado_analisis, destino, capturado_por, semana_ingreso, creado_en, actualizado_en)
+      values (?, null, 'Lámpara', '', 'hogar', 20000, 40000, 1, 'listo', 'etiqueta', ?, 'S40', ?, ?)`).run(id, CAP_CASILLA, ahora, ahora);
+    return id;
+  };
+  const id = lampara(), sinEtiqueta = ropa(t, { codigo: '' });
+  como(t, CAP_CASILLA);
+  // corregirBorrador (ficha / Revisar): ni precio ni precio de lista; sin etiqueta tampoco.
+  for (const cuerpo of [{ precio: 15000 }, { precio_lista: 90000 }]) {
+    const r = await t.pedir(ruta(id), cuerpo, 'PATCH');
+    assert.equal(r.status, 403, JSON.stringify(cuerpo)); assert.match(r.cuerpo.error, /gerencia/);
+  }
+  assert.equal(fila(t, id).precio, 20000);
+  // Repetir el actual no es escribir; cambiar el grado sin precio recalcula con la banda.
+  assert.equal((await t.pedir(ruta(id), { precio: 20000, marca: 'Oster' }, 'PATCH')).status, 200);
+  const grado = await t.pedir(ruta(id), { estado_fisico: 'danado' }, 'PATCH');
+  assert.equal(grado.status, 200); assert.ok(grado.cuerpo.precio > 0 && grado.cuerpo.precio < 20000, JSON.stringify(grado.cuerpo));
+  // Ropa sin código: escalón fijo para todos; un precio libre solo gerencia.
+  assert.equal((await t.pedir(ruta(sinEtiqueta), { precio: 8000 }, 'PATCH')).status, 200);
+  assert.equal(fila(t, sinEtiqueta).precio, 8000);
+  assert.equal((await t.pedir(ruta(sinEtiqueta), { precio: 8100 }, 'PATCH')).status, 403);
+  como(t, DUENO);
+  assert.equal((await t.pedir(ruta(id), { precio: 15000, precio_lista: 90000 }, 'PATCH')).status, 200);
+  assert.equal(fila(t, id).precio, 15000);
+});
+
 // El análisis: Gemini responde siempre lo mismo; el precio calculado queda por debajo del precio actual de la pieza.
 function conGemini(t: Tienda, t0: { after: (f: () => void) => void }, nombre = 'Licuadora Oster') {
   const original = globalThis.fetch;
