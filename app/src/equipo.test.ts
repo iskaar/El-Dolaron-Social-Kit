@@ -143,6 +143,53 @@ test('semana justo en la linea o bajo ella, y tienda sin linea: bolsa 0 y no se 
   } finally { t.db.close(); }
 });
 
+test('acelerador (#960): arriba de la meta tope rige bono_tienda_pb_arriba; un solo floor sobre la suma de los dos tramos', async () => {
+  const { t, empleado, dias, vender, config, semana, deTienda } = escenario();
+  try {
+    const ana = await empleado('Ana', 'ana@prueba.mx');
+    dias(ana.id, LUNES, 2);
+    const total = await vender(undefined, 'soledad', 3);
+    await vender(undefined, 'salk', 2);
+    const bolsa = async (c: Record<string, number>, tiendaClave = 'soledad') => {
+      await config({ bono_tienda_pb: 1000, bono_tienda_pb_arriba: 3000, bono_tienda_meta_tope: 0, bono_tienda_linea_soledad: total - 10000, ...c });
+      return deTienda(await semana(), tiendaClave).bolsa;
+    };
+    assert.equal(await bolsa({ bono_tienda_linea_soledad: total + 100, bono_tienda_meta_tope: total + 20000 }), 0);    // abajo de la linea
+    assert.equal(await bolsa({ bono_tienda_meta_tope: total + 20000 }), 1000);                                      // entre linea y tope: solo pb
+    assert.equal(await bolsa({ bono_tienda_meta_tope: total }), 1000);                                              // justo en el tope: no hay tramo arriba
+    assert.equal(await bolsa({ bono_tienda_meta_tope: total - 4000 }), 600 + 1200);                                 // 6000 a pb y 4000 a pb_arriba
+    assert.equal(await bolsa({ bono_tienda_meta_tope: total - 4000, bono_tienda_pb_arriba: 0 }), 1000);             // arriba en 0 = pb
+    assert.equal(await bolsa({ bono_tienda_meta_tope: total - 4000, bono_tienda_pb_arriba: 1000 }), 1000);          // igual a pb: sin efecto
+    assert.equal(await bolsa({ bono_tienda_meta_tope: 0 }), 1000);                                                  // sin tope: todo a pb
+    assert.equal(await bolsa({ bono_tienda_meta_tope: total - 10000 }), 1000);                                      // tope == linea: sin tramo
+    assert.equal(await bolsa({ bono_tienda_meta_tope: total - 20000 }), 1000);                                      // tope bajo la linea: sin tramo
+    // Un solo floor: 5555 a 10.01 % = 556.05 y 4445 a 30.01 % = 1333.9 -> la suma da 1890 (por tramo darian 556 + 1333).
+    assert.equal(await bolsa({ bono_tienda_pb: 1001, bono_tienda_pb_arriba: 3001, bono_tienda_meta_tope: total - 4445 }), 1890);
+    // Sin la clave en config (instalacion previa): igual que antes.
+    t.db.prepare(`delete from config where clave = 'bono_tienda_pb_arriba'`).run();
+    assert.equal(deTienda(await semana(), 'soledad').bolsa, Math.floor(10000 * 1001 / 10000));
+    // Una tienda no afecta a otra: Salk sin linea sigue en 0 aunque Soledad tenga acelerador.
+    assert.equal(deTienda(await semana(), 'salk').bolsa, 0);
+  } finally { t.db.close(); }
+});
+
+test('acelerador (#960): semana ya asentada no cambia si despues se mueve bono_tienda_pb_arriba', async () => {
+  const { t, empleado, dias, vender, config, bono, semana, deTienda, movimientos } = escenario();
+  try {
+    const ana = await empleado('Ana', 'ana@prueba.mx');
+    dias(ana.id, LUNES, 2);
+    const total = await vender();
+    await config({ bono_tienda_pb: 1000, bono_tienda_pb_arriba: 3000, bono_tienda_linea_soledad: total - 10000, bono_tienda_meta_tope: total - 4000 });
+    assert.equal(deTienda(await semana(), 'soledad').bolsa, 1800);
+    assert.equal((await bono(LUNES)).status, 201);
+    await config({ bono_tienda_pb_arriba: 9000 });
+    const otra = await bono(LUNES);
+    assert.deepEqual([otra.status, otra.cuerpo.creados.length, otra.cuerpo.ya_estaban.length], [200, 0, 1]);
+    assert.equal((movimientos() as { importe: number }[])[0].importe, 1800);
+    assert.equal(deTienda(await semana(), 'soledad').partes[0].importe, 1800);   // se muestra lo pagado
+  } finally { t.db.close(); }
+});
+
 test('Dolarones del bono: 1 D por cada tanto de bono con tope semanal, lote de id fijo y doble asentado sin duplicar', async () => {
   const { t, empleado, dias, vender, config, bono, semana, deTienda, lotes } = escenario();
   try {

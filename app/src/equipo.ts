@@ -2,7 +2,7 @@
  * Equipo en /reportes (Issue #751, Fase 1 de #749): lo que hizo cada persona en el rango y el bono semanal POR TIENDA (#930).
  * Bono: cada tienda tiene su linea semanal (`bono_tienda_linea_<tienda>`; sin linea = apagado). Si las ventas netas de una semana
  * cerrada (lunes a domingo, fecha de tienda, `ventas.tienda`) superan la linea, la bolsa es `bono_tienda_pb` puntos base (100 = 1 %)
- * de lo vendido ARRIBA de la linea y se reparte entre las empleadas de ESA tienda por dias trabajados de ESA semana. Sin ranking.
+ * de lo vendido ARRIBA de la linea (lo vendido arriba de la meta tope `bono_tienda_meta_tope` paga `bono_tienda_pb_arriba`, #960; 0 = `pb`) y se reparte entre las empleadas de ESA tienda por dias trabajados de ESA semana. Sin ranking.
  * Encima del efectivo van Dolarones: 1 D por cada `bono_d_cada` centavos de bono (tope semanal por persona `bono_d_tope`) y un premio fijo
  * `bono_d_record` si la semana fue la mejor de la tienda y no llego a su linea. `bono_tienda_desde` (un lunes, AAAAMMDD) es la primera semana
  * del esquema nuevo: sin ella, o antes de ella, no hay bono por tienda (las semanas ya asentadas con el esquema anterior no se tocan). Todo en centavos enteros; el bono se paga como
@@ -53,7 +53,7 @@ export function fechaBono(n: number): string {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === f && lunesDe(f) === f ? f : '';
 }
 /** Todo en centavos enteros salvo `pb` (puntos base) y los Dolarones (`d_*`, enteros). Cero = apagado. */
-interface ConfigBono { pb: number; desde: string; lineas: Record<Tienda, number>; tope: number; d_cada: number; d_tope: number; d_record: number }
+interface ConfigBono { pb: number; pb_arriba: number; desde: string; lineas: Record<Tienda, number>; tope: number; d_cada: number; d_tope: number; d_record: number }
 export async function configBono(env: Env): Promise<ConfigBono> {
   const { results } = await env.DB.prepare(`select clave, valor from config where clave like 'bono\\_tienda\\_%' escape '\\' or clave like 'bono\\_d\\_%' escape '\\'`)
     .all<{ clave: string; valor: string }>();
@@ -62,7 +62,7 @@ export async function configBono(env: Env): Promise<ConfigBono> {
     return Number.isInteger(n) && n >= 0 ? n : omision;
   };
   return {
-    pb: v('bono_tienda_pb', 100), desde: fechaBono(v(CLAVE_BONO_DESDE, 0)), tope: v('bono_tienda_meta_tope', 0), d_cada: v('bono_d_cada', 0), d_tope: v('bono_d_tope', 0), d_record: v('bono_d_record', 0),
+    pb: v('bono_tienda_pb', 100), pb_arriba: v('bono_tienda_pb_arriba', 0), desde: fechaBono(v(CLAVE_BONO_DESDE, 0)), tope: v('bono_tienda_meta_tope', 0), d_cada: v('bono_d_cada', 0), d_tope: v('bono_d_tope', 0), d_record: v('bono_d_record', 0),
     lineas: Object.fromEntries(TIENDAS_CLAVES.map((t) => [t, v(claveLinea(t), 0)])) as Record<Tienda, number>,
   };
 }
@@ -104,8 +104,10 @@ export async function semanasBono(env: Env, lunes: string[], config?: ConfigBono
     tiendas: TIENDAS_CLAVES.map((t) => {
       const total = totalDe(dia, t);
       const linea = config.desde && dia >= config.desde ? config.lineas[t] : 0;
+      // Acelerador: arriba de la meta tope rige `pb_arriba` (0 = `pb`). Sin tope, o tope <= linea, no hay tramo: todo a `pb`.
+      const tramoTope = config.tope > linea ? config.tope : Infinity;
       const alcanzada = linea > 0 && total > linea;   // justo en la linea no llego: no hay excedente
-      const bolsa = linea > 0 && total > linea ? Math.floor((total - linea) * config.pb / 10_000) : 0;
+      const bolsa = linea > 0 && total > linea ? Math.floor(((Math.min(total, tramoTope) - linea) * config.pb + Math.max(0, total - tramoTope) * (config.pb_arriba || config.pb)) / 10_000) : 0;
       const mejorAntes = conRecord ? Math.max(0, ...ventas.filter((v) => v.tienda === t && v.lunes < dia).map((v) => v.total)) : 0;
       const record = conRecord && linea > 0 && !alcanzada && mejorAntes > 0 && total > mejorAntes;
       const dias = new Map<string, { id: string; nombre: string; correo: string; dias: number }>();

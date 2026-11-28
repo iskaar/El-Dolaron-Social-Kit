@@ -736,6 +736,7 @@
         <label>El bono por tienda empieza en la semana del (un lunes) <input id="bono-desde" type="date" style="width:150px"></label>
         <div id="bono-lineas" style="display:contents"></div>
         <label>Porcentaje de lo vendido arriba de la línea (%) <input id="bono-pct" type="number" min="0" step="0.01" style="width:90px"></label>
+        <label>Porcentaje arriba de la meta tope (%) <input id="bono-pct-arriba" type="number" min="0" step="0.01" style="width:90px"></label>
         <label>Meta tope, la misma para todas ($) <input id="bono-tope" type="number" min="0" step="1" style="width:130px"></label>
         <label>1 Dolarón por cada ($ de bono) <input id="bono-d-cada" type="number" min="0" step="1" style="width:110px"></label>
         <label>Tope de Dolarones por persona y semana <input id="bono-d-tope" type="number" min="0" step="1" style="width:110px"></label>
@@ -744,7 +745,7 @@
       </form>
       <div id="bono-semanas" style="overflow-x:auto"></div>
       <p class="nota">Sin fecha de inicio el bono por tienda está apagado, y las semanas anteriores a esa fecha no se asientan aquí (así no se mezclan con las que ya se pagaron con el esquema anterior).
-        Cada tienda tiene su línea semanal; una tienda sin línea (o en 0) no tiene bono. Solo hay bolsa si las ventas netas de esa tienda superan su línea, y es el porcentaje de lo que pasa de la línea.
+        Cada tienda tiene su línea semanal; una tienda sin línea (o en 0) no tiene bono. Solo hay bolsa si las ventas netas de esa tienda superan su línea, y es el porcentaje de lo que pasa de la línea. Lo vendido arriba de la meta tope paga el porcentaje de «arriba de la meta tope» (en 0, o sin meta tope, todo paga el porcentaje normal).
         Se reparte entre quienes trabajaron esa semana en esa tienda según sus días (el resto de centavos, a quien más días tuvo). Encima del efectivo, cada persona recibe 1 Dolarón por cada tanto de bono, con su tope;
         y si la semana fue la mejor de la tienda sin llegar a su línea, el premio «semana récord» (con el premio o el tope en 0 no se da Dolarones).
         Registrar crea el bono en Nómina fechado el domingo de la semana y acredita los Dolarones; hacerlo dos veces no duplica, y lo ya pagado no cambia aunque cambies los valores.
@@ -1540,6 +1541,7 @@ function pintarEquipo(e) {
   for (const t of tiendasBono) $(`bono-linea-${t.tienda}`).value = c.lineas[t.tienda] / 100;
   $('bono-desde').value = c.desde;
   $('bono-pct').value = c.pb / 100;
+  $('bono-pct-arriba').value = c.pb_arriba / 100;
   $('bono-tope').value = c.tope / 100;
   $('bono-d-cada').value = c.d_cada / 100;
   $('bono-d-tope').value = c.d_tope;
@@ -1821,7 +1823,7 @@ $('equipo-config').addEventListener('submit', async (ev) => {
     method: 'PUT', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       bono_tienda_desde: desde ? Number(desde.replaceAll('-', '')) : 0,
-      bono_tienda_pb: Math.round(Number($('bono-pct').value) * 100), bono_tienda_meta_tope: Math.round(Number($('bono-tope').value) * 100),
+      bono_tienda_pb: Math.round(Number($('bono-pct').value) * 100), bono_tienda_pb_arriba: Math.round(Number($('bono-pct-arriba').value) * 100), bono_tienda_meta_tope: Math.round(Number($('bono-tope').value) * 100),
       bono_d_cada: Math.round(Number($('bono-d-cada').value) * 100), bono_d_tope: Math.round(Number($('bono-d-tope').value)), bono_d_record: Math.round(Number($('bono-d-record').value)),
       ...Object.fromEntries([...$('bono-lineas').querySelectorAll('input')].map((i) => [`bono_tienda_linea_${i.dataset.tienda}`, Math.round(Number(i.value) * 100)])),
     }),
